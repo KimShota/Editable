@@ -1,10 +1,4 @@
-# Viral Template — CS Resources format
-
-This renders the "3 resources for [painpoint]" viral format. The format
-(block order, durations, text placement) lives entirely in one config
-file. You bring clips + audio; it assembles the video automatically.
-
-## What this is
+# Editable
 
 A library of proven, niche-specific viral video formats turned into
 lego-block templates. Think of it as **the video-editing version of
