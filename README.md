@@ -1,10 +1,10 @@
 # Editable
 
-A library of proven, niche-specific viral video formats turned into
-lego-block templates. Think of it as **the video-editing version of
-NeetCode**: instead of teaching you to invent a viral structure from
-scratch, it hands you a pattern that already works and shows you how to
-fill it in.
+**Editable turns proven viral video formats into fill-in-the-blank
+templates.** Each template is a real format that already works, broken
+into labeled lego blocks. You pick one for your niche, film the clips it
+asks for, and it assembles a ready-to-post video — no editing skill, and
+no guessing at what makes a video go viral, required.
 
 The two hardest, most time-consuming parts of being a creator are (1)
 figuring out *what's working* — studying other creators and
