@@ -12,6 +12,7 @@ export const CtaBlock: React.FC<Props> = ({ clip, text }) => {
     <AbsoluteFill style={{ backgroundColor: "black" }}>
       <OffthreadVideo
         src={staticFile(clip)}
+        muted
         style={{ width: "100%", height: "100%", objectFit: "cover" }}
       />
       <AbsoluteFill
@@ -30,6 +31,7 @@ export const CtaBlock: React.FC<Props> = ({ clip, text }) => {
             textAlign: "center",
             textShadow: TEXT_SHADOW,
             lineHeight: 1.2,
+            whiteSpace: "pre-line",
           }}
         >
           {text}

@@ -17,6 +17,7 @@ export const ResourceBlock: React.FC<Props> = ({
     <AbsoluteFill style={{ backgroundColor: "black" }}>
       <OffthreadVideo
         src={staticFile(clip)}
+        muted
         style={{ width: "100%", height: "100%", objectFit: "cover" }}
       />
       {/* Title (near center, above) + description (slightly below it),

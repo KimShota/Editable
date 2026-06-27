@@ -4,6 +4,39 @@ This renders the "3 resources for [painpoint]" viral format. The format
 (block order, durations, text placement) lives entirely in one config
 file. You bring clips + audio; it assembles the video automatically.
 
+## What this is
+
+A library of proven, niche-specific viral video formats turned into
+lego-block templates. Think of it as **the video-editing version of
+NeetCode**: instead of teaching you to invent a viral structure from
+scratch, it hands you a pattern that already works and shows you how to
+fill it in.
+
+The two hardest, most time-consuming parts of being a creator are (1)
+figuring out *what's working* — studying other creators and
+reverse-engineering their formats — and (2) the editing itself. This
+product absorbs both. You're left with the one part that's actually
+yours: the content — your expertise, your story.
+
+How it works:
+
+1. **Pick a template** in your niche.
+2. **Film a clip for each labeled block.** The template tells you exactly
+   what to shoot for each one, based on what's proven to perform.
+3. **Plug the clips in** and get an assembled video out.
+
+The work is structural *assembly*, not animation — most formats don't
+need fancy effects to land. Maybe a little motion in the hook, nothing
+more. The lever isn't out-editing anyone; it's knowing the right
+structure. The promise to someone with real expertise but zero editing
+knowledge is simply: *you don't need any of that — just show up and film
+what the template tells you to.*
+
+Beyond the structure, a template also gives you per-block filming
+guidance (what to shoot, shot by shot) and suggestions for which
+sound/audio fits each moment (you supply the actual file). If you want
+to take it further after assembly, you still can.
+
 ## Quick start
 
 ```bash

@@ -77,7 +77,7 @@ export const csResourcesTemplate: Template = {
       type: "hook",
       clip: "clips/hook.mp4",
       durationInFrames: 88, // 00:00:02:28
-      textHook: "I have NO projects\non my resume",
+      textHook: '"I have NO projects\non my resume"',
       resolveText: "GO HERE",
       resolveAtFrame: 64, // 00:02.14 (2.14s @30fps); align to the "okay" beat — adjust by ear/eye
     },
@@ -106,7 +106,7 @@ export const csResourcesTemplate: Template = {
       type: "cta",
       clip: "clips/cta.mp4",
       durationInFrames: 48, // 00:00:01:18
-      text: "Follow & Comment \u201CLINKS\u201D for the resources",
+      text: "Follow & Comment \u201CLINKS\u201D\nfor the resources",
     },
   ],
 };
