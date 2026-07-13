@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Editable — You bring the content. We bring the format.</title>
+  <meta name="description" content="Proven viral video formats, turned into fill-in-the-blank templates. Film a few clips, drop them into labeled slots, get an assembled video out." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div class="loader" id="loader">
+    <div class="loader__mark">E</div>
+    <div class="loader__bar"><div class="loader__fill" id="loaderFill"></div></div>
+  </div>
+
+  <nav class="nav">
+    <div class="nav__logo">EDITABLE</div>
+    <a class="nav__cta" href="#waitlist">Get early access</a>
+  </nav>
+
+  <!-- 01 · HERO -->
+  <section class="hero" id="hero">
+    <div class="hero__bg">
+      <img src="assets/src/hero_reel.png" alt="" id="heroImg" />
+      <div class="hero__vignette"></div>
+    </div>
+    <div class="hero__content">
+      <h1 class="hero__title" aria-label="EDITABLE">
+        <span class="ch">E</span><span class="ch">D</span><span class="ch">I</span><span class="ch">T</span><span class="ch">A</span><span class="ch">B</span><span class="ch">L</span><span class="ch">E</span>
+      </h1>
+      <p class="hero__tag">
+        <span class="line-mask"><span class="line">You bring the <span class="chip">content.</span></span></span>
+        <span class="line-mask"><span class="line">We bring the <span class="chip">format.</span></span></span>
+      </p>
+    </div>
+    <div class="hero__scrollhint">
+      <span>Scroll</span>
+      <div class="hero__scrollline"></div>
+    </div>
+  </section>
+
+  <!-- 02 · STORY -->
+  <section class="story" id="story">
+    <div class="story__inner">
+      <h2 class="story__line reveal" data-reveal>The edit takes hours.</h2>
+      <h2 class="story__line reveal" data-reveal>Cracking the format takes weeks.</h2>
+      <h2 class="story__line story__line--accent reveal" data-reveal>You'd rather be creating.</h2>
+      <p class="story__sub reveal" data-reveal>
+        Grinding in the timeline. Studying other creators, reverse-engineering why their videos work.
+        None of that is the value you bring your audience. The videos that blow up follow structures
+        that already worked a thousand times — you don't need to invent one. You need to fill one in.
+      </p>
+    </div>
+  </section>
+
+  <!-- 03 · SCRUB SEQUENCE -->
+  <section class="scrub" id="scrub">
+    <div class="scrub__sticky">
+      <canvas id="seq" class="scrub__canvas"></canvas>
+      <div class="scrub__captions">
+        <div class="scrub__caption" data-caption="0">
+          <h3>Your raw clips.</h3>
+          <p>A talking head. A screen recording. A desk shot. No structure yet.</p>
+        </div>
+        <div class="scrub__caption" data-caption="1">
+          <h3>Snapped into a proven format.</h3>
+          <p>Hook. Point 1. Point 2. CTA. Every clip knows its slot.</p>
+        </div>
+        <div class="scrub__caption" data-caption="2">
+          <h3>The outcome.</h3>
+          <p>Assembled, captioned, ready to post.</p>
+        </div>
+      </div>
+      <div class="scrub__progress"><div class="scrub__progressfill" id="scrubFill"></div></div>
+    </div>
+  </section>
+
+  <!-- 04 · HOW IT WORKS -->
+  <section class="how" id="how">
+    <div class="how__inner">
+      <p class="how__kicker reveal" data-reveal>How it works</p>
+      <ol class="how__steps">
+        <li class="how__step reveal" data-reveal>
+          <span class="how__num">01</span>
+          <h3>Pick a proven format</h3>
+          <p>Structures pulled from videos that already went viral.</p>
+        </li>
+        <li class="how__step reveal" data-reveal>
+          <span class="how__num">02</span>
+          <h3>Film the clips we tell you to</h3>
+          <p>Each slot comes with a plain-English shot direction.</p>
+        </li>
+        <li class="how__step reveal" data-reveal>
+          <span class="how__num">03</span>
+          <h3>Drop them in</h3>
+          <p>Your clips snap into the labeled slots. That's the edit.</p>
+        </li>
+        <li class="how__step reveal" data-reveal>
+          <span class="how__num">04</span>
+          <h3>Post</h3>
+          <p>Cut, paced, and captioned. Out the door.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- 05 · PITCH -->
+  <section class="pitch" id="pitch">
+    <div class="pitch__inner">
+      <h2 class="pitch__title reveal" data-reveal>Proven formats,<br /><span class="accent">ready to fill in.</span></h2>
+      <p class="pitch__sub reveal" data-reveal>
+        Like practicing the problems that actually show up in the interview —
+        except it's the video structures that actually show up on your feed.
+      </p>
+      <div class="pitch__formats">
+        <div class="format reveal" data-reveal>
+          <span class="format__name">The Hot Take</span>
+          <span class="format__slots"><i>HOOK</i><i>TAKE</i><i>PROOF</i><i>CTA</i></span>
+        </div>
+        <div class="format reveal" data-reveal>
+          <span class="format__name">The 3-Point Breakdown</span>
+          <span class="format__slots"><i>HOOK</i><i>POINT 1</i><i>POINT 2</i><i>POINT 3</i><i>CTA</i></span>
+        </div>
+        <div class="format reveal" data-reveal>
+          <span class="format__name">The Myth Bust</span>
+          <span class="format__slots"><i>MYTH</i><i>TRUTH</i><i>WHY</i><i>CTA</i></span>
+        </div>
+        <div class="format reveal" data-reveal>
+          <span class="format__name">The Before / After</span>
+          <span class="format__slots"><i>BEFORE</i><i>TURN</i><i>AFTER</i><i>CTA</i></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 · WHO -->
+  <section class="who" id="who">
+    <div class="who__inner">
+      <h2 class="who__line reveal" data-reveal>
+        For creators, experts, and small businesses
+        who have something to say —
+        <span class="accent">but don't know how to make it land.</span>
+      </h2>
+    </div>
+  </section>
+
+  <!-- 07 · CTA -->
+  <section class="cta" id="waitlist">
+    <div class="cta__inner">
+      <h2 class="cta__title reveal" data-reveal>Stop staring at the timeline.</h2>
+      <p class="cta__sub reveal" data-reveal>Early access is rolling out format by format.</p>
+      <form class="cta__form reveal" data-reveal id="waitlistForm">
+        <input type="email" placeholder="you@somewhere.com" required aria-label="Email" />
+        <button type="submit">Join the waitlist</button>
+      </form>
+      <p class="cta__done" id="ctaDone">You're on the list. Talk soon.</p>
+    </div>
+    <footer class="footer">
+      <span>EDITABLE</span>
+      <span>You bring the content. We bring the format.</span>
+      <span>© 2026</span>
+    </footer>
+  </section>
+
+  <script src="https://unpkg.com/lenis@1.1.14/dist/lenis.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
