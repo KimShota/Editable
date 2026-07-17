@@ -1,0 +1,252 @@
+{
+  "id": "cs-resources",
+  "name": "3 Resources for [Painpoint]",
+  "niche": "CS students",
+  "description": "Hook states a painpoint to camera and pivots to the solution; three quick resource cards over screen recordings; follow CTA. Ported from the reference reel (timings at 30fps: hook 2.93s, resources 1.77/1.63/1.60s, cta 1.60s).",
+  "fps": 30,
+  "width": 1080,
+  "height": 1920,
+  "captionStyle": { "component": "Captions", "params": { "position": "lowerThird" } },
+  "musicSlot": {
+    "name": "music",
+    "mediaType": "audio",
+    "required": false,
+    "instructions": "Optional music bed that you own or that is licensed to you. For posting, prefer adding trending audio inside Instagram/TikTok — it is licensed there and the render never bakes it in."
+  },
+  "musicVolume": 0.4,
+  "blocks": [
+    {
+      "id": "hook",
+      "title": "Hook",
+      "kind": "voice",
+      "videoSlot": "hook_clip",
+      "captions": true,
+      "maxDurationSec": 6,
+      "slots": [
+        {
+          "name": "hook_clip",
+          "mediaType": "video",
+          "instructions": "Film yourself chest-up, phone vertical, saying the painpoint out loud and then pivoting to the solution — e.g. \"I have NO projects on my resume... okay, go here.\" Keep it under ~4 seconds, energy high."
+        },
+        {
+          "name": "hook_text",
+          "mediaType": "text",
+          "instructions": "The painpoint as it should appear on screen, first person, in quotes, max two short lines."
+        },
+        {
+          "name": "resolve_text",
+          "mediaType": "text",
+          "required": false,
+          "instructions": "The short call that flashes when you pivot to the solution. Default: GO HERE."
+        },
+        {
+          "name": "whoosh_sfx",
+          "mediaType": "audio",
+          "required": false,
+          "instructions": "A short whoosh/swipe sound effect you own outright or that is CC0. Fires at the pivot."
+        }
+      ],
+      "roles": [
+        {
+          "id": "resolve",
+          "description": "The moment the speaker pivots from stating the problem to pointing at the solution — usually a short turn word like 'okay', 'so', or 'well', or the start of an instruction like 'go here' / 'check this out'. Return the start of that pivot.",
+          "fallback": { "anchor": "blockEnd", "offsetSec": -0.9 }
+        }
+      ],
+      "events": [
+        {
+          "id": "hook_painpoint_overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": { "textSlot": "hook_text", "variant": "hook" }
+          },
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 },
+          "until": { "kind": "role", "roleId": "resolve" }
+        },
+        {
+          "id": "hook_resolve_overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": { "textSlot": "resolve_text", "variant": "resolve" }
+          },
+          "timing": { "kind": "role", "roleId": "resolve" }
+        },
+        {
+          "id": "hook_resolve_whoosh",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": { "audioSlot": "whoosh_sfx", "volume": 0.9 }
+          },
+          "timing": { "kind": "role", "roleId": "resolve" }
+        }
+      ],
+      "transitionAfter": { "component": "whooshZoom", "params": { "durationSec": 0.3 } }
+    },
+    {
+      "id": "resource-1",
+      "title": "Resource 1",
+      "kind": "broll",
+      "videoSlot": "resource1_clip",
+      "brollDurationSec": 1.77,
+      "slots": [
+        {
+          "name": "resource1_clip",
+          "mediaType": "video",
+          "instructions": "Screen recording of the first resource — scroll its page slowly. 2–3 seconds is plenty."
+        },
+        {
+          "name": "resource1_title",
+          "mediaType": "text",
+          "instructions": "The resource's name, short."
+        },
+        {
+          "name": "resource1_desc",
+          "mediaType": "text",
+          "instructions": "One sentence on why it solves the painpoint."
+        }
+      ],
+      "events": [
+        {
+          "id": "resource1_title_overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": { "textSlot": "resource1_title", "variant": "title" }
+          },
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 }
+        },
+        {
+          "id": "resource1_desc_overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": { "textSlot": "resource1_desc", "variant": "description" }
+          },
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0.12 }
+        }
+      ]
+    },
+    {
+      "id": "resource-2",
+      "title": "Resource 2",
+      "kind": "broll",
+      "videoSlot": "resource2_clip",
+      "brollDurationSec": 1.63,
+      "slots": [
+        {
+          "name": "resource2_clip",
+          "mediaType": "video",
+          "instructions": "Screen recording of the second resource — scroll its page slowly. 2–3 seconds is plenty."
+        },
+        {
+          "name": "resource2_title",
+          "mediaType": "text",
+          "instructions": "The resource's name, short."
+        },
+        {
+          "name": "resource2_desc",
+          "mediaType": "text",
+          "instructions": "One sentence on why it solves the painpoint."
+        }
+      ],
+      "events": [
+        {
+          "id": "resource2_title_overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": { "textSlot": "resource2_title", "variant": "title" }
+          },
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 }
+        },
+        {
+          "id": "resource2_desc_overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": { "textSlot": "resource2_desc", "variant": "description" }
+          },
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0.12 }
+        }
+      ]
+    },
+    {
+      "id": "resource-3",
+      "title": "Resource 3",
+      "kind": "broll",
+      "videoSlot": "resource3_clip",
+      "brollDurationSec": 1.6,
+      "slots": [
+        {
+          "name": "resource3_clip",
+          "mediaType": "video",
+          "instructions": "Screen recording of the third resource — scroll its page slowly. 2–3 seconds is plenty."
+        },
+        {
+          "name": "resource3_title",
+          "mediaType": "text",
+          "instructions": "The resource's name, short."
+        },
+        {
+          "name": "resource3_desc",
+          "mediaType": "text",
+          "instructions": "One sentence on why it solves the painpoint."
+        }
+      ],
+      "events": [
+        {
+          "id": "resource3_title_overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": { "textSlot": "resource3_title", "variant": "title" }
+          },
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 }
+        },
+        {
+          "id": "resource3_desc_overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": { "textSlot": "resource3_desc", "variant": "description" }
+          },
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0.12 }
+        }
+      ],
+      "transitionAfter": { "component": "fade", "params": { "durationSec": 0.25 } }
+    },
+    {
+      "id": "cta",
+      "title": "Call to Action",
+      "kind": "broll",
+      "videoSlot": "cta_clip",
+      "brollDurationSec": 1.6,
+      "slots": [
+        {
+          "name": "cta_clip",
+          "mediaType": "video",
+          "instructions": "A simple closing clip of you (pointing up or smiling works). 2 seconds is plenty."
+        },
+        {
+          "name": "cta_text",
+          "mediaType": "text",
+          "instructions": "The follow/comment call to action, max two short lines."
+        }
+      ],
+      "events": [
+        {
+          "id": "cta_text_overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": { "textSlot": "cta_text", "variant": "cta" }
+          },
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 }
+        }
+      ]
+    }
+  ]
+}

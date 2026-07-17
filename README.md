@@ -31,58 +31,76 @@ guidance (what to shoot, shot by shot) and suggestions for which
 sound/audio fits each moment (you supply the actual file). If you want
 to take it further after assembly, you still can.
 
-## Quick start
+## The pipeline
+
+The engine is a chain of modules joined by fixed contracts — each stage
+writes an inspectable JSON artifact:
+
+```
+format + user assets
+  → intake      (bind assets to named slots, validate)   artifacts/<job>/filled.json
+  → transcribe  (whisper.cpp word timestamps)            artifacts/<job>/transcript.json
+  → trim        (cut dead air; trim first, then time)    artifacts/<job>/trim.json
+  → roles       (LLM finds format-defined moments)       artifacts/<job>/roles.json
+  → assemble    (master timeline: the EDL)               artifacts/<job>/edl.json
+  → render      (Remotion → MP4)                         out/<job>.mp4
+```
+
+When a video comes out wrong, don't stare at the video — look at which
+artifact first went wrong.
+
+### One-time setup
 
 ```bash
 npm install
-npm run dev      # opens Remotion Studio to preview/scrub
+brew install ffmpeg whisper-cpp
+curl -L -o models/ggml-base.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 ```
 
-Then render a final MP4:
+### Run it
 
 ```bash
-npx remotion render CsResources out/video.mp4
+npm run pipeline -- --job jobs/demo
 ```
 
-## Plug in YOUR clips
+Flags:
 
-The project ships with placeholder clips so it runs immediately. To make
-your real video, replace the files in `public/clips/` and `public/audio/`,
-keeping the EXACT same names:
+- `--only <stage>` — re-run a single stage against the artifacts on disk
+  (`intake | transcribe | trim | roles | assemble | render`)
+- `--resolver <name>` — role-resolution provider:
+  - `anthropic` — Anthropic API (`ANTHROPIC_API_KEY` in `.env`)
+  - `claude-cli` — your local `claude` login, no key needed
+  - `fallback` — no LLM; every role uses its config fallback position
+  - `auto` (default) — API key → claude CLI → fallback
 
-| File                          | What it is                                  | Length (timecode @ 30fps) |
-|-------------------------------|----------------------------------------------|---------------------------|
-| `public/clips/hook.mp4`       | Desk / POV visual for the hook              | 00:00:02:28 (2.93s)        |
-| `public/clips/resource-1.mp4` | Screen-recording of resource 1              | 00:00:01:23 (1.77s)        |
-| `public/clips/resource-2.mp4` | Screen-recording of resource 2              | 00:00:01:19 (1.63s)        |
-| `public/clips/resource-3.mp4` | Screen-recording of resource 3              | 00:00:01:18 (1.60s)        |
-| `public/clips/cta.mp4`        | Desk / intellectual visual for the CTA      | 00:00:01:18 (1.60s)        |
-| `public/audio/music.mp3`      | Your background track (the "okay" beat one) | 9.53s                      |
+### A job
 
-Clips can be longer than the listed length — only the first N seconds are
-used. (Auto-trimming the clips themselves is a later feature; for now just
-film roughly the right length.)
+A job is a directory with the user's content: a `job.json` manifest
+binding each of the format's named slots to a file (`{"file": "assets/…"}`)
+or a text string (`{"text": "…"}`), plus the assets. See `jobs/demo/`.
+Per-video tweaks go in an optional `"overrides"` key (nudge an event's
+time, swap a transition) — they never touch the shared format.
 
-## Change YOUR text
+### A format
 
-Open `src/templates/csResources.ts` and edit the text fields:
-- `textHook` — the painpoint (e.g. "I have NO projects on my resume")
-- `resolveText` — the payoff (e.g. "GO HERE")
-- each resource's `title` + `description`
-- the `cta` `text`
+A format is a proven structure encoded as data: `formats/<id>.json`.
+Blocks, named slots with filming instructions, overlay/sfx events, and —
+the important part — **roles, not keywords**: events are timed by a
+plain-language description of the moment they belong to ("the pivot from
+problem to solution"), which the LLM locates in each user's own
+transcript, with a deterministic fallback position when it can't. Adding
+a format means writing a new config file, never touching the engine.
 
-## Sync "GO HERE" to the beat
+### Layout
 
-In `src/templates/csResources.ts`, set the hook's `resolveAtFrame` to the
-frame (within the hook block, at 30fps) where the "okay" beat hits in your
-audio (currently frame 64, 00:02.14 / 2.14s in). Scrub in Remotion Studio to line it
-up by eye/ear — each frame is 1/30s.
+- `src/pipeline/` — the six modules + `schemas.ts`/`types.ts` (the contracts)
+- `src/pipeline/resolvers/` — pluggable LLM providers for role resolution
+- `src/remotion/EdlVideo.tsx` — generic EDL renderer (one renderer, many formats)
+- `formats/` — the format library
+- `jobs/` — job directories (user content)
+- `src/templates/csResources.ts` + `src/TemplateVideo.tsx` — the legacy
+  hand-timed template, kept for reference (`CsResources` composition)
 
-## How it's structured (so you can extend it)
-
-- `src/templates/csResources.ts` — the FORMAT as data. New format = new file like this.
-- `src/TemplateVideo.tsx` — generic renderer; reads any template config, lays out blocks.
-- `src/components/` — the block renderers (Hook, Resource, Cta) + shared style.
-
-To add a second template later, copy `csResources.ts`, change the blocks,
-and register it in `src/Root.tsx`. No renderer changes needed.
+`npm run dev` opens Remotion Studio; the `EdlVideo` composition previews a
+placeholder EDL (real renders pass a job's EDL via `--props`).

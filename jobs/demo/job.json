@@ -1,0 +1,21 @@
+{
+  "format": "cs-resources",
+  "bindings": {
+    "hook_clip": { "file": "assets/hook-spoken.mp4" },
+    "hook_text": { "text": "\"I have NO projects\non my resume\"" },
+    "resolve_text": { "text": "GO HERE" },
+    "whoosh_sfx": { "file": "assets/whoosh.wav" },
+    "resource1_clip": { "file": "assets/resource-1.mp4" },
+    "resource1_title": { "text": "Build-your-own-X" },
+    "resource1_desc": { "text": "Recreate real tools from scratch, step by step" },
+    "resource2_clip": { "file": "assets/resource-2.mp4" },
+    "resource2_title": { "text": "roadmap.sh" },
+    "resource2_desc": { "text": "Pick a path and follow the project checkpoints" },
+    "resource3_clip": { "file": "assets/resource-3.mp4" },
+    "resource3_title": { "text": "freeCodeCamp" },
+    "resource3_desc": { "text": "Certified projects you can ship this weekend" },
+    "cta_clip": { "file": "assets/cta.mp4" },
+    "cta_text": { "text": "Follow & Comment “LINKS”\nfor the resources" },
+    "music": { "file": "assets/music.mp3" }
+  }
+}
