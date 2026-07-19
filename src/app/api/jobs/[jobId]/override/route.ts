@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jobExists, readJobManifest, writeJobManifest, jobDir } from "../../../../lib/jobs";
-import { reassembleJob } from "../../../../../pipeline/orchestrate";
-import { ComponentRef } from "../../../../../pipeline/types";
+import { reassembleJob } from "@backend/pipeline/orchestrate";
+import { ComponentRef } from "@backend/pipeline/types";
 
 type OverridePatch = {
   events?: Record<string, { timeSec?: number; component?: ComponentRef }>;

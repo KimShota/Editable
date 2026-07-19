@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { jobExists, readJobManifest, getJobStatus } from "../../../lib/jobs";
-import { loadFormat } from "../../../../pipeline/loader";
+import { loadFormat } from "@backend/pipeline/loader";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;

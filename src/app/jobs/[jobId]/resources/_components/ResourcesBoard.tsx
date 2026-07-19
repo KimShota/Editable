@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Format, Slot } from "../../../../../pipeline/types";
+import type { Format, Slot } from "@backend/pipeline/types";
 import { Button, Card, Pill } from "../../../../_components/ui";
 import { LibraryPanel } from "../../../../_components/library/LibraryPanel";
 import { Binding, SlotDropzone } from "./SlotDropzone";

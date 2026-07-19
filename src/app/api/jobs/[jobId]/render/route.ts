@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 import { jobExists, jobDir } from "../../../../lib/jobs";
-import { repoRoot, artifactsDir, outDir } from "../../../../../pipeline/paths";
+import { repoRoot, artifactsDir, outDir } from "@backend/pipeline/paths";
 
 /**
  * Rendering shells out to `npx remotion render` under the hood (see

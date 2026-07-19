@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Edl, FormatEvent } from "../../../../../pipeline/types";
+import type { Edl, FormatEvent } from "@backend/pipeline/types";
 import { Pill } from "../../../../_components/ui";
 
 /** Finds the resolved EDL entry (overlay or sfx) an authored event produced, if it wasn't skipped. */

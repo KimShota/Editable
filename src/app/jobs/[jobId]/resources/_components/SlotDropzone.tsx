@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { Slot } from "../../../../../pipeline/types";
+import type { Slot } from "@backend/pipeline/types";
 import { LIBRARY_DRAG_MIME, type LibraryDragPayload } from "../../../../lib/dnd";
 
 export type Binding = { file: string } | { text: string };

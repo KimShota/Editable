@@ -26,6 +26,9 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@backend/*": [
+        "./src/backend/*"
       ]
     },
     "allowJs": true

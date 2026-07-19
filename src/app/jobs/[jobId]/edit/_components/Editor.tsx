@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { Player } from "@remotion/player";
-import { EdlVideo } from "../../../../../remotion/EdlVideo";
-import type { Edl, Format } from "../../../../../pipeline/types";
+import { EdlVideo } from "@backend/remotion/EdlVideo";
+import type { Edl, Format } from "@backend/pipeline/types";
 import { Card, Pill } from "../../../../_components/ui";
 import { EventRow } from "./EventRow";
 import { RenderPanel } from "./RenderPanel";

@@ -3,9 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { JobManifestSchema } from "../../pipeline/schemas";
-import { JobManifest } from "../../pipeline/types";
-import { repoRoot, artifactsDir, outDir } from "../../pipeline/paths";
+import { JobManifestSchema } from "@backend/pipeline/schemas";
+import { JobManifest } from "@backend/pipeline/types";
+import { repoRoot, artifactsDir, outDir } from "@backend/pipeline/paths";
 
 /**
  * Job directories ARE the app's "projects" — a job is created the moment a

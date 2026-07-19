@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jobExists, jobDir } from "../../../../lib/jobs";
-import { buildJob } from "../../../../../pipeline/orchestrate";
-import { ResolverChoice } from "../../../../../pipeline/resolvers";
+import { buildJob } from "@backend/pipeline/orchestrate";
+import { ResolverChoice } from "@backend/pipeline/resolvers";
 
 /** Runs intake through assemble (transcription + role resolution included). */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {

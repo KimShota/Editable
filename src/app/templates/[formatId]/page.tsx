@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { formatExists, getFormatSummary } from "../../lib/formats";
-import { loadFormat } from "../../../pipeline/loader";
+import { loadFormat } from "@backend/pipeline/loader";
 import { Container, Pill } from "../../_components/ui";
 import { StartButton } from "./_components/StartButton";
 

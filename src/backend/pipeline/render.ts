@@ -35,7 +35,7 @@ export const render = (edl: Edl, artifactsJobDir: string): string => {
 
   execFileSync(
     "npx",
-    ["remotion", "render", "src/index.ts", "EdlVideo", outPath, `--props=${propsPath}`],
+    ["remotion", "render", "src/backend/index.ts", "EdlVideo", outPath, `--props=${propsPath}`],
     { cwd: repoRoot, stdio: "inherit" },
   );
   return outPath;

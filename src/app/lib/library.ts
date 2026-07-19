@@ -1,7 +1,7 @@
 import "server-only";
 import fs from "node:fs";
 import path from "node:path";
-import { repoRoot } from "../../pipeline/paths";
+import { repoRoot } from "@backend/pipeline/paths";
 import { LIBRARY_CATEGORIES, LibraryAsset, LibraryCategory } from "./library-shared";
 
 /**

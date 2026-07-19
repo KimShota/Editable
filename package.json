@@ -34,9 +34,9 @@
     "typescript": "5.9.3"
   },
   "scripts": {
-    "pipeline": "tsx src/pipeline/run.ts",
-    "dev": "remotion studio",
-    "build": "remotion bundle",
+    "pipeline": "tsx src/backend/pipeline/run.ts",
+    "dev": "remotion studio src/backend/index.ts",
+    "build": "remotion bundle src/backend/index.ts",
     "upgrade": "remotion upgrade",
     "lint": "eslint src && tsc",
     "app:dev": "next dev -p 3100",

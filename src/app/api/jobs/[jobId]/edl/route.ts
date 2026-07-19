@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { jobExists } from "../../../../lib/jobs";
-import { artifactsDir } from "../../../../../pipeline/paths";
+import { artifactsDir } from "@backend/pipeline/paths";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;

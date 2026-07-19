@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { notFound, redirect } from "next/navigation";
 import { jobExists, readJobManifest } from "../../../lib/jobs";
-import { loadFormat } from "../../../../pipeline/loader";
-import { artifactsDir } from "../../../../pipeline/paths";
-import { stageAssets } from "../../../../pipeline/render";
-import { Edl } from "../../../../pipeline/types";
+import { loadFormat } from "@backend/pipeline/loader";
+import { artifactsDir } from "@backend/pipeline/paths";
+import { stageAssets } from "@backend/pipeline/render";
+import { Edl } from "@backend/pipeline/types";
 import { Container, PageHeader } from "../../../_components/ui";
 import { Editor } from "./_components/Editor";
 

@@ -3,8 +3,8 @@ import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { jobExists, readJobManifest, writeJobManifest, jobDir } from "../../../../lib/jobs";
 import { isLibraryCategory, libraryDir } from "../../../../lib/library";
-import { loadFormat } from "../../../../../pipeline/loader";
-import { allSlots } from "../../../../../pipeline/intake";
+import { loadFormat } from "@backend/pipeline/loader";
+import { allSlots } from "@backend/pipeline/intake";
 
 /** Binds one slot: a file upload, or a text string for text-typed slots. */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {

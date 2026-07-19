@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { jobExists, readJobManifest } from "../../../lib/jobs";
-import { loadFormat } from "../../../../pipeline/loader";
+import { loadFormat } from "@backend/pipeline/loader";
 import { Container, PageHeader } from "../../../_components/ui";
 import { ResourcesBoard } from "./_components/ResourcesBoard";
 

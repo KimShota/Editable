@@ -94,13 +94,19 @@ a format means writing a new config file, never touching the engine.
 
 ### Layout
 
-- `src/pipeline/` — the six modules + `schemas.ts`/`types.ts` (the contracts)
-- `src/pipeline/resolvers/` — pluggable LLM providers for role resolution
-- `src/remotion/EdlVideo.tsx` — generic EDL renderer (one renderer, many formats)
+The backend (engine) and frontend (web app) are separate folders under
+`src/`, with a one-way dependency: the app imports from the engine via the
+`@backend/*` path alias, never the other way around.
+
+- `src/backend/pipeline/` — the six modules + `schemas.ts`/`types.ts` (the contracts)
+- `src/backend/pipeline/resolvers/` — pluggable LLM providers for role resolution
+- `src/backend/remotion/EdlVideo.tsx` — generic EDL renderer (one renderer, many formats)
+- `src/backend/index.ts` — the Remotion entry point (`remotion studio`/`bundle`/`render` all target this explicitly, since it's no longer at the default `src/index.ts` location)
 - `formats/` — the format library
 - `jobs/` — job directories (user content)
-- `src/templates/csResources.ts` + `src/TemplateVideo.tsx` — the legacy
-  hand-timed template, kept for reference (`CsResources` composition)
+- `src/backend/templates/csResources.ts` + `src/backend/TemplateVideo.tsx` —
+  the legacy hand-timed template, kept for reference (`CsResources` composition)
+- `src/app/` — the Next.js web app (pages, API routes, UI)
 
 `npm run dev` opens Remotion Studio; the `EdlVideo` composition previews a
 placeholder EDL (real renders pass a job's EDL via `--props`).

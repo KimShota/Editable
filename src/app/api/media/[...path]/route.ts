@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
-import { repoRoot } from "../../../../pipeline/paths";
+import { repoRoot } from "@backend/pipeline/paths";
 
 /**
  * Generic file streamer for content that lives outside public/ (which Next

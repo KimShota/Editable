@@ -1,10 +1,10 @@
 import "server-only";
 import fs from "node:fs";
 import path from "node:path";
-import { listFormats, loadFormat } from "../../pipeline/loader";
-import { allSlots } from "../../pipeline/intake";
-import { Format, Slot } from "../../pipeline/types";
-import { repoRoot } from "../../pipeline/paths";
+import { listFormats, loadFormat } from "@backend/pipeline/loader";
+import { allSlots } from "@backend/pipeline/intake";
+import { Format, Slot } from "@backend/pipeline/types";
+import { repoRoot } from "@backend/pipeline/paths";
 import { listJobs } from "./jobs";
 
 /**
