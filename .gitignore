@@ -10,3 +10,15 @@ out
 models
 artifacts
 public/jobs
+
+# Next.js app
+.next
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# App-managed data (jobs created through the UI, user's asset library)
+jobs/*
+!jobs/demo
+!jobs/five-codes
+!jobs/five-codes-demo
+library

@@ -1,7 +1,12 @@
 import path from "node:path";
 
-/** Repo root, resolved from this file so the CLI works from any cwd. */
-export const repoRoot = path.resolve(__dirname, "..", "..");
+/**
+ * Repo root. Both entry points (the `tsx` CLI and the Next.js app) are run
+ * from the repo root by convention, so process.cwd() is the source of
+ * truth — a __dirname-relative resolution breaks once this module is
+ * bundled (Next/Turbopack rewrites __dirname to a virtual location).
+ */
+export const repoRoot = process.cwd();
 
 export const formatsDir = path.join(repoRoot, "formats");
 export const publicDir = path.join(repoRoot, "public");

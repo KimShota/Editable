@@ -20,6 +20,7 @@ import {
   FormatSchema,
   JobManifestSchema,
   LiteralAnchorSchema,
+  MediaTypeSchema,
   OverridesSchema,
   ResolvedRoleSchema,
   ResolvedRolesSchema,
@@ -42,6 +43,7 @@ export type AnchorWindow = z.infer<typeof AnchorWindowSchema>;
 export type LiteralAnchor = z.infer<typeof LiteralAnchorSchema>;
 export type SemanticAnchor = z.infer<typeof SemanticAnchorSchema>;
 export type Anchor = z.infer<typeof AnchorSchema>;
+export type MediaType = z.infer<typeof MediaTypeSchema>;
 export type Slot = z.infer<typeof SlotSchema>;
 export type FormatEvent = z.infer<typeof FormatEventSchema>;
 export type Block = z.infer<typeof BlockSchema>;

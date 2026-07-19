@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* ---------- design tokens (shared with website/) ---------- */
+:root {
+  --bg: #0b0710;
+  --bg-2: #120a1e;
+  --ink: #f4f1f9;
+  --ink-dim: #a294b8;
+  --accent: #b366ff;
+  --accent-ink: #0b0710;
+  --violet: #7c3aed;
+  --indigo: #4c1d95;
+  --magenta: #d946ef;
+  --display: "Space Grotesk", ui-sans-serif, sans-serif;
+  --body: "Inter", ui-sans-serif, sans-serif;
+  --card: rgba(244, 241, 249, 0.04);
+  --card-border: rgba(244, 241, 249, 0.1);
+  --card-border-hover: rgba(179, 102, 255, 0.45);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-2: var(--bg-2);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-violet: var(--violet);
+  --color-indigo: var(--indigo);
+  --color-magenta: var(--magenta);
+  --font-display: var(--display);
+  --font-body: var(--body);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  position: relative;
+}
+
+/* ---------- ambient mesh + grain (fixed, sits behind all content) ---------- */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.ambient__mesh {
+  position: absolute;
+  inset: -10%;
+  background:
+    radial-gradient(38% 42% at 14% 18%, rgba(76, 29, 149, 0.7), transparent 68%),
+    radial-gradient(46% 50% at 82% 14%, rgba(217, 70, 239, 0.4), transparent 70%),
+    radial-gradient(50% 55% at 30% 82%, rgba(124, 58, 237, 0.45), transparent 70%),
+    radial-gradient(60% 60% at 90% 88%, rgba(76, 29, 149, 0.4), transparent 72%),
+    var(--bg);
+  filter: saturate(1.1);
+}
+.ambient__grain {
+  position: absolute;
+  inset: -50%;
+  width: 200%;
+  height: 200%;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-size: 180px 180px;
+  opacity: 0.15;
+  mix-blend-mode: overlay;
+}
+
+.app-shell {
+  position: relative;
+  z-index: 1;
+}
