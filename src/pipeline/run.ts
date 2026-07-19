@@ -119,8 +119,12 @@ const main = async () => {
   if (wants("roles")) {
     write("roles", resolved);
     for (const r of resolved.roles) {
+      const span =
+        r.endSec !== undefined && r.endSec > r.timeSec
+          ? `${r.timeSec.toFixed(2)}–${r.endSec.toFixed(2)}s`
+          : `${r.timeSec.toFixed(2)}s`;
       console.log(
-        `    role ${r.blockId}/${r.roleId}: ${r.timeSec.toFixed(2)}s (${r.source}, confidence ${r.confidence.toFixed(2)}${r.quote ? `, "${r.quote}"` : ""})`,
+        `    anchor ${r.blockId}/${r.roleId}: ${span} (${r.source}, confidence ${r.confidence.toFixed(2)}${r.quote ? `, "${r.quote}"` : ""}${r.capturedText ? `, captured "${r.capturedText}"` : ""})`,
       );
     }
   }

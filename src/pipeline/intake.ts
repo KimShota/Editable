@@ -70,9 +70,10 @@ export const probeFile = (absPath: string): ProbedMedia => {
   throw new Error(`no decodable audio or video stream in ${absPath}`);
 };
 
-/** Every slot the format declares, block slots plus the optional music slot. */
+/** Every slot the format declares: block, shared, and the music slot. */
 export const allSlots = (format: Format): Slot[] => [
   ...format.blocks.flatMap((b) => b.slots),
+  ...format.sharedSlots,
   ...(format.musicSlot ? [format.musicSlot] : []),
 ];
 

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   AnchoredTimeSchema,
+  AnchorSchema,
+  AnchorWindowSchema,
   BlockSchema,
   BlockTranscriptSchema,
   BlockTrimSchema,
@@ -17,10 +19,11 @@ import {
   FormatEventSchema,
   FormatSchema,
   JobManifestSchema,
+  LiteralAnchorSchema,
   OverridesSchema,
   ResolvedRoleSchema,
   ResolvedRolesSchema,
-  RoleSchema,
+  SemanticAnchorSchema,
   SlotSchema,
   TranscriptSchema,
   TrimPointsSchema,
@@ -35,7 +38,10 @@ import {
 
 export type ComponentRef = z.infer<typeof ComponentRefSchema>;
 export type AnchoredTime = z.infer<typeof AnchoredTimeSchema>;
-export type Role = z.infer<typeof RoleSchema>;
+export type AnchorWindow = z.infer<typeof AnchorWindowSchema>;
+export type LiteralAnchor = z.infer<typeof LiteralAnchorSchema>;
+export type SemanticAnchor = z.infer<typeof SemanticAnchorSchema>;
+export type Anchor = z.infer<typeof AnchorSchema>;
 export type Slot = z.infer<typeof SlotSchema>;
 export type FormatEvent = z.infer<typeof FormatEventSchema>;
 export type Block = z.infer<typeof BlockSchema>;

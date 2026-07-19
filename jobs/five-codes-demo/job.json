@@ -1,0 +1,110 @@
+{
+  "format": "five-secret-codes",
+  "bindings": {
+    "hook_clip": {
+      "file": "assets/talking/hook.mp4"
+    },
+    "preview_1": {
+      "file": "assets/images/preview-1.png"
+    },
+    "preview_2": {
+      "file": "assets/images/preview-2.png"
+    },
+    "preview_3": {
+      "file": "assets/images/preview-3.png"
+    },
+    "preview_4": {
+      "file": "assets/images/preview-4.png"
+    },
+    "preview_5": {
+      "file": "assets/images/preview-5.png"
+    },
+    "code1_clip": {
+      "file": "assets/talking/code1.mp4"
+    },
+    "code1_screen": {
+      "file": "assets/screens/code1.mp4"
+    },
+    "code1_meme": {
+      "file": "assets/memes/code1-punchline.png"
+    },
+    "code2_clip": {
+      "file": "assets/talking/code2.mp4"
+    },
+    "code2_screen": {
+      "file": "assets/screens/code2.mp4"
+    },
+    "code2_reaction_meme": {
+      "file": "assets/memes/code2-reaction.png"
+    },
+    "code2_punchline_meme": {
+      "file": "assets/memes/code2-punchline.png"
+    },
+    "code3_clip": {
+      "file": "assets/talking/code3.mp4"
+    },
+    "code3_screen": {
+      "file": "assets/screens/code3.mp4"
+    },
+    "code3_shot1": {
+      "file": "assets/images/result-1.png"
+    },
+    "code3_shot2": {
+      "file": "assets/images/result-2.png"
+    },
+    "code3_meme": {
+      "file": "assets/memes/code3-punchline.png"
+    },
+    "code4_clip": {
+      "file": "assets/talking/code4.mp4"
+    },
+    "code4_screen": {
+      "file": "assets/screens/code4.mp4"
+    },
+    "code4_positive_meme": {
+      "file": "assets/memes/code4-positive.png"
+    },
+    "code4_punchline_meme": {
+      "file": "assets/memes/code4-punchline.png"
+    },
+    "code5_clip": {
+      "file": "assets/talking/code5.mp4"
+    },
+    "code5_gif": {
+      "file": "assets/gifs/code5-reaction.gif"
+    },
+    "code5_reaction_meme": {
+      "file": "assets/memes/code5-reaction.png"
+    },
+    "code5_punchline_meme": {
+      "file": "assets/memes/code5-punchline.png"
+    },
+    "cta_clip": {
+      "file": "assets/talking/cta.mp4"
+    },
+    "bell_sfx": {
+      "file": "assets/sfx/bell.wav"
+    },
+    "click_sfx": {
+      "file": "assets/sfx/click.wav"
+    },
+    "typing_sfx": {
+      "file": "assets/sfx/typing.wav"
+    },
+    "punchline_sfx": {
+      "file": "assets/sfx/punchline.wav"
+    },
+    "shutter_sfx": {
+      "file": "assets/sfx/shutter.wav"
+    },
+    "reaction_sfx": {
+      "file": "assets/sfx/reaction.wav"
+    },
+    "reaction2_sfx": {
+      "file": "assets/sfx/reaction2.wav"
+    },
+    "positive_sfx": {
+      "file": "assets/sfx/positive.wav"
+    }
+  }
+}

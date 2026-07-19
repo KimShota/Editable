@@ -34,26 +34,72 @@ export const ComponentRefSchema = z.object({
   params: z.record(z.string(), z.unknown()).default({}),
 });
 
-export const AnchorSchema = z.enum(["blockStart", "blockEnd"]);
+export const AnchorPointSchema = z.enum(["blockStart", "blockEnd"]);
 
-/** Deterministic position inside a block: anchor + signed offset. */
+/** Deterministic position inside a block: anchor point + signed offset. */
 export const AnchoredTimeSchema = z.object({
-  anchor: AnchorSchema,
+  anchor: AnchorPointSchema,
   /** Seconds after (positive) or before (negative) the anchor. */
   offsetSec: z.number(),
 });
 
 /**
- * A role: a plain-language description of the job a moment plays in the
- * structure ("the pivot from problem to solution"), NOT a keyword.
- * The LLM locates it in each user's transcript; the fallback position is
- * used when it can't do so confidently.
+ * Anchors: how overlay/SFX timing is found in each user's own transcript.
+ *
+ * LITERAL anchors are fixed words the instruction told the user to say
+ * ("First is …"). They're found by fuzzy text matching — no LLM — and are
+ * near-certain, so they double as scaffolding: block markers whose spans
+ * bound the search windows for everything else. With `capture`, the words
+ * the user speaks right after the phrase (their own name for the item) are
+ * captured, stopping at a pause, a sentence break, or the fixed
+ * continuation in `captureUntil`. Captured text is content: overlays can
+ * reference it via a `textAnchor` param.
+ *
+ * SEMANTIC anchors are content moments spoken freely in the user's own
+ * words. The config carries a reference description plus a light form
+ * constraint ("one sentence, starts with a verb"); an LLM locates the
+ * matching SPAN (start and end) — searching only inside `window`, which is
+ * bounded by literal anchors, when one is given.
+ *
+ * Every anchor resolves to a span and carries a fallback structural
+ * position for when matching confidence is low: output is never broken,
+ * just occasionally less precisely timed.
  */
-export const RoleSchema = z.object({
+
+/** Search window for a semantic anchor, bounded by LITERAL anchor ids. */
+export const AnchorWindowSchema = z.object({
+  /** Search starts where this literal anchor's span ends. */
+  afterAnchor: z.string().optional(),
+  /** Search ends where this literal anchor's span starts. */
+  beforeAnchor: z.string().optional(),
+});
+
+export const LiteralAnchorSchema = z.object({
   id: z.string(),
-  description: z.string(),
+  kind: z.literal("literal"),
+  /** The fixed words the instruction tells the user to say. */
+  phrase: z.string().min(1),
+  /** Capture the user's own words following the phrase. */
+  capture: z.boolean().default(false),
+  /** Fixed continuation that terminates the capture ("and I'll …"). */
+  captureUntil: z.string().optional(),
   fallback: AnchoredTimeSchema,
 });
+
+/** Legacy `roles` entries parse as semantic anchors (kind defaults). */
+export const SemanticAnchorSchema = z.object({
+  id: z.string(),
+  kind: z.literal("semantic").default("semantic"),
+  description: z.string(),
+  /** Light form constraint, e.g. "one sentence, starts with a verb". */
+  form: z.string().optional(),
+  window: AnchorWindowSchema.optional(),
+  fallback: AnchoredTimeSchema,
+  /** Span length assumed when the end is needed but resolution fell back. */
+  fallbackDurationSec: z.number().min(0).default(1),
+});
+
+export const AnchorSchema = z.union([LiteralAnchorSchema, SemanticAnchorSchema]);
 
 export const MediaTypeSchema = z.enum(["video", "image", "audio", "text"]);
 
@@ -66,9 +112,19 @@ export const SlotSchema = z.object({
   instructions: z.string(),
 });
 
-/** When an event fires: at a resolved role, or at a fixed anchored time. */
+/**
+ * When an event fires: at a resolved anchor (kind "role", the historical
+ * name), or at a fixed anchored time. Anchor timings pick an `edge` of the
+ * resolved span and may nudge from it with `offsetSec`.
+ */
 export const EventTimingSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("role"), roleId: z.string() }),
+  z.object({
+    kind: z.literal("role"),
+    roleId: z.string(),
+    /** captureStart = where a literal anchor's captured words begin. */
+    edge: z.enum(["start", "end", "captureStart"]).default("start"),
+    offsetSec: z.number().default(0),
+  }),
   z.object({ kind: z.literal("fixed") }).extend(AnchoredTimeSchema.shape),
 ]);
 
@@ -81,8 +137,9 @@ export const FormatEventSchema = z.object({
   /** How long an overlay stays up. Omitted = until the end of the block. */
   durationSec: z.number().positive().optional(),
   /**
-   * When an overlay ends (overlays only) — e.g. the painpoint text ends at
-   * the moment the resolve role fires. Takes precedence over durationSec.
+   * When the event ends — e.g. the painpoint text ends at the moment the
+   * resolve anchor fires, or a click SFX is cut at the keyword's end.
+   * Takes precedence over durationSec.
    */
   until: EventTimingSchema.optional(),
 });
@@ -106,7 +163,9 @@ export const BlockSchema = z.object({
   brollDurationSec: z.number().positive().optional(),
   /** Optional hard cap on the block's duration after trim. */
   maxDurationSec: z.number().positive().optional(),
-  roles: z.array(RoleSchema).default([]),
+  /** Legacy field: semantic anchors only. New formats use `anchors`. */
+  roles: z.array(SemanticAnchorSchema).default([]),
+  anchors: z.array(AnchorSchema).default([]),
   events: z.array(FormatEventSchema).default([]),
   /** Transition into the NEXT block. Omitted = hard cut. */
   transitionAfter: ComponentRefSchema.optional(),
@@ -126,6 +185,8 @@ export const FormatSchema = z
     /** Optional user-supplied music bed for the whole video. */
     musicSlot: SlotSchema.optional(),
     musicVolume: z.number().min(0).max(1).default(0.5),
+    /** Slots used by events across many blocks (shared SFX, recurring memes). */
+    sharedSlots: z.array(SlotSchema).default([]),
     blocks: z.array(BlockSchema).min(1),
   })
   .superRefine((format, ctx) => {
@@ -137,6 +198,7 @@ export const FormatSchema = z
       slotNames.add(name);
     };
     if (format.musicSlot) addSlot(format.musicSlot.name);
+    for (const slot of format.sharedSlots) addSlot(slot.name);
 
     const blockIds = new Set<string>();
     const eventIds = new Set<string>();
@@ -161,10 +223,11 @@ export const FormatSchema = z
         });
       }
 
-      if (block.kind === "broll" && block.roles.length > 0) {
+      const anchors = [...block.roles, ...block.anchors];
+      if (block.kind === "broll" && anchors.length > 0) {
         ctx.addIssue({
           code: "custom",
-          message: `block "${block.id}": broll blocks cannot define roles (no transcript to resolve against)`,
+          message: `block "${block.id}": broll blocks cannot define anchors (no transcript to resolve against)`,
         });
       }
       if (block.kind === "broll" && block.captions) {
@@ -174,31 +237,48 @@ export const FormatSchema = z
         });
       }
 
-      const roleIds = new Set(block.roles.map((r) => r.id));
+      const anchorIds = new Set<string>();
+      const literalIds = new Set<string>();
+      for (const anchor of anchors) {
+        if (anchorIds.has(anchor.id)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `duplicate anchor id "${anchor.id}" in block "${block.id}"`,
+          });
+        }
+        anchorIds.add(anchor.id);
+        if (anchor.kind === "literal") literalIds.add(anchor.id);
+      }
+      // Windows may only be bounded by literal anchors: literals resolve
+      // first (no LLM), so their spans exist before any semantic search.
+      for (const anchor of anchors) {
+        if (anchor.kind !== "semantic" || !anchor.window) continue;
+        for (const ref of [anchor.window.afterAnchor, anchor.window.beforeAnchor]) {
+          if (ref !== undefined && !literalIds.has(ref)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `anchor "${anchor.id}": window must reference a LITERAL anchor in block "${block.id}", got "${ref}"`,
+            });
+          }
+        }
+      }
+
       for (const event of block.events) {
         if (eventIds.has(event.id)) {
           ctx.addIssue({ code: "custom", message: `duplicate event id "${event.id}"` });
         }
         eventIds.add(event.id);
-        if (event.timing.kind === "role" && !roleIds.has(event.timing.roleId)) {
+        if (event.timing.kind === "role" && !anchorIds.has(event.timing.roleId)) {
           ctx.addIssue({
             code: "custom",
-            message: `event "${event.id}": unknown roleId "${event.timing.roleId}" in block "${block.id}"`,
+            message: `event "${event.id}": unknown anchor "${event.timing.roleId}" in block "${block.id}"`,
           });
         }
-        if (event.until) {
-          if (event.kind !== "overlay") {
-            ctx.addIssue({
-              code: "custom",
-              message: `event "${event.id}": "until" is only valid on overlay events`,
-            });
-          }
-          if (event.until.kind === "role" && !roleIds.has(event.until.roleId)) {
-            ctx.addIssue({
-              code: "custom",
-              message: `event "${event.id}": unknown "until" roleId "${event.until.roleId}" in block "${block.id}"`,
-            });
-          }
+        if (event.until?.kind === "role" && !anchorIds.has(event.until.roleId)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `event "${event.id}": unknown "until" anchor "${event.until.roleId}" in block "${block.id}"`,
+          });
         }
       }
     }
@@ -298,18 +378,25 @@ export const TrimPointsSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// ResolvedRoles — the brain's output (TRIMMED block time)
+// ResolvedRoles — resolved anchor spans (TRIMMED block time)
 // ---------------------------------------------------------------------------
 
 export const ResolvedRoleSchema = z.object({
   blockId: z.string(),
   roleId: z.string(),
-  /** Seconds from the start of the block's trimmed clip. */
+  /** Span start, seconds from the start of the block's trimmed clip. */
   timeSec: z.number().min(0),
+  /** Span end. Omitted on legacy point anchors; treated as == timeSec. */
+  endSec: z.number().min(0).optional(),
+  /** Where a literal anchor's captured words begin (the "[name]" start). */
+  captureStartSec: z.number().min(0).optional(),
   confidence: z.number().min(0).max(1),
-  source: z.enum(["llm", "fallback"]),
-  /** The transcript words the LLM anchored to — for inspection. */
+  /** literal = fuzzy text match (no LLM). */
+  source: z.enum(["literal", "llm", "fallback"]),
+  /** The transcript words matched/anchored to — for inspection. */
   quote: z.string().optional(),
+  /** The user's own words captured after a literal phrase ("[name]"). */
+  capturedText: z.string().optional(),
 });
 
 export const ResolvedRolesSchema = z.object({
@@ -345,6 +432,8 @@ export const EdlSfxSchema = z.object({
   id: z.string(),
   src: z.string(),
   tlInSec: z.number().min(0),
+  /** Cut the effect after this long (span-aligned SFX). Omitted = play out. */
+  durationSec: z.number().positive().optional(),
   volume: z.number().min(0).max(1).default(1),
 });
 

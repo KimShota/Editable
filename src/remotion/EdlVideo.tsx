@@ -13,6 +13,8 @@ import {
 import { Edl, EdlTransition, EdlVideoSegment } from "../pipeline/types";
 import { TextOverlay } from "./components/TextOverlay";
 import { ImageOverlay } from "./components/ImageOverlay";
+import { VideoOverlay } from "./components/VideoOverlay";
+import { TitleCard } from "./components/TitleCard";
 import { Captions } from "./components/Captions";
 
 /**
@@ -30,6 +32,8 @@ const OVERLAY_COMPONENTS: Record<
 > = {
   TextOverlay: TextOverlay as React.FC<Record<string, unknown>>,
   ImageOverlay: ImageOverlay as React.FC<Record<string, unknown>>,
+  VideoOverlay: VideoOverlay as React.FC<Record<string, unknown>>,
+  TitleCard: TitleCard as React.FC<Record<string, unknown>>,
 };
 
 /**
@@ -132,7 +136,16 @@ export const EdlVideo: React.FC<{ edl: Edl }> = ({ edl }) => {
       )}
 
       {edl.sfx.map((s) => (
-        <Sequence key={s.id} from={toFrames(s.tlInSec)} name={`sfx:${s.id}`}>
+        <Sequence
+          key={s.id}
+          from={toFrames(s.tlInSec)}
+          durationInFrames={
+            s.durationSec !== undefined
+              ? Math.max(1, toFrames(s.tlInSec + s.durationSec) - toFrames(s.tlInSec))
+              : undefined
+          }
+          name={`sfx:${s.id}`}
+        >
           <Audio src={staticFile(s.src)} volume={() => s.volume} />
         </Sequence>
       ))}

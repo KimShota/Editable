@@ -68,11 +68,14 @@ export const assemble = (
 
   /**
    * Resolve a component ref's slot indirection against the job bindings:
-   * textSlot → text param, imageSlot → src param, audioSlot → src param.
-   * Returns null if a required slot is unbound (event should be skipped).
+   * textSlot → text param; imageSlot/audioSlot/videoSlot → src param;
+   * textAnchor → text param from the anchor's captured words (optionally
+   * shaped by a textTemplate containing "{captured}").
+   * Returns null if a required slot/capture is unbound (event is skipped).
    */
   const resolveComponentParams = (
     ref: ComponentRef,
+    blockId: string,
   ): { component: string; params: Record<string, unknown> } | null => {
     const params: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(ref.params)) {
@@ -80,10 +83,20 @@ export const assemble = (
         const text = textAsset(filled, String(value));
         if (text === undefined) return null;
         params.text = text;
-      } else if (key === "imageSlot" || key === "audioSlot") {
+      } else if (key === "imageSlot" || key === "audioSlot" || key === "videoSlot") {
         const asset = fileAsset(filled, String(value));
         if (!asset) return null;
         params.src = stage(asset);
+      } else if (key === "textAnchor") {
+        const captured = resolved.roles.find(
+          (r) => r.blockId === blockId && r.roleId === String(value),
+        )?.capturedText;
+        if (captured === undefined) return null;
+        const template = ref.params.textTemplate;
+        params.text =
+          typeof template === "string" ? template.split("{captured}").join(captured) : captured;
+      } else if (key === "textTemplate") {
+        // Consumed alongside textAnchor above.
       } else {
         params[key] = value;
       }
@@ -91,7 +104,7 @@ export const assemble = (
     return { component: ref.component, params };
   };
 
-  /** Resolve a timing (fixed anchor or role) to trimmed-block seconds. */
+  /** Resolve a timing (fixed anchor or anchor span edge) to trimmed-block seconds. */
   const timingSec = (
     timing: FormatEvent["timing"],
     blockId: string,
@@ -105,10 +118,16 @@ export const assemble = (
     );
     if (!role) {
       throw new Error(
-        `assemble: role "${timing.roleId}" in block "${blockId}" was not resolved`,
+        `assemble: anchor "${timing.roleId}" in block "${blockId}" was not resolved`,
       );
     }
-    return clamp(role.timeSec, 0, blockDurationSec);
+    const edgeSec =
+      timing.edge === "end"
+        ? (role.endSec ?? role.timeSec)
+        : timing.edge === "captureStart"
+          ? (role.captureStartSec ?? role.timeSec)
+          : role.timeSec;
+    return clamp(edgeSec + timing.offsetSec, 0, blockDurationSec);
   };
 
   /** Event start relative to the block's trimmed start, overrides applied. */
@@ -155,23 +174,23 @@ export const assemble = (
     for (const event of block.events) {
       const override = overrides?.events[event.id];
       const ref = override?.component ?? event.component;
-      const resolvedRef = resolveComponentParams(ref);
+      const resolvedRef = resolveComponentParams(ref, block.id);
       if (!resolvedRef) {
         console.warn(
-          `assemble: skipping event "${event.id}" — an optional slot it needs is not filled`,
+          `assemble: skipping event "${event.id}" — an optional slot/capture it needs is not filled`,
         );
         continue;
       }
       const atSec = tlInSec + eventTimeSec(event, block.id, blockDurationSec);
+      // End priority: `until` (an anchor span edge) > durationSec > block end.
+      const endSec = event.until
+        ? tlInSec + timingSec(event.until, block.id, blockDurationSec)
+        : event.durationSec
+          ? Math.min(atSec + event.durationSec, tlOutSec)
+          : tlOutSec;
 
       if (event.kind === "overlay") {
-        // End priority: `until` (a role/anchor) > durationSec > block end.
-        const overlayEnd = event.until
-          ? tlInSec + timingSec(event.until, block.id, blockDurationSec)
-          : event.durationSec
-            ? Math.min(atSec + event.durationSec, tlOutSec)
-            : tlOutSec;
-        if (overlayEnd <= atSec) {
+        if (endSec <= atSec) {
           console.warn(
             `assemble: skipping overlay "${event.id}" — its "until" resolves before its start`,
           );
@@ -182,7 +201,7 @@ export const assemble = (
           component: resolvedRef.component,
           params: resolvedRef.params,
           tlInSec: atSec,
-          tlOutSec: overlayEnd,
+          tlOutSec: endSec,
         });
       } else {
         const volume = resolvedRef.params.volume;
@@ -190,6 +209,9 @@ export const assemble = (
           id: event.id,
           src: String(resolvedRef.params.src),
           tlInSec: atSec,
+          // SFX default to playing out; only an explicit end cuts them.
+          durationSec:
+            (event.until || event.durationSec) && endSec > atSec ? endSec - atSec : undefined,
           volume: typeof volume === "number" ? clamp(volume, 0, 1) : 1,
         });
       }
