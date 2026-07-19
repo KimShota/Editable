@@ -1,0 +1,263 @@
+/* Marketing landing page ("/") — scoped by these class names, which don't
+   collide with the app's Tailwind-driven pages. Shared tokens, ambient
+   mesh/grain and base html/body rules already live in globals.css. */
+
+.accent { color: var(--accent); }
+
+/* ---------- cursor glow (fixed, behind marketing content) ---------- */
+.cursor-glow {
+  position: fixed; top: 0; left: 0; z-index: 0; pointer-events: none;
+  width: 640px; height: 640px; margin-left: -320px; margin-top: -320px;
+  background: radial-gradient(circle, rgba(179, 102, 255, 0.16), transparent 68%);
+  filter: blur(8px);
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cursor-glow { display: none; }
+}
+
+.marketing, .marketing .nav, .marketing .hero, .marketing .story,
+.marketing .how, .marketing .pitch, .marketing .who, .marketing .cta {
+  position: relative; z-index: 1;
+}
+
+/* ---------- nav ---------- */
+.marketing .nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 22px 4vw;
+  mix-blend-mode: difference;
+}
+.marketing .nav__logo { font-family: var(--display); font-weight: 700; letter-spacing: 0.22em; font-size: 14px; }
+.marketing .nav__links { display: flex; align-items: center; gap: 32px; }
+.marketing .nav__links a {
+  font-family: var(--body); font-size: 14px; color: var(--ink-dim);
+  text-decoration: none; transition: color 0.25s ease;
+}
+.marketing .nav__links a:hover { color: var(--ink); }
+.marketing .nav__actions { display: flex; align-items: center; gap: 12px; }
+.marketing .nav__cta {
+  font-family: var(--display); font-size: 13px; letter-spacing: 0.08em;
+  color: var(--ink); text-decoration: none;
+  border: 1px solid rgba(242, 242, 239, 0.4); border-radius: 999px;
+  padding: 9px 18px;
+  transition: border-color 0.3s;
+}
+.marketing .nav__cta:hover { border-color: var(--ink); }
+.marketing .nav__launch {
+  font-family: var(--display); font-size: 13px; letter-spacing: 0.08em;
+  color: var(--accent-ink); text-decoration: none;
+  background: var(--accent); border-radius: 999px;
+  padding: 9px 18px;
+  transition: transform 0.25s ease;
+}
+.marketing .nav__launch:hover { transform: scale(1.04); }
+
+/* ---------- buttons ---------- */
+.marketing .btn {
+  font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: 0.01em;
+  padding: 15px 30px; border-radius: 999px; text-decoration: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: transform 0.25s ease, background 0.25s ease, border-color 0.25s ease;
+}
+.marketing .btn--primary { background: var(--accent); color: var(--accent-ink); }
+.marketing .btn--primary:hover { transform: scale(1.04); }
+.marketing .btn--ghost { color: var(--ink); border: 1px solid rgba(242, 242, 239, 0.22); }
+.marketing .btn--ghost:hover { border-color: var(--ink); background: rgba(242, 242, 239, 0.05); }
+
+/* ---------- hero ---------- */
+.marketing .hero {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 160px 6vw 100px;
+}
+.marketing .hero__content {
+  position: relative; z-index: 2; text-align: center;
+  max-width: 900px; margin: 0 auto;
+  display: flex; flex-direction: column; align-items: center;
+}
+.marketing .hero__badge {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-family: var(--display); font-size: 13px; color: var(--ink-dim);
+  border: 1px solid rgba(242, 242, 239, 0.14); border-radius: 999px;
+  padding: 8px 16px 8px 13px;
+  background: rgba(179, 102, 255, 0.06);
+  margin-bottom: 30px;
+}
+.marketing .hero__dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: var(--accent); box-shadow: 0 0 10px var(--accent);
+}
+.marketing .hero__title {
+  font-family: var(--display); font-weight: 700;
+  font-size: clamp(56px, 11vw, 168px);
+  letter-spacing: 0.02em; line-height: 0.95;
+  display: flex; justify-content: center; overflow: hidden;
+  text-shadow: 0 4px 60px rgba(0, 0, 0, 0.5);
+}
+.marketing .hero__title .ch { display: inline-block; transform: translateY(115%); }
+.marketing .hero__tag {
+  margin-top: 30px; font-family: var(--display);
+  font-size: clamp(19px, 2.4vw, 32px); font-weight: 700; line-height: 1.5;
+}
+.marketing .hero__tag .chip {
+  background: var(--accent); color: var(--accent-ink);
+  padding: 0.04em 0.28em; border-radius: 0.22em;
+}
+.marketing .line-mask { display: block; overflow: hidden; }
+.marketing .line-mask .line { display: inline-block; transform: translateY(110%); }
+.marketing .hero__sub {
+  margin-top: 24px; max-width: 560px;
+  color: var(--ink-dim); font-size: clamp(16px, 1.4vw, 19px);
+}
+.marketing .hero__actions {
+  margin-top: 38px; display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
+}
+
+/* ---------- hero mockup (product UI) ---------- */
+.marketing .mockup { margin-top: 76px; width: min(560px, 92vw); }
+.marketing .mockup__frame {
+  text-align: left; border-radius: 20px; overflow: hidden;
+  border: 1px solid rgba(242, 242, 239, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
+  backdrop-filter: blur(20px);
+  box-shadow: 0 30px 90px -24px rgba(76, 29, 149, 0.55);
+}
+.marketing .mockup__bar {
+  display: flex; align-items: center; gap: 7px;
+  padding: 14px 18px; border-bottom: 1px solid rgba(242, 242, 239, 0.08);
+}
+.marketing .mockup__dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(242, 242, 239, 0.16); }
+.marketing .mockup__barlabel {
+  margin-left: 8px; font-family: var(--display); font-size: 12px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim);
+}
+.marketing .mockup__body { padding: 16px; display: grid; gap: 10px; }
+.marketing .mockup__slot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 15px 18px; border-radius: 12px;
+  border: 1px solid rgba(242, 242, 239, 0.1);
+  background: rgba(255, 255, 255, 0.02);
+}
+.marketing .mockup__slot--done { border-color: rgba(179, 102, 255, 0.35); background: rgba(179, 102, 255, 0.07); }
+.marketing .mockup__slot--active {
+  border-color: var(--accent); background: rgba(179, 102, 255, 0.1);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 26px rgba(179, 102, 255, 0.25);
+}
+.marketing .mockup__slotlabel { font-family: var(--display); font-size: 12px; letter-spacing: 0.1em; color: var(--accent); }
+.marketing .mockup__slotfile { font-size: 13px; color: var(--ink-dim); }
+.marketing .mockup__slot--done .mockup__slotfile { color: var(--ink); }
+.marketing .mockup__check { color: var(--accent); font-weight: 700; }
+
+/* ---------- story ---------- */
+.marketing .story { padding: 30vh 6vw; }
+.marketing .story__inner { max-width: 1100px; margin: 0 auto; }
+.marketing .story__line {
+  font-family: var(--display); font-weight: 700;
+  font-size: clamp(38px, 6.4vw, 96px);
+  line-height: 1.04; letter-spacing: -0.015em;
+}
+.marketing .story__line--accent { color: var(--accent); }
+.marketing .story__sub { margin-top: 44px; max-width: 560px; color: var(--ink-dim); font-size: clamp(16px, 1.4vw, 19px); }
+
+/* ---------- how (bento) ---------- */
+.marketing .how { padding: 22vh 6vw; background: var(--bg-2); }
+.marketing .how__inner { max-width: 1100px; margin: 0 auto; }
+.marketing .how__kicker, .marketing .pitch__kicker {
+  font-size: 12px; letter-spacing: 0.34em; text-transform: uppercase; color: var(--accent);
+  margin-bottom: 20px;
+}
+.marketing .how__title {
+  font-family: var(--display); font-weight: 700;
+  font-size: clamp(28px, 4vw, 48px); line-height: 1.12; max-width: 640px;
+}
+.marketing .how__grid {
+  margin-top: 60px;
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px;
+  border-radius: 20px; overflow: hidden;
+  background: rgba(242, 242, 239, 0.08);
+}
+.marketing .how__step {
+  background: var(--bg-2); padding: 40px 36px;
+  display: flex; flex-direction: column; gap: 14px;
+  transition: background 0.3s ease;
+}
+.marketing .how__step:hover { background: rgba(179, 102, 255, 0.05); }
+.marketing .how__num { font-family: var(--display); color: var(--accent); font-size: 14px; letter-spacing: 0.1em; }
+.marketing .how__step h3 { font-family: var(--display); font-weight: 700; font-size: clamp(21px, 2vw, 27px); line-height: 1.15; }
+.marketing .how__step p { color: var(--ink-dim); font-size: 15px; max-width: 300px; }
+
+/* ---------- pitch / formats ---------- */
+.marketing .pitch { padding: 26vh 6vw; }
+.marketing .pitch__inner { max-width: 1100px; margin: 0 auto; }
+.marketing .pitch__title { font-family: var(--display); font-weight: 700; font-size: clamp(42px, 7vw, 104px); line-height: 1.0; letter-spacing: -0.015em; }
+.marketing .pitch__sub { margin-top: 36px; max-width: 540px; color: var(--ink-dim); font-size: clamp(16px, 1.4vw, 19px); }
+.marketing .pitch__formats { margin-top: 90px; display: grid; gap: 14px; }
+.marketing .format {
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;
+  border: 1px solid rgba(242, 242, 239, 0.12); border-radius: 14px;
+  padding: 26px 30px;
+  transition: border-color 0.35s ease, background 0.35s ease;
+}
+.marketing .format:hover { border-color: var(--accent); background: rgba(179, 102, 255, 0.08); }
+.marketing .format__name { font-family: var(--display); font-weight: 700; font-size: clamp(19px, 2vw, 26px); }
+.marketing .format__slots { display: flex; gap: 8px; flex-wrap: wrap; }
+.marketing .format__slots i {
+  font-style: normal; font-family: var(--display); font-size: 11px; letter-spacing: 0.12em;
+  color: var(--accent); border: 1px solid rgba(179, 102, 255, 0.4); border-radius: 999px;
+  padding: 6px 12px;
+}
+
+/* ---------- who ---------- */
+.marketing .who { padding: 30vh 6vw; background: var(--bg-2); }
+.marketing .who__inner { max-width: 1000px; margin: 0 auto; }
+.marketing .who__line {
+  font-family: var(--display); font-weight: 700;
+  font-size: clamp(30px, 4.6vw, 66px); line-height: 1.15; letter-spacing: -0.01em;
+}
+
+/* ---------- cta ---------- */
+.marketing .cta { padding: 28vh 6vw 0; display: flex; flex-direction: column; min-height: 100vh; }
+.marketing .cta__inner { max-width: 760px; margin: 0 auto; text-align: center; flex: 1; }
+.marketing .cta__title { font-family: var(--display); font-weight: 700; font-size: clamp(40px, 6vw, 88px); line-height: 1.02; letter-spacing: -0.015em; }
+.marketing .cta__sub { margin-top: 22px; color: var(--ink-dim); }
+.marketing .cta__form { margin-top: 52px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.marketing .cta__form input {
+  background: transparent; border: 1px solid rgba(242, 242, 239, 0.22); border-radius: 999px;
+  color: var(--ink); font-family: var(--body); font-size: 15px;
+  padding: 16px 26px; width: min(340px, 80vw); outline: none;
+  transition: border-color 0.3s;
+}
+.marketing .cta__form input:focus { border-color: var(--accent); }
+.marketing .cta__form input:disabled { opacity: 0.5; }
+.marketing .cta__form button {
+  background: var(--accent); color: var(--accent-ink); border: none; border-radius: 999px;
+  font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: 0.02em;
+  padding: 16px 32px; cursor: pointer;
+  transition: transform 0.25s ease;
+}
+.marketing .cta__form button:hover { transform: scale(1.04); }
+.marketing .cta__done { margin-top: 26px; color: var(--accent); opacity: 0; transition: opacity 0.5s; font-family: var(--display); }
+.marketing .cta__done.is-visible { opacity: 1; }
+
+.marketing .footer {
+  position: relative; z-index: 1;
+  margin-top: 18vh; padding: 30px 4vw;
+  display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  border-top: 1px solid rgba(242, 242, 239, 0.1);
+  font-size: 12px; letter-spacing: 0.14em; color: var(--ink-dim);
+  font-family: var(--display);
+}
+
+/* ---------- reveals ---------- */
+.marketing [data-reveal] { opacity: 0; transform: translateY(56px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .marketing [data-reveal] { opacity: 1; transform: none; }
+  .marketing .hero__title .ch, .marketing .line-mask .line { transform: none; }
+}
+
+@media (max-width: 640px) {
+  .marketing .nav__links { display: none; }
+  .marketing .how__grid { grid-template-columns: 1fr; }
+}
