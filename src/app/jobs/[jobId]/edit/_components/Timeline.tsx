@@ -6,6 +6,19 @@ import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import { TimelineClip } from "./TimelineClip";
 import { Selection, SelectionTrack, MUSIC_ID } from "./selection";
 import { buildMajorLadder, chooseTickScale, formatTick } from "./tickScale";
+import { FitIcon, ScissorsIcon, TrashIcon, ZoomInIcon, ZoomOutIcon } from "./Icons";
+
+/** One hue family (indigo → violet → purple) so tracks read as a system;
+ *  transitions get the one intentional exception (amber) since they're a
+ *  different kind of thing — an effect marker, not a content clip. */
+const TRACK_COLOR = {
+  video: "bg-indigo-500/85",
+  transition: "bg-amber-500/75",
+  text: "bg-violet-500/80",
+  sfx: "bg-purple-400/75",
+  captions: "bg-white/12",
+  music: "bg-indigo-900/85",
+} as const;
 
 const TRACK_LABEL_WIDTH = 96;
 /** Frame-level precision: enough px/frame that individual frames are
@@ -236,6 +249,46 @@ export function Timeline({
     onOp({ type: "trimEdge", track: "music", id: MUSIC_ID, edge, tlSec });
   };
 
+  // Toolbar split/delete act on whatever's currently selected — a shortcut
+  // for the same actions available per-clip in the Inspector. Only the
+  // four real clip tracks support split/delete (transitions/music don't).
+  const isSplittableTrack = (t: SelectionTrack): t is "video" | "overlay" | "sfx" | "captions" =>
+    t === "video" || t === "overlay" || t === "sfx" || t === "captions";
+
+  const selectedClipView: ClipView | undefined = selection
+    ? selection.track === "video"
+      ? videoClips.find((c) => c.id === selection.id)
+      : selection.track === "overlay"
+        ? overlayClips.find((c) => c.id === selection.id)
+        : selection.track === "sfx"
+          ? sfxClips.find((c) => c.id === selection.id)
+          : selection.track === "captions"
+            ? captionClips.find((c) => c.id === selection.id)
+            : undefined
+    : undefined;
+
+  const canSplitSelection =
+    !!selection &&
+    isSplittableTrack(selection.track) &&
+    !!selectedClipView &&
+    currentTimeSec > selectedClipView.tlInSec + 0.1 &&
+    currentTimeSec < selectedClipView.tlOutSec - 0.1;
+
+  const canDeleteSelection =
+    !!selection &&
+    isSplittableTrack(selection.track) &&
+    !(selection.track === "video" && edl.video.length <= 1);
+
+  const splitSelection = () => {
+    if (!selection || !isSplittableTrack(selection.track)) return;
+    onOp({ type: "split", track: selection.track, id: selection.id, atSec: currentTimeSec });
+  };
+
+  const deleteSelection = () => {
+    if (!selection || !isSplittableTrack(selection.track)) return;
+    onOp({ type: "delete", track: selection.track, id: selection.id });
+  };
+
   const trackRow = (
     label: string,
     clips: ClipView[],
@@ -247,8 +300,9 @@ export function Timeline({
     track: SelectionTrack,
     locked = false,
   ) => (
-    <div className="relative flex h-14 border-b border-white/6">
-      <div className="sticky left-0 z-20 flex w-24 shrink-0 items-center bg-[color:var(--bg-2)] px-2 text-[11px] text-[color:var(--ink-dim)]">
+    <div className="relative flex h-14 border-b border-[color:var(--ed-border)]">
+      <div className="sticky left-0 z-20 flex w-24 shrink-0 items-center gap-2 bg-[color:var(--ed-panel)] px-3 text-[11px] text-[color:var(--ed-ink-dim)]">
+        <span className={`h-2 w-2 shrink-0 rounded-[3px] ${colorClass}`} />
         {label}
       </div>
       <div className="relative flex-1">
@@ -272,23 +326,31 @@ export function Timeline({
     </div>
   );
 
+  const toolbarBtnClass =
+    "flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--ed-ink-dim)] transition-colors hover:bg-[color:var(--ed-raised)] hover:text-[color:var(--ed-ink)] disabled:pointer-events-none disabled:opacity-30";
+
   return (
-    <div className="flex h-full flex-col bg-[color:var(--bg-2)]">
-      <div className="flex items-center justify-between border-b border-white/8 px-3 py-1.5">
-        <p className="text-[11px] tracking-wide text-[color:var(--ink-dim)] uppercase">Timeline</p>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setPxPerSec(minPxPerSec)}
-            title="Fit whole video to view"
-            className="rounded px-2 h-6 text-[11px] text-[color:var(--ink-dim)] hover:bg-white/10 hover:text-[color:var(--ink)]"
-          >
-            Fit
+    <div className="flex h-full flex-col bg-[color:var(--ed-panel)]">
+      <div className="flex items-center justify-between border-b border-[color:var(--ed-border)] px-2.5 py-1.5">
+        <div className="flex items-center gap-1">
+          <button onClick={splitSelection} disabled={!canSplitSelection} title="Split at playhead" className={toolbarBtnClass}>
+            <ScissorsIcon className="h-4 w-4" />
+          </button>
+          <button onClick={deleteSelection} disabled={!canDeleteSelection} title="Delete selected clip" className={toolbarBtnClass}>
+            <TrashIcon className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => setPxPerSec(minPxPerSec)} title="Fit whole video to view" className={toolbarBtnClass}>
+            <FitIcon className="h-4 w-4" />
           </button>
           <button
             onClick={() => setPxPerSec((v) => clamp(v / 1.4, minPxPerSec, maxPxPerSec))}
-            className="h-6 w-6 rounded text-[color:var(--ink-dim)] hover:bg-white/10 hover:text-[color:var(--ink)]"
+            title="Zoom out"
+            className={toolbarBtnClass}
           >
-            −
+            <ZoomOutIcon className="h-4 w-4" />
           </button>
           <input
             type="range"
@@ -297,14 +359,15 @@ export function Timeline({
             step={(maxPxPerSec - minPxPerSec) / 200 || 1}
             value={pxPerSec}
             onChange={(e) => setPxPerSec(Number(e.target.value))}
-            className="w-24"
+            className="w-24 accent-[color:var(--ed-accent)]"
             title="Zoom"
           />
           <button
             onClick={() => setPxPerSec((v) => clamp(v * 1.4, minPxPerSec, maxPxPerSec))}
-            className="h-6 w-6 rounded text-[color:var(--ink-dim)] hover:bg-white/10 hover:text-[color:var(--ink)]"
+            title="Zoom in"
+            className={toolbarBtnClass}
           >
-            +
+            <ZoomInIcon className="h-4 w-4" />
           </button>
         </div>
       </div>
@@ -313,7 +376,7 @@ export function Timeline({
         <div style={{ width: contentWidth }} className="relative">
           {/* Ruler — click to jump, drag to scrub continuously */}
           <div
-            className="sticky top-0 z-20 flex h-6 cursor-text border-b border-white/8 bg-[color:var(--bg-2)]"
+            className="sticky top-0 z-20 flex h-6 cursor-text border-b border-[color:var(--ed-border)] bg-[color:var(--ed-panel)]"
             onPointerDown={(e) => {
               e.stopPropagation();
               e.currentTarget.setPointerCapture(e.pointerId);
@@ -330,14 +393,14 @@ export function Timeline({
                 <div
                   key={`minor-${t}`}
                   style={{ left: t * pxPerSec }}
-                  className="absolute bottom-0 h-1.5 border-l border-white/10"
+                  className="absolute bottom-0 h-1.5 border-l border-[color:var(--ed-border)]"
                 />
               ))}
               {majorTicks.map((t) => (
                 <div
                   key={`major-${t}`}
                   style={{ left: t * pxPerSec }}
-                  className="absolute top-0 h-full border-l border-white/20 pl-1 text-[10px] whitespace-nowrap text-[color:var(--ink-dim)]"
+                  className="absolute top-0 h-full border-l border-[color:var(--ed-border-strong)] pl-1 font-mono text-[10px] whitespace-nowrap tabular-nums text-[color:var(--ed-ink-dim)]"
                 >
                   {formatTick(t, useFrames, edl.fps)}
                 </div>
@@ -345,13 +408,13 @@ export function Timeline({
             </div>
           </div>
 
-          {trackRow("Video", videoClips, "bg-indigo-600/80", { move: commitVideoMove, trim: commitVideoTrim }, "video")}
+          {trackRow("Video", videoClips, TRACK_COLOR.video, { move: commitVideoMove, trim: commitVideoTrim }, "video")}
           {transitionClips.length > 0 &&
-            trackRow("Transitions", transitionClips, "bg-amber-400/80", {}, "transition", true)}
+            trackRow("Transitions", transitionClips, TRACK_COLOR.transition, {}, "transition", true)}
           {trackRow(
             "Text",
             overlayClips,
-            "bg-fuchsia-600/70",
+            TRACK_COLOR.text,
             {
               move: (id, d) => commitFloatMove("overlay", id, d),
               trim: (id, edge, d) => commitFloatTrim("overlay", id, edge, d),
@@ -361,7 +424,7 @@ export function Timeline({
           {trackRow(
             "SFX",
             sfxClips,
-            "bg-[color:var(--accent)]/70",
+            TRACK_COLOR.sfx,
             {
               move: (id, d) => commitFloatMove("sfx", id, d),
               trim: (id, edge, d) => commitFloatTrim("sfx", id, edge, d),
@@ -372,7 +435,7 @@ export function Timeline({
             trackRow(
               "Captions",
               captionClips,
-              "bg-white/15",
+              TRACK_COLOR.captions,
               {
                 move: (id, d) => commitFloatMove("captions", id, d),
                 trim: (id, edge, d) => commitFloatTrim("captions", id, edge, d),
@@ -383,7 +446,7 @@ export function Timeline({
             trackRow(
               "Music",
               [musicView],
-              "bg-violet-800/70",
+              TRACK_COLOR.music,
               { move: (_id, d) => commitMusicMove(d), trim: (_id, edge, d) => commitMusicTrim(edge, d) },
               "music",
             )}
@@ -393,7 +456,7 @@ export function Timeline({
               draggable control. */}
           <div
             style={{ left: currentTimeSec * pxPerSec + TRACK_LABEL_WIDTH }}
-            className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-[color:var(--accent)]"
+            className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-[color:var(--ed-accent)]"
           >
             <div
               onPointerDown={(e) => {
@@ -405,7 +468,7 @@ export function Timeline({
                 if (e.buttons !== 1) return;
                 seekFromClientX(e.clientX);
               }}
-              className="pointer-events-auto absolute -top-0.5 -left-2.5 h-5 w-5 cursor-ew-resize rounded-full bg-[color:var(--accent)] ring-2 ring-[color:var(--bg-2)]"
+              className="pointer-events-auto absolute -top-0.5 -left-2.5 h-5 w-5 cursor-ew-resize rounded-full bg-[color:var(--ed-accent)] ring-2 ring-[color:var(--ed-panel)]"
             />
           </div>
         </div>

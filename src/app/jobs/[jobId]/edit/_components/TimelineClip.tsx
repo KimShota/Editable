@@ -87,8 +87,10 @@ export function TimelineClip({
         width: Math.max(previewWidth, 4),
         transform: `translateX(${translateX}px)`,
       }}
-      className={`group absolute top-1 bottom-1 flex cursor-grab flex-col justify-center overflow-hidden rounded-md border px-2 text-left transition-shadow active:cursor-grabbing ${colorClass} ${
-        selected ? "z-10 border-white/70 shadow-[0_0_0_2px_rgba(255,255,255,0.4)]" : "border-black/20"
+      className={`group absolute top-1 bottom-1 flex cursor-grab flex-col justify-center overflow-hidden rounded-lg border px-2 text-left transition-shadow duration-150 active:cursor-grabbing ${colorClass} ${
+        selected
+          ? "z-10 border-[color:var(--ed-accent)] shadow-[0_0_0_3px_var(--ed-accent-dim)]"
+          : "border-black/20"
       } ${locked ? "cursor-default opacity-80" : ""}`}
     >
       <p className="truncate text-[11px] leading-tight font-medium text-white">{label}</p>

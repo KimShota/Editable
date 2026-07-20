@@ -13,10 +13,20 @@ import { RenderPanel } from "./RenderPanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { Selection } from "./selection";
 import { formatTimecode } from "./timeFormat";
+import {
+  ArrowLeftIcon,
+  CheckIcon,
+  FrameBackIcon,
+  FrameForwardIcon,
+  PauseIcon,
+  PlayIcon,
+  SkipEndIcon,
+  SkipStartIcon,
+} from "./Icons";
 
 const LAYOUT_KEY = "editable-editor-layout";
 type Layout = { mediaPanelWidth: number; inspectorWidth: number; timelineHeight: number };
-const DEFAULT_LAYOUT: Layout = { mediaPanelWidth: 256, inspectorWidth: 320, timelineHeight: 256 };
+const DEFAULT_LAYOUT: Layout = { mediaPanelWidth: 260, inspectorWidth: 320, timelineHeight: 260 };
 
 const loadLayout = (): Layout => {
   if (typeof window === "undefined") return DEFAULT_LAYOUT;
@@ -29,6 +39,26 @@ const loadLayout = (): Layout => {
 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
+const panelClass = "rounded-xl border border-[color:var(--ed-border)] bg-[color:var(--ed-panel)] overflow-hidden";
+
+const TransportButton = ({
+  children,
+  onClick,
+  title,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title: string;
+}) => (
+  <button
+    onClick={onClick}
+    title={title}
+    className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--ed-ink-dim)] transition-colors hover:bg-[color:var(--ed-raised)] hover:text-[color:var(--ed-ink)]"
+  >
+    {children}
+  </button>
+);
 
 /**
  * A CapCut/Premiere-style non-linear editor: the left panel reflects the
@@ -58,6 +88,7 @@ export function Editor({
   const [layout, setLayout] = useState<Layout>(loadLayout);
 
   const playerRef = useRef<PlayerRef>(null);
+  const totalFrames = Math.max(1, Math.round(edl.durationSec * edl.fps));
 
   useEffect(() => {
     try {
@@ -98,6 +129,15 @@ export function Editor({
     [edl.durationSec, edl.fps],
   );
 
+  const stepFrame = useCallback(
+    (delta: number) => {
+      const player = playerRef.current;
+      if (!player) return;
+      player.seekTo(clamp(player.getCurrentFrame() + delta, 0, totalFrames - 1));
+    },
+    [totalFrames],
+  );
+
   const submitOp = useCallback(
     async (op: TimelineOp) => {
       setPending(true);
@@ -120,8 +160,9 @@ export function Editor({
     [jobId],
   );
 
-  // Delete/Backspace deletes the selected clip; Space toggles play/pause.
-  // Both are ignored while typing in a text field (the overlay text editor).
+  // Delete/Backspace deletes the selected clip; Space toggles play/pause;
+  // arrow keys step one frame. All ignored while typing in a text field
+  // (the overlay text editor).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -137,10 +178,18 @@ export function Editor({
         e.preventDefault();
         playerRef.current?.toggle();
       }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        stepFrame(-1);
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        stepFrame(1);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selection, submitOp]);
+  }, [selection, submitOp, stepFrame]);
 
   const jumpTo = (sel: Selection, tlInSec: number) => {
     setSelection(sel);
@@ -148,103 +197,138 @@ export function Editor({
   };
 
   return (
-    <div className="flex h-full w-full flex-col bg-[color:var(--bg)] text-[color:var(--ink)]">
+    <div className="editor-theme flex h-full w-full flex-col">
       {/* Top bar */}
-      <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/8 px-4">
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-[color:var(--ed-border)] px-4">
         <div className="flex items-center gap-3">
-          <Link href="/library" className="text-[color:var(--ink-dim)] hover:text-[color:var(--ink)]">
-            ←
+          <Link
+            href="/library"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--ed-ink-dim)] transition-colors hover:bg-[color:var(--ed-raised)] hover:text-[color:var(--ed-ink)]"
+          >
+            <ArrowLeftIcon className="h-4 w-4" />
           </Link>
+          <div className="h-5 w-px bg-[color:var(--ed-border-strong)]" />
           <div>
-            <p className="font-[family-name:var(--font-display)] text-sm font-bold text-[color:var(--ink)]">
+            <p className="font-[family-name:var(--ed-font-display)] text-sm font-semibold text-[color:var(--ed-ink)]">
               {formatName}
             </p>
-            <p className="text-[11px] text-[color:var(--ink-dim)]">{jobId}</p>
+            <p className="font-mono text-[10px] tracking-wide text-[color:var(--ed-ink-faint)]">{jobId}</p>
           </div>
-          {pending && <span className="text-[11px] text-[color:var(--ink-dim)]">Saving…</span>}
         </div>
-        <div className="relative">
-          <button
-            onClick={() => setExportOpen((v) => !v)}
-            className="rounded-full bg-[color:var(--accent)] px-5 py-2 font-[family-name:var(--font-display)] text-sm font-bold text-[color:var(--accent-ink)] hover:scale-[1.03]"
-          >
-            Export
-          </button>
-          {exportOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
-              <div className="absolute top-12 right-0 z-50 w-96">
-                <RenderPanel jobId={jobId} />
-              </div>
-            </>
-          )}
+
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1.5 rounded-full border border-[color:var(--ed-border)] px-2.5 py-1 text-[11px] text-[color:var(--ed-ink-dim)]">
+            {pending ? (
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[color:var(--ed-accent)]" />
+            ) : (
+              <CheckIcon className="h-3 w-3" />
+            )}
+            {pending ? "Saving…" : "Saved"}
+          </span>
+
+          <div className="relative">
+            <button
+              onClick={() => setExportOpen((v) => !v)}
+              className="rounded-lg bg-[color:var(--ed-accent)] px-4 py-2 font-[family-name:var(--ed-font-display)] text-sm font-semibold text-[color:var(--ed-accent-ink)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
+            >
+              Export
+            </button>
+            {exportOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
+                <div className="absolute top-11 right-0 z-50 w-96">
+                  <RenderPanel jobId={jobId} />
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {error && (
-        <p className="border-b border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-400">{error}</p>
+        <p className="border-b border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-[color:var(--ed-danger)]">
+          {error}
+        </p>
       )}
 
-      {/* Body */}
-      <div className="flex min-h-0 flex-1">
-        <div style={{ width: layout.mediaPanelWidth }} className="shrink-0">
-          <MediaPanel edl={edl} onJumpTo={jumpTo} />
-        </div>
-        <ResizeHandle orientation="vertical" onResize={resizeMediaPanel} />
+      {/* Canvas — the inset floating-panel workspace */}
+      <div className="flex min-h-0 flex-1 flex-col p-2.5">
+        <div className="flex min-h-0 flex-1">
+          <div style={{ width: layout.mediaPanelWidth }} className={`shrink-0 ${panelClass}`}>
+            <MediaPanel edl={edl} onJumpTo={jumpTo} />
+          </div>
+          <ResizeHandle orientation="vertical" onResize={resizeMediaPanel} />
 
-        <div className="flex min-w-0 flex-1 flex-col bg-black/20">
-          <div className="flex flex-1 items-center justify-center overflow-hidden p-6">
-            <div className="h-full max-h-full" style={{ aspectRatio: `${edl.width} / ${edl.height}` }}>
-              <Player
-                ref={playerRef}
-                component={EdlVideo}
-                inputProps={{ edl }}
-                durationInFrames={Math.max(1, Math.round(edl.durationSec * edl.fps))}
-                fps={edl.fps}
-                compositionWidth={edl.width}
-                compositionHeight={edl.height}
-                style={{ width: "100%", height: "100%" }}
-                loop
-              />
+          <div className={`flex min-w-0 flex-1 flex-col ${panelClass}`}>
+            <div className="flex flex-1 items-center justify-center overflow-hidden bg-black p-6">
+              <div className="h-full max-h-full" style={{ aspectRatio: `${edl.width} / ${edl.height}` }}>
+                <Player
+                  ref={playerRef}
+                  component={EdlVideo}
+                  inputProps={{ edl }}
+                  durationInFrames={totalFrames}
+                  fps={edl.fps}
+                  compositionWidth={edl.width}
+                  compositionHeight={edl.height}
+                  style={{ width: "100%", height: "100%" }}
+                  loop
+                />
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center justify-center gap-1 border-t border-[color:var(--ed-border)] py-2.5">
+              <TransportButton onClick={() => playerRef.current?.seekTo(0)} title="Jump to start">
+                <SkipStartIcon className="h-4 w-4" />
+              </TransportButton>
+              <TransportButton onClick={() => stepFrame(-1)} title="Previous frame">
+                <FrameBackIcon className="h-4 w-4" />
+              </TransportButton>
+              <button
+                onClick={() => playerRef.current?.toggle()}
+                className="mx-1 flex h-9 w-9 items-center justify-center rounded-full bg-[color:var(--ed-accent)] text-[color:var(--ed-accent-ink)] transition-transform hover:scale-105 active:scale-95"
+              >
+                {isPlaying ? (
+                  <PauseIcon className="h-4 w-4" />
+                ) : (
+                  <PlayIcon className="h-4 w-4 translate-x-[1px]" />
+                )}
+              </button>
+              <TransportButton onClick={() => stepFrame(1)} title="Next frame">
+                <FrameForwardIcon className="h-4 w-4" />
+              </TransportButton>
+              <TransportButton onClick={() => playerRef.current?.seekTo(totalFrames - 1)} title="Jump to end">
+                <SkipEndIcon className="h-4 w-4" />
+              </TransportButton>
+              <p className="ml-3 font-mono text-xs tabular-nums text-[color:var(--ed-ink-dim)]">
+                {formatTimecode(currentTimeSec)}{" "}
+                <span className="text-[color:var(--ed-ink-faint)]">/</span> {formatTimecode(edl.durationSec)}
+              </p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center justify-center gap-4 border-t border-white/8 py-2">
-            <button
-              onClick={() => playerRef.current?.toggle()}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-[color:var(--ink)] hover:bg-white/20"
-            >
-              {isPlaying ? "⏸" : "▶"}
-            </button>
-            <p className="font-mono text-xs text-[color:var(--ink-dim)]">
-              {formatTimecode(currentTimeSec)} / {formatTimecode(edl.durationSec)}
-            </p>
+
+          <ResizeHandle orientation="vertical" onResize={resizeInspector} />
+          <div style={{ width: layout.inspectorWidth }} className={`shrink-0 ${panelClass}`}>
+            <Inspector
+              edl={edl}
+              selection={selection}
+              currentTimeSec={currentTimeSec}
+              onOp={submitOp}
+              onDeselect={() => setSelection(null)}
+            />
           </div>
         </div>
 
-        <ResizeHandle orientation="vertical" onResize={resizeInspector} />
-        <div style={{ width: layout.inspectorWidth }} className="shrink-0">
-          <Inspector
+        <ResizeHandle orientation="horizontal" onResize={resizeTimeline} />
+
+        <div style={{ height: layout.timelineHeight }} className={`shrink-0 ${panelClass}`}>
+          <Timeline
             edl={edl}
             selection={selection}
+            onSelect={setSelection}
             currentTimeSec={currentTimeSec}
+            onSeek={seekToSec}
             onOp={submitOp}
-            onDeselect={() => setSelection(null)}
           />
         </div>
-      </div>
-
-      <ResizeHandle orientation="horizontal" onResize={resizeTimeline} />
-
-      {/* Timeline */}
-      <div style={{ height: layout.timelineHeight }} className="shrink-0">
-        <Timeline
-          edl={edl}
-          selection={selection}
-          onSelect={setSelection}
-          currentTimeSec={currentTimeSec}
-          onSeek={seekToSec}
-          onOp={submitOp}
-        />
       </div>
     </div>
   );

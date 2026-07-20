@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Button } from "../../../../_components/ui";
 
 type RenderStatus =
   | { status: "idle" }
@@ -43,21 +42,27 @@ export function RenderPanel({ jobId }: { jobId: string }) {
   };
 
   return (
-    <div className="rounded-2xl border border-[color:var(--card-border)] bg-[color:var(--card)] p-5">
+    <div className="rounded-xl border border-[color:var(--ed-border-strong)] bg-[color:var(--ed-panel)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
       <div className="flex items-center justify-between gap-3">
-        <p className="font-[family-name:var(--font-display)] font-bold text-[color:var(--ink)]">Render</p>
-        <Button onClick={startRender} disabled={status.status === "rendering"}>
+        <p className="font-[family-name:var(--ed-font-display)] font-semibold text-[color:var(--ed-ink)]">Render</p>
+        <button
+          onClick={startRender}
+          disabled={status.status === "rendering"}
+          className="rounded-lg bg-[color:var(--ed-accent)] px-4 py-2 text-sm font-semibold text-[color:var(--ed-accent-ink)] transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40"
+        >
           {status.status === "rendering" ? "Rendering…" : "Render final video"}
-        </Button>
+        </button>
       </div>
-      {status.status === "error" && <p className="mt-3 text-sm text-red-400">{status.error}</p>}
+      {status.status === "error" && (
+        <p className="mt-3 text-sm text-[color:var(--ed-danger)]">{status.error}</p>
+      )}
       {status.status === "done" && (
         <div className="mt-4">
           <video src={status.outUrl} controls className="w-full rounded-lg" />
           <a
             href={status.outUrl}
             download
-            className="mt-3 inline-block text-sm text-[color:var(--accent)] hover:underline"
+            className="mt-3 inline-block text-sm text-[color:var(--ed-accent)] hover:underline"
           >
             Download MP4
           </a>

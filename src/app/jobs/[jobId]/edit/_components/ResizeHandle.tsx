@@ -34,6 +34,9 @@ export function ResizeHandle({
     delete e.currentTarget.dataset.lastPos;
   };
 
+  // The handle owns the whole gutter between two panels (not just a
+  // hairline) so it reads as intentional negative space — a small nub
+  // brightens on hover/drag, the rest of the gutter stays invisible.
   return (
     <div
       onPointerDown={onPointerDown}
@@ -41,9 +44,17 @@ export function ResizeHandle({
       onPointerUp={onPointerUp}
       className={
         orientation === "vertical"
-          ? "w-1 shrink-0 cursor-col-resize bg-white/6 hover:bg-[color:var(--accent)]/60 active:bg-[color:var(--accent)]"
-          : "h-1 shrink-0 cursor-row-resize bg-white/6 hover:bg-[color:var(--accent)]/60 active:bg-[color:var(--accent)]"
+          ? "group flex w-2.5 shrink-0 cursor-col-resize items-center justify-center"
+          : "group flex h-2.5 shrink-0 cursor-row-resize items-center justify-center"
       }
-    />
+    >
+      <div
+        className={
+          orientation === "vertical"
+            ? "h-8 w-[3px] rounded-full bg-[color:var(--ed-border-strong)] transition-colors group-hover:bg-[color:var(--ed-accent)] group-active:bg-[color:var(--ed-accent)]"
+            : "h-[3px] w-8 rounded-full bg-[color:var(--ed-border-strong)] transition-colors group-hover:bg-[color:var(--ed-accent)] group-active:bg-[color:var(--ed-accent)]"
+        }
+      />
+    </div>
   );
 }

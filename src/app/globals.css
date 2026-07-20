@@ -83,3 +83,28 @@ body {
   position: relative;
   z-index: 1;
 }
+
+/* ---------- editor theme (scoped — the timeline/NLE workspace only) ----------
+   A separate neutral-charcoal surface system from the marketing --bg/--card
+   tokens above: the editor is a workbench, not a landing page, so violet is
+   spent only on interactive/selected states instead of washing every surface. */
+.editor-theme {
+  --ed-canvas: #0c0c0f;
+  --ed-panel: #141418;
+  --ed-raised: #1c1c22;
+  --ed-raised-hover: #24242b;
+  --ed-border: rgba(255, 255, 255, 0.07);
+  --ed-border-strong: rgba(255, 255, 255, 0.14);
+  --ed-ink: #f4f4f6;
+  --ed-ink-dim: #8b8b93;
+  --ed-ink-faint: #5a5a61;
+  --ed-accent: #b366ff;
+  --ed-accent-ink: #0c0c0f;
+  --ed-accent-dim: rgba(179, 102, 255, 0.16);
+  --ed-focus: rgba(179, 102, 255, 0.55);
+  --ed-danger: #f87171;
+  --ed-font-display: "Space Grotesk", ui-sans-serif, sans-serif;
+  --ed-font-body: "Inter", ui-sans-serif, sans-serif;
+  background: var(--ed-canvas);
+  color: var(--ed-ink);
+}
