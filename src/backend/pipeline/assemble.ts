@@ -161,10 +161,14 @@ export const assemble = (
     const tlOutSec = cursor + blockDurationSec;
 
     video.push({
+      // 1:1 with the block at generation time; ids diverge from blockId
+      // once the timeline editor splits a clip into two.
+      id: block.id,
       blockId: block.id,
       src: stage(clip),
       srcInSec: trim.srcInSec,
       srcOutSec: trim.srcOutSec,
+      srcDurationSec: clip.durationSec,
       tlInSec,
       tlOutSec,
       // B-roll plays under the music/voice; its own audio is muted.
@@ -231,7 +235,7 @@ export const assemble = (
           group.words.length >= CAPTION_WORDS_PER_GROUP ||
           tlStartSec - lastEnd > CAPTION_GAP_SEC;
         if (startNew) {
-          group = { words: [], tlInSec: tlStartSec, tlOutSec: tlEndSec };
+          group = { id: `caption-${captions.length}`, words: [], tlInSec: tlStartSec, tlOutSec: tlEndSec };
           captions.push(group);
         }
         group!.words.push({ text: w.text, tlStartSec, tlEndSec });
@@ -251,7 +255,7 @@ export const assemble = (
           ? transitionRef.params.durationSec
           : DEFAULT_TRANSITION_SEC;
       transitions.push({
-        afterBlockId: block.id,
+        afterClipId: block.id,
         component: transitionRef.component,
         params: transitionRef.params,
         atSec: tlOutSec,

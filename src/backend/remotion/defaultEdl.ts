@@ -14,6 +14,7 @@ export const defaultEdl: Edl = {
   durationSec: 2,
   video: [
     {
+      id: "placeholder",
       blockId: "placeholder",
       src: "clips/hook.mp4",
       srcInSec: 0,

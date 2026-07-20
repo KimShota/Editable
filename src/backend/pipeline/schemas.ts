@@ -409,11 +409,18 @@ export const ResolvedRolesSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const EdlVideoSegmentSchema = z.object({
+  /** Stable clip id — the timeline editor's addressing handle. Distinct
+   *  segments may share a blockId (after a split), so id is the only
+   *  field that's guaranteed unique. */
+  id: z.string(),
   blockId: z.string(),
   /** public/-relative path (usable with Remotion staticFile). */
   src: z.string(),
   srcInSec: z.number().min(0),
   srcOutSec: z.number().positive(),
+  /** Full duration of the source file, when known — lets a trim edge be
+   *  dragged back out to reveal more of the original footage. */
+  srcDurationSec: z.number().positive().optional(),
   tlInSec: z.number().min(0),
   tlOutSec: z.number().positive(),
   muted: z.boolean().default(false),
@@ -444,14 +451,15 @@ export const EdlCaptionWordSchema = z.object({
 });
 
 export const EdlCaptionGroupSchema = z.object({
+  id: z.string(),
   words: z.array(EdlCaptionWordSchema).min(1),
   tlInSec: z.number().min(0),
   tlOutSec: z.number().positive(),
 });
 
 export const EdlTransitionSchema = z.object({
-  /** Block id this transition follows (it plays at that block's cut). */
-  afterBlockId: z.string(),
+  /** Video clip id this transition follows (it plays at that clip's cut). */
+  afterClipId: z.string(),
   component: z.string(),
   params: z.record(z.string(), z.unknown()).default({}),
   /** Absolute time of the cut. */
@@ -473,7 +481,15 @@ export const EdlSchema = z.object({
   captionStyle: ComponentRefSchema.optional(),
   transitions: z.array(EdlTransitionSchema).default([]),
   music: z
-    .object({ src: z.string(), volume: z.number().min(0).max(1).default(0.5) })
+    .object({
+      src: z.string(),
+      volume: z.number().min(0).max(1).default(0.5),
+      /** Where the music bed starts on the timeline — movable/trimmable
+       *  like any other clip, independent of the source audio file. */
+      tlInSec: z.number().min(0).default(0),
+      /** Omitted = plays to the end of the timeline. */
+      durationSec: z.number().positive().optional(),
+    })
     .optional(),
   /**
    * Staging map: public/-relative src → absolute source path. The render

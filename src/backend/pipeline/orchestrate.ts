@@ -10,6 +10,7 @@ import { assemble } from "./assemble";
 import { render, stageAssets } from "./render";
 import { artifactsDir } from "./paths";
 import { Edl } from "./types";
+import { EdlSchema } from "./schemas";
 
 /**
  * Programmatic entry points for the same six-stage pipeline `run.ts` drives
@@ -83,4 +84,19 @@ export const renderJob = (jobId: string): string => {
   const dir = artifactsDir(jobId);
   const edl: Edl = JSON.parse(fs.readFileSync(path.join(dir, "edl.json"), "utf8"));
   return render(edl, dir);
+};
+
+/**
+ * Reads a job's edl.json as the timeline editor's source of truth. If it
+ * predates a schema change (e.g. was written before clip ids existed), one
+ * reassemble backfills the new fields from scratch — a one-time migration,
+ * since reassemble only re-derives from the format/trims/roles, never from
+ * hand-made timeline edits.
+ */
+export const readOrMigrateEdl = (jobDir: string, jobId: string): Edl => {
+  const edlPath = path.join(artifactsDir(jobId), "edl.json");
+  const raw = JSON.parse(fs.readFileSync(edlPath, "utf8"));
+  const parsed = EdlSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  return reassembleJob(jobDir, jobId);
 };

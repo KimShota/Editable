@@ -89,24 +89,24 @@ export const EdlVideo: React.FC<{ edl: Edl }> = ({ edl }) => {
   const { fps } = useVideoConfig();
   const toFrames = (sec: number) => Math.round(sec * fps);
 
-  // A transition after block N plays on the segment that follows it.
+  // A transition after clip N plays on the segment that follows it.
   const incomingTransitions = new Map<string, EdlTransition>();
   for (const t of edl.transitions) {
-    const i = edl.video.findIndex((v) => v.blockId === t.afterBlockId);
+    const i = edl.video.findIndex((v) => v.id === t.afterClipId);
     const next = edl.video[i + 1];
-    if (next) incomingTransitions.set(next.blockId, t);
+    if (next) incomingTransitions.set(next.id, t);
   }
 
   return (
     <AbsoluteFill style={{ backgroundColor: "black" }}>
       {edl.video.map((seg) => (
         <Sequence
-          key={seg.blockId}
+          key={seg.id}
           from={toFrames(seg.tlInSec)}
           durationInFrames={toFrames(seg.tlOutSec) - toFrames(seg.tlInSec)}
-          name={`video:${seg.blockId}`}
+          name={`video:${seg.id}`}
         >
-          <Segment seg={seg} transition={incomingTransitions.get(seg.blockId)} />
+          <Segment seg={seg} transition={incomingTransitions.get(seg.id)} />
         </Sequence>
       ))}
 
@@ -151,7 +151,17 @@ export const EdlVideo: React.FC<{ edl: Edl }> = ({ edl }) => {
       ))}
 
       {edl.music && (
-        <Audio src={staticFile(edl.music.src)} volume={() => edl.music!.volume} />
+        <Sequence
+          from={toFrames(edl.music.tlInSec)}
+          durationInFrames={
+            edl.music.durationSec !== undefined
+              ? Math.max(1, toFrames(edl.music.tlInSec + edl.music.durationSec) - toFrames(edl.music.tlInSec))
+              : undefined
+          }
+          name="music"
+        >
+          <Audio src={staticFile(edl.music.src)} volume={() => edl.music!.volume} />
+        </Sequence>
       )}
     </AbsoluteFill>
   );
