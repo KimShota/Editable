@@ -64,6 +64,10 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
   /** Reposition a clip in the video track's sequence (drag past a
    *  neighbor); the track re-flows contiguously afterward. */
   z.object({ type: z.literal("reorder"), id: z.string(), toIndex: z.number().int().min(0) }),
+  /** Reassign a transition to a different cut — dragging its marker onto
+   *  another clip boundary. If that boundary already has a transition, the
+   *  two swap places rather than one clobbering the other. */
+  z.object({ type: z.literal("moveTransition"), fromId: z.string(), toId: z.string() }),
   /** Cut a clip into two at an absolute timeline second. */
   z.object({
     type: z.literal("split"),
@@ -215,6 +219,27 @@ const applyReorder = (edl: Edl, op: Extract<TimelineOp, { type: "reorder" }>): v
   const to = clamp(op.toIndex, 0, edl.video.length);
   edl.video.splice(to, 0, seg);
   recomputeVideoTrack(edl);
+};
+
+const applyMoveTransition = (edl: Edl, op: Extract<TimelineOp, { type: "moveTransition" }>): void => {
+  if (op.fromId === op.toId) return;
+  const from = edl.transitions.find((t) => t.afterClipId === op.fromId);
+  if (!from) throw new Error(`timeline op: no transition after clip "${op.fromId}"`);
+  const toIndex = findIndexOrThrow(edl.video, op.toId, "video clip");
+  // The last clip has no "next" clip to blend into, so it can't host a
+  // transition.
+  if (toIndex === edl.video.length - 1) {
+    throw new Error("timeline op: cannot move a transition after the last clip");
+  }
+  const toClip = edl.video[toIndex];
+  const collision = edl.transitions.find((t) => t.afterClipId === op.toId);
+  if (collision) {
+    const fromClip = edl.video[findIndexOrThrow(edl.video, op.fromId, "video clip")];
+    collision.afterClipId = op.fromId;
+    collision.atSec = fromClip.tlOutSec;
+  }
+  from.afterClipId = op.toId;
+  from.atSec = toClip.tlOutSec;
 };
 
 const applySplit = (edl: Edl, op: Extract<TimelineOp, { type: "split" }>): void => {
@@ -396,6 +421,9 @@ export const applyOp = (edl: Edl, opInput: unknown): Edl => {
       break;
     case "reorder":
       applyReorder(next, op);
+      break;
+    case "moveTransition":
+      applyMoveTransition(next, op);
       break;
     case "split":
       applySplit(next, op);

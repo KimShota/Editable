@@ -274,8 +274,8 @@ export function Inspector({
             />
           </Field>
           <p className="text-xs text-[color:var(--ed-ink-dim)]">
-            Position isn&apos;t draggable — a transition always sits exactly at the cut between two clips, so it
-            moves automatically when you trim or reorder the clip next to it.
+            Drag the transition on the timeline to snap it onto a different cut, or drag its right edge to
+            change how long it plays. It also moves automatically when you trim or reorder the clip next to it.
           </p>
         </div>
       </div>

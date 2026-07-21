@@ -21,6 +21,7 @@ export function TimelineClip({
   colorClass,
   selected,
   locked = false,
+  trimEdges = ["in", "out"],
   pxPerSec,
   onSelect,
   onCommitMove,
@@ -33,6 +34,10 @@ export function TimelineClip({
   colorClass: string;
   selected: boolean;
   locked?: boolean;
+  /** Which edges show a resize handle, when onCommitTrim is given — a
+   *  transition's leading edge is pinned to the cut it follows, so only
+   *  its trailing edge (duration) is ever draggable. */
+  trimEdges?: ("in" | "out")[];
   pxPerSec: number;
   onSelect: () => void;
   onCommitMove?: (deltaSec: number) => void;
@@ -46,6 +51,9 @@ export function TimelineClip({
     if (locked) return;
     e.stopPropagation();
     onSelect();
+    // Move needs onCommitMove; a trim edge needs both onCommitTrim and to be
+    // in trimEdges — otherwise this is a plain select-only click.
+    if (kind === "move" ? !onCommitMove : !onCommitTrim || !trimEdges.includes(kind)) return;
     (e.target as Element).setPointerCapture(e.pointerId);
     drag.current = { startX: e.clientX, kind };
     if (kind !== "move") setTrimEdge(kind);
@@ -87,30 +95,32 @@ export function TimelineClip({
         width: Math.max(previewWidth, 4),
         transform: `translateX(${translateX}px)`,
       }}
-      className={`group absolute top-1 bottom-1 flex cursor-grab flex-col justify-center overflow-hidden rounded-lg border px-2 text-left transition-shadow duration-150 active:cursor-grabbing ${colorClass} ${
+      className={`group absolute top-1 bottom-1 flex flex-col justify-center overflow-hidden rounded-lg border px-2 text-left transition-shadow duration-150 ${
+        onCommitMove ? "cursor-grab active:cursor-grabbing" : "cursor-default"
+      } ${colorClass} ${
         selected
           ? "z-10 border-[color:var(--ed-accent)] shadow-[0_0_0_3px_var(--ed-accent-dim)]"
           : "border-black/20"
-      } ${locked ? "cursor-default opacity-80" : ""}`}
+      } ${locked ? "opacity-80" : ""}`}
     >
       <p className="truncate text-[11px] leading-tight font-medium text-white">{label}</p>
       {sublabel && <p className="truncate text-[10px] leading-tight text-white/70">{sublabel}</p>}
 
-      {!locked && onCommitTrim && (
-        <>
-          <div
-            onPointerDown={(e) => beginDrag(e, "in")}
-            onPointerMove={onPointerMove}
-            onPointerUp={endDrag}
-            className="absolute top-0 bottom-0 left-0 w-2 cursor-ew-resize bg-white/0 group-hover:bg-white/25"
-          />
-          <div
-            onPointerDown={(e) => beginDrag(e, "out")}
-            onPointerMove={onPointerMove}
-            onPointerUp={endDrag}
-            className="absolute top-0 right-0 bottom-0 w-2 cursor-ew-resize bg-white/0 group-hover:bg-white/25"
-          />
-        </>
+      {!locked && onCommitTrim && trimEdges.includes("in") && (
+        <div
+          onPointerDown={(e) => beginDrag(e, "in")}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          className="absolute top-0 bottom-0 left-0 w-2 cursor-ew-resize bg-white/0 group-hover:bg-white/25"
+        />
+      )}
+      {!locked && onCommitTrim && trimEdges.includes("out") && (
+        <div
+          onPointerDown={(e) => beginDrag(e, "out")}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          className="absolute top-0 right-0 bottom-0 w-2 cursor-ew-resize bg-white/0 group-hover:bg-white/25"
+        />
       )}
     </div>
   );

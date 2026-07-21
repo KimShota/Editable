@@ -209,6 +209,42 @@ export function Timeline({
     onOp({ type: "trimEdge", track: "video", id: clipId, edge, tlSec });
   };
 
+  // A transition can only ever sit at "the cut after some clip" — there's
+  // no such thing as a transition floating between cuts. So dragging one
+  // snaps to whichever clip boundary (excluding the last clip, which has
+  // no next clip to blend into) ends up closest to the drop point.
+  const commitTransitionMove = (afterClipId: string, deltaSec: number) => {
+    const t = edl.transitions.find((tr) => tr.afterClipId === afterClipId);
+    if (!t) return;
+    const targetSec = t.atSec + deltaSec;
+    let bestId = afterClipId;
+    let bestDist = Infinity;
+    for (let i = 0; i < edl.video.length - 1; i++) {
+      const dist = Math.abs(edl.video[i].tlOutSec - targetSec);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestId = edl.video[i].id;
+      }
+    }
+    if (bestId !== afterClipId) onOp({ type: "moveTransition", fromId: afterClipId, toId: bestId });
+  };
+
+  // The transition's leading edge is pinned to the cut it follows (atSec is
+  // recomputed from the preceding clip's tlOutSec after every video-track
+  // edit — see timelineOps.ts), so only its trailing edge is draggable:
+  // that's the transition's duration, how far it plays into the next clip.
+  const commitTransitionTrim = (afterClipId: string, edge: "in" | "out", deltaSec: number) => {
+    if (edge === "in") return;
+    const t = edl.transitions.find((tr) => tr.afterClipId === afterClipId);
+    if (!t) return;
+    onOp({
+      type: "setProp",
+      track: "transition",
+      id: afterClipId,
+      patch: { durationSec: Math.max(t.durationSec + deltaSec, 0.05) },
+    });
+  };
+
   const commitFloatMove = (track: "overlay" | "sfx" | "captions", clipId: string, deltaSec: number) => {
     const clips = track === "overlay" ? edl.overlays : track === "sfx" ? edl.sfx : edl.captions;
     const clip = clips.find((c) => c.id === clipId);
@@ -303,6 +339,7 @@ export function Timeline({
     },
     track: SelectionTrack,
     locked = false,
+    trimEdges: ("in" | "out")[] = ["in", "out"],
   ) => (
     <div className="relative flex h-14 border-b border-[color:var(--ed-border)]">
       <div className="sticky left-0 z-20 flex w-24 shrink-0 items-center gap-2 bg-[color:var(--ed-panel)] px-3 text-[11px] text-[color:var(--ed-ink-dim)]">
@@ -320,6 +357,7 @@ export function Timeline({
             colorClass={colorClass}
             selected={selection?.track === track && selection.id === c.id}
             locked={locked}
+            trimEdges={trimEdges}
             pxPerSec={pxPerSec}
             onSelect={() => onSelect({ track, id: c.id })}
             onCommitMove={handlers.move ? (d) => handlers.move!(c.id, d) : undefined}
@@ -414,7 +452,18 @@ export function Timeline({
 
           {trackRow("Video", videoClips, TRACK_COLOR.video, { move: commitVideoMove, trim: commitVideoTrim }, "video")}
           {transitionClips.length > 0 &&
-            trackRow("Transitions", transitionClips, TRACK_COLOR.transition, {}, "transition", true)}
+            trackRow(
+              "Transitions",
+              transitionClips,
+              TRACK_COLOR.transition,
+              {
+                move: (id, d) => commitTransitionMove(id, d),
+                trim: (id, edge, d) => commitTransitionTrim(id, edge, d),
+              },
+              "transition",
+              false,
+              ["out"],
+            )}
           {trackRow(
             "Text",
             overlayClips,
