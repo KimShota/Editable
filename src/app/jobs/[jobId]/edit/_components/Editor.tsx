@@ -20,13 +20,19 @@ import {
   FrameForwardIcon,
   PauseIcon,
   PlayIcon,
+  RedoIcon,
   SkipEndIcon,
   SkipStartIcon,
+  UndoIcon,
 } from "./Icons";
 
 const LAYOUT_KEY = "editable-editor-layout";
 type Layout = { mediaPanelWidth: number; inspectorWidth: number; timelineHeight: number };
 const DEFAULT_LAYOUT: Layout = { mediaPanelWidth: 260, inspectorWidth: 320, timelineHeight: 260 };
+/** How many steps back undo can go — each entry is one small EDL
+ *  snapshot (a few KB of JSON), so this is generous without being
+ *  memory-relevant for a single editing session. */
+const MAX_HISTORY = 50;
 
 const loadLayout = (): Layout => {
   if (typeof window === "undefined") return DEFAULT_LAYOUT;
@@ -86,6 +92,8 @@ export function Editor({
   const [exportOpen, setExportOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [layout, setLayout] = useState<Layout>(loadLayout);
+  const [undoStack, setUndoStack] = useState<Edl[]>([]);
+  const [redoStack, setRedoStack] = useState<Edl[]>([]);
 
   const playerRef = useRef<PlayerRef>(null);
   const totalFrames = Math.max(1, Math.round(edl.durationSec * edl.fps));
@@ -138,8 +146,11 @@ export function Editor({
     [totalFrames],
   );
 
-  const submitOp = useCallback(
-    async (op: TimelineOp) => {
+  // Every op — including undo/redo's own "restore" — goes through this;
+  // it never touches the undo/redo stacks itself, so restoring a snapshot
+  // can't pollute its own history.
+  const sendOpToServer = useCallback(
+    async (op: TimelineOp): Promise<Edl | null> => {
       setPending(true);
       setError(null);
       try {
@@ -150,9 +161,10 @@ export function Editor({
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "edit failed");
-        setEdl(data.edl as Edl);
+        return data.edl as Edl;
       } catch (err) {
         setError((err as Error).message);
+        return null;
       } finally {
         setPending(false);
       }
@@ -160,13 +172,65 @@ export function Editor({
     [jobId],
   );
 
+  // Regular edits: push the pre-op document onto undo history and clear
+  // redo (a fresh edit invalidates whatever "future" existed).
+  const submitOp = useCallback(
+    async (op: TimelineOp) => {
+      const previous = edl;
+      const next = await sendOpToServer(op);
+      if (!next) return;
+      setUndoStack((s) => [...s.slice(-(MAX_HISTORY - 1)), previous]);
+      setRedoStack([]);
+      setEdl(next);
+    },
+    [edl, sendOpToServer],
+  );
+
+  const undo = useCallback(async () => {
+    if (undoStack.length === 0 || pending) return;
+    const target = undoStack[undoStack.length - 1];
+    const restored = await sendOpToServer({ type: "restore", edl: target });
+    if (!restored) return;
+    setUndoStack((s) => s.slice(0, -1));
+    setRedoStack((s) => [...s.slice(-(MAX_HISTORY - 1)), edl]);
+    setEdl(restored);
+    setSelection(null);
+  }, [undoStack, edl, pending, sendOpToServer]);
+
+  const redo = useCallback(async () => {
+    if (redoStack.length === 0 || pending) return;
+    const target = redoStack[redoStack.length - 1];
+    const restored = await sendOpToServer({ type: "restore", edl: target });
+    if (!restored) return;
+    setRedoStack((s) => s.slice(0, -1));
+    setUndoStack((s) => [...s.slice(-(MAX_HISTORY - 1)), edl]);
+    setEdl(restored);
+    setSelection(null);
+  }, [redoStack, edl, pending, sendOpToServer]);
+
   // Delete/Backspace deletes the selected clip; Space toggles play/pause;
-  // arrow keys step one frame. All ignored while typing in a text field
-  // (the overlay text editor).
+  // arrow keys step one frame; Cmd/Ctrl+Z undoes, Shift adds redo (Ctrl+Y
+  // also redoes, the Windows convention). All ignored while typing in a
+  // text field (the overlay text editor).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+
+      if (mod && key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (mod && key === "y") {
+        e.preventDefault();
+        redo();
+        return;
+      }
 
       if ((e.key === "Delete" || e.key === "Backspace") && selection) {
         if (selection.track === "video" || selection.track === "overlay" || selection.track === "sfx") {
@@ -189,7 +253,7 @@ export function Editor({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selection, submitOp, stepFrame]);
+  }, [selection, submitOp, stepFrame, undo, redo]);
 
   const jumpTo = (sel: Selection, tlInSec: number) => {
     setSelection(sel);
@@ -213,6 +277,25 @@ export function Editor({
               {formatName}
             </p>
             <p className="font-mono text-[10px] tracking-wide text-[color:var(--ed-ink-faint)]">{jobId}</p>
+          </div>
+          <div className="h-5 w-px bg-[color:var(--ed-border-strong)]" />
+          <div className="flex items-center gap-1">
+            <button
+              onClick={undo}
+              disabled={undoStack.length === 0 || pending}
+              title="Undo (⌘Z)"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--ed-ink-dim)] transition-colors hover:bg-[color:var(--ed-raised)] hover:text-[color:var(--ed-ink)] disabled:pointer-events-none disabled:opacity-30"
+            >
+              <UndoIcon className="h-4 w-4" />
+            </button>
+            <button
+              onClick={redo}
+              disabled={redoStack.length === 0 || pending}
+              title="Redo (⌘⇧Z)"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--ed-ink-dim)] transition-colors hover:bg-[color:var(--ed-raised)] hover:text-[color:var(--ed-ink)] disabled:pointer-events-none disabled:opacity-30"
+            >
+              <RedoIcon className="h-4 w-4" />
+            </button>
           </div>
         </div>
 

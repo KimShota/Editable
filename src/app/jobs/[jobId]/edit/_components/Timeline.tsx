@@ -184,7 +184,11 @@ export function Timeline({
     const el = scrollRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const x = clientX - rect.left + el.scrollLeft;
+    // Ticks/clips/playhead are all positioned at time*pxPerSec +
+    // TRACK_LABEL_WIDTH (seconds=0 starts after the label gutter, not at
+    // the container's edge) — this has to subtract the same offset or the
+    // playhead lands a constant TRACK_LABEL_WIDTH px ahead of the cursor.
+    const x = clientX - rect.left + el.scrollLeft - TRACK_LABEL_WIDTH;
     onSeek(Math.max(0, x / pxPerSec));
   };
 

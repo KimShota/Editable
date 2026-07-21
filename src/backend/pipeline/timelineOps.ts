@@ -83,6 +83,11 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
     id: z.string().optional(),
     patch: z.record(z.string(), z.unknown()),
   }),
+  /** Undo/redo: replaces the whole document with a snapshot the client
+   *  already had (a previous server response). Still fully re-validated
+   *  below — a client can't use this to write an arbitrary/malformed
+   *  document, only one that was itself once a valid EDL. */
+  z.object({ type: z.literal("restore"), edl: z.unknown() }),
 ]);
 export type TimelineOp = z.infer<typeof TimelineOpSchema>;
 
@@ -376,6 +381,10 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
  *  that into a 400 rather than persisting a broken document. */
 export const applyOp = (edl: Edl, opInput: unknown): Edl => {
   const op = TimelineOpSchema.parse(opInput);
+
+  // Restore ignores the current document entirely — it replaces it.
+  if (op.type === "restore") return EdlSchema.parse(op.edl);
+
   const next = clone(edl);
 
   switch (op.type) {

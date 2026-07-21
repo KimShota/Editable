@@ -110,6 +110,20 @@ export const MusicNoteIcon = ({ className }: IconProps) => (
   </svg>
 );
 
+export const UndoIcon = ({ className }: IconProps) => (
+  <svg viewBox="0 0 24 24" fill={base} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M8 15 3 10 8 5" />
+    <path d="M3 10h9a6 6 0 0 1 6 6v1" />
+  </svg>
+);
+
+export const RedoIcon = ({ className }: IconProps) => (
+  <svg viewBox="0 0 24 24" fill={base} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M16 15 21 10 16 5" />
+    <path d="M21 10h-9a6 6 0 0 0-6 6v1" />
+  </svg>
+);
+
 export const ArrowLeftIcon = ({ className }: IconProps) => (
   <svg viewBox="0 0 24 24" fill={base} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M19 12H5M11 6l-6 6 6 6" />
