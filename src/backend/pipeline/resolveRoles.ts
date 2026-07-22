@@ -7,7 +7,7 @@ import {
   TrimPoints,
   Word,
 } from "./types";
-import { anchoredTimeSec, clamp, toTrimmedWords } from "./timing";
+import { anchoredTimeSec, clamp, concatenateTakes } from "./timing";
 import { matchLiteralAnchor } from "./literal";
 import { pickResolver, ResolverChoice } from "./resolvers";
 import { RoleResolution, SemanticQuery } from "./resolvers/protocol";
@@ -70,10 +70,9 @@ export const resolveRoles = async (
 
     const trim = trims.blocks.find((b) => b.blockId === block.id);
     if (!trim) throw new Error(`resolveRoles: no trim points for block "${block.id}"`);
-    const blockDurationSec = trim.srcOutSec - trim.srcInSec;
 
-    const rawWords = transcript.blocks.find((b) => b.blockId === block.id)?.words ?? [];
-    const words = toTrimmedWords(rawWords, trim.srcInSec, blockDurationSec);
+    const rawTakes = transcript.blocks.find((b) => b.blockId === block.id)?.takes ?? [[]];
+    const { words, blockDurationSec } = concatenateTakes(rawTakes, trim.takes);
 
     // Pass 1 — literal anchors. Their spans scaffold the semantic windows;
     // a missed match contributes its fallback so windows stay computable.

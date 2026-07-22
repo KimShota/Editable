@@ -74,6 +74,7 @@ export function ResourcesBoard({
                   slot={slot}
                   binding={bindings[slot.name]}
                   onChange={setBinding}
+                  multi={block.kind === "voice" && slot.name === block.videoSlot}
                 />
               ))}
             </div>

@@ -1,4 +1,4 @@
-import { LiteralAnchor, Word } from "./types";
+import { Block, LiteralAnchor, Word } from "./types";
 
 /**
  * Literal anchor matching — no LLM.
@@ -134,4 +134,40 @@ export const matchLiteralAnchor = (
       ? captured.map((w) => cleanCaptured(w.text)).filter((t) => t.length > 0).join(" ")
       : undefined,
   };
+};
+
+/**
+ * Decides playback order for a voice block's takes when the user films the
+ * marker line ("First is …") and the body of the explanation as separate
+ * clips instead of one continuous take. No LLM: the block's first literal
+ * anchor is its opening marker by convention, so whichever take matches it
+ * best is moved to the front; every other take keeps its relative upload
+ * order (the order the user filmed/dropped them in — the honest default
+ * when there's nothing else to go on).
+ *
+ * Returns a permutation of upload indices (0..rawTakes.length-1) in
+ * playback order. A single take, or a block with no literal anchor to
+ * match against, returns upload order unchanged.
+ */
+export const orderTakes = (block: Block, rawTakes: Word[][]): number[] => {
+  const uploadOrder = rawTakes.map((_, i) => i);
+  if (rawTakes.length <= 1) return uploadOrder;
+
+  const marker = [...block.roles, ...block.anchors].find(
+    (a): a is LiteralAnchor => a.kind === "literal",
+  );
+  if (!marker) return uploadOrder;
+
+  let markerTakeIdx = -1;
+  let bestConfidence = 0;
+  rawTakes.forEach((words, i) => {
+    const match = words.length > 0 ? matchLiteralAnchor(marker, words) : null;
+    if (match && match.confidence > bestConfidence) {
+      bestConfidence = match.confidence;
+      markerTakeIdx = i;
+    }
+  });
+
+  if (markerTakeIdx <= 0) return uploadOrder; // not found, or already first
+  return [markerTakeIdx, ...uploadOrder.filter((i) => i !== markerTakeIdx)];
 };

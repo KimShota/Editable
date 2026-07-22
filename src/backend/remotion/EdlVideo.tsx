@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   AbsoluteFill,
   Audio,
@@ -67,15 +67,24 @@ const IncomingTransition: React.FC<{
   return <>{children}</>;
 };
 
-const Segment: React.FC<{ seg: EdlVideoSegment; transition?: EdlTransition }> = ({
-  seg,
-  transition,
-}) => {
+/** Editor-only: a source clip served through the transcoded preview proxy
+ *  instead of the (often 4K) original — see previewMedia.ts. Export never
+ *  sets `previewMode`, so `render.ts` always gets the real source. */
+const previewProxySrc = (jobId: string, src: string): string =>
+  `/api/jobs/${jobId}/preview-proxy?src=${encodeURIComponent(src)}`;
+
+const Segment: React.FC<{
+  seg: EdlVideoSegment;
+  transition?: EdlTransition;
+  jobId: string;
+  previewMode?: boolean;
+}> = ({ seg, transition, jobId, previewMode }) => {
   const { fps } = useVideoConfig();
+  const src = previewMode ? previewProxySrc(jobId, seg.src) : staticFile(seg.src);
   return (
     <IncomingTransition transition={transition}>
       <OffthreadVideo
-        src={staticFile(seg.src)}
+        src={src}
         muted={seg.muted}
         startFrom={Math.round(seg.srcInSec * fps)}
         endAt={Math.round(seg.srcOutSec * fps)}
@@ -85,17 +94,20 @@ const Segment: React.FC<{ seg: EdlVideoSegment; transition?: EdlTransition }> = 
   );
 };
 
-export const EdlVideo: React.FC<{ edl: Edl }> = ({ edl }) => {
+export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, previewMode }) => {
   const { fps } = useVideoConfig();
   const toFrames = (sec: number) => Math.round(sec * fps);
 
   // A transition after clip N plays on the segment that follows it.
-  const incomingTransitions = new Map<string, EdlTransition>();
-  for (const t of edl.transitions) {
-    const i = edl.video.findIndex((v) => v.id === t.afterClipId);
-    const next = edl.video[i + 1];
-    if (next) incomingTransitions.set(next.id, t);
-  }
+  const incomingTransitions = useMemo(() => {
+    const map = new Map<string, EdlTransition>();
+    for (const t of edl.transitions) {
+      const i = edl.video.findIndex((v) => v.id === t.afterClipId);
+      const next = edl.video[i + 1];
+      if (next) map.set(next.id, t);
+    }
+    return map;
+  }, [edl.transitions, edl.video]);
 
   return (
     <AbsoluteFill style={{ backgroundColor: "black" }}>
@@ -105,8 +117,9 @@ export const EdlVideo: React.FC<{ edl: Edl }> = ({ edl }) => {
           from={toFrames(seg.tlInSec)}
           durationInFrames={toFrames(seg.tlOutSec) - toFrames(seg.tlInSec)}
           name={`video:${seg.id}`}
+          premountFor={previewMode ? Math.round(fps * 0.75) : 0}
         >
-          <Segment seg={seg} transition={incomingTransitions.get(seg.id)} />
+          <Segment seg={seg} transition={incomingTransitions.get(seg.id)} jobId={edl.jobId} previewMode={previewMode} />
         </Sequence>
       ))}
 

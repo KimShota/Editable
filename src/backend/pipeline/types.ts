@@ -7,6 +7,7 @@ import {
   BlockTranscriptSchema,
   BlockTrimSchema,
   BoundAssetSchema,
+  BoundFileSchema,
   ComponentRefSchema,
   EdlCaptionGroupSchema,
   EdlCaptionWordSchema,
@@ -26,6 +27,7 @@ import {
   ResolvedRolesSchema,
   SemanticAnchorSchema,
   SlotSchema,
+  TakeTrimSchema,
   TranscriptSchema,
   TrimPointsSchema,
   WordSchema,
@@ -51,6 +53,7 @@ export type Format = z.infer<typeof FormatSchema>;
 
 export type JobManifest = z.infer<typeof JobManifestSchema>;
 export type Overrides = z.infer<typeof OverridesSchema>;
+export type BoundFile = z.infer<typeof BoundFileSchema>;
 export type BoundAsset = z.infer<typeof BoundAssetSchema>;
 export type FilledFormat = z.infer<typeof FilledFormatSchema>;
 
@@ -58,6 +61,7 @@ export type Word = z.infer<typeof WordSchema>;
 export type BlockTranscript = z.infer<typeof BlockTranscriptSchema>;
 export type Transcript = z.infer<typeof TranscriptSchema>;
 
+export type TakeTrim = z.infer<typeof TakeTrimSchema>;
 export type BlockTrim = z.infer<typeof BlockTrimSchema>;
 export type TrimPoints = z.infer<typeof TrimPointsSchema>;
 

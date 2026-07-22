@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { Edl } from "@backend/pipeline/types";
 import { Selection, MUSIC_ID } from "./selection";
 import { MusicNoteIcon, VolumeIcon } from "./Icons";
@@ -19,8 +19,11 @@ const cardClass =
 
 /** Read-only reflection of the job's own bound assets — not a stock
  *  library. Clicking an item jumps the timeline/player to it. Dragging new
- *  media onto the timeline isn't wired up yet (see README follow-ups). */
-export function MediaPanel({
+ *  media onto the timeline isn't wired up yet (see README follow-ups).
+ *
+ *  Memoized: doesn't depend on playhead position, so it shouldn't re-render
+ *  on every one of the editor's ~30/sec frame updates. */
+export const MediaPanel = memo(function MediaPanel({
   edl,
   onJumpTo,
 }: {
@@ -46,10 +49,16 @@ export function MediaPanel({
       <div className="flex-1 overflow-y-auto p-3">
         {tab === "media" && (
           <div className="grid grid-cols-2 gap-2">
-            {edl.video.map((v) => (
+            {edl.video.map((v) => {
+              const posterAtSec = v.srcInSec + (v.srcOutSec - v.srcInSec) / 2;
+              const thumbSrc = `/api/jobs/${edl.jobId}/preview-thumbnail?src=${encodeURIComponent(v.src)}&t=${posterAtSec}`;
+              return (
               <button key={v.id} onClick={() => onJumpTo({ track: "video", id: v.id }, v.tlInSec)} className={cardClass}>
                 <div className="aspect-9/16 overflow-hidden rounded-t-lg bg-black/40">
-                  <video src={`/${v.src}`} muted preload="metadata" className="h-full w-full object-cover" />
+                  {/* A static poster frame, not a live <video> — 16+ of
+                      those mounted at once competed with the Player for
+                      decoders and were a chunk of the editor's jank. */}
+                  <img src={thumbSrc} alt="" loading="lazy" className="h-full w-full object-cover" />
                 </div>
                 <div className="p-1.5">
                   <p className="truncate text-[11px] text-[color:var(--ed-ink)]">{v.blockId}</p>
@@ -58,7 +67,8 @@ export function MediaPanel({
                   </p>
                 </div>
               </button>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -121,4 +131,4 @@ export function MediaPanel({
       </div>
     </div>
   );
-}
+});

@@ -288,9 +288,15 @@ export const FormatSchema = z
 // Job manifest + FilledFormat — intake and slot binding
 // ---------------------------------------------------------------------------
 
-/** How the user fills a slot in job.json: a file path (job-dir-relative) or text. */
+/**
+ * How the user fills a slot in job.json: a file path (job-dir-relative),
+ * MULTIPLE file paths (a voice block's main clip only — see intake.ts —
+ * filmed as separate takes and auto-ordered/concatenated downstream), or
+ * text.
+ */
 export const SlotFillSchema = z.union([
   z.object({ file: z.string() }),
+  z.object({ files: z.array(z.string()).min(1) }),
   z.object({ text: z.string() }),
 ]);
 
@@ -319,20 +325,27 @@ export const JobManifestSchema = z.object({
   overrides: OverridesSchema.optional(),
 });
 
+/** One probed file — shared shape between a single-file binding and each
+ *  entry of a multi-take binding. */
+export const BoundFileSchema = z.object({
+  /** Path exactly as written in job.json (for readable artifacts). */
+  path: z.string(),
+  /** Resolved absolute path used by later stages. */
+  absPath: z.string(),
+  mediaType: z.enum(["video", "image", "audio"]),
+  durationSec: z.number().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  hasAudio: z.boolean().optional(),
+});
+
 /** A slot binding after validation, with probed media metadata attached. */
 export const BoundAssetSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("file"),
-    /** Path exactly as written in job.json (for readable artifacts). */
-    path: z.string(),
-    /** Resolved absolute path used by later stages. */
-    absPath: z.string(),
-    mediaType: z.enum(["video", "image", "audio"]),
-    durationSec: z.number().optional(),
-    width: z.number().optional(),
-    height: z.number().optional(),
-    hasAudio: z.boolean().optional(),
-  }),
+  z.object({ type: z.literal("file") }).extend(BoundFileSchema.shape),
+  /** Multiple takes for one slot — see intake.ts for where this is allowed
+   *  (a voice block's main clip only). Order here is UPLOAD order; the
+   *  transcribe stage decides playback order. */
+  z.object({ type: z.literal("files"), files: z.array(BoundFileSchema).min(1) }),
   z.object({ type: z.literal("text"), text: z.string() }),
 ]);
 
@@ -356,7 +369,13 @@ export const WordSchema = z.object({
 
 export const BlockTranscriptSchema = z.object({
   blockId: z.string(),
-  words: z.array(WordSchema),
+  /** takeOrder[i] = the original upload index now playing at position i
+   *  ([0] for an ordinary single-clip block). Decided once, here, since
+   *  this is the earliest stage with each take's own words to order by. */
+  takeOrder: z.array(z.number().int().min(0)).min(1),
+  /** Raw (per-take-file) word timestamps, one array per take, already
+   *  reordered to playback position (parallel to takeOrder). */
+  takes: z.array(z.array(WordSchema)).min(1),
 });
 
 export const TranscriptSchema = z.object({
@@ -367,10 +386,18 @@ export const TranscriptSchema = z.object({
 // TrimPoints — dead air removed (RAW clip time)
 // ---------------------------------------------------------------------------
 
-export const BlockTrimSchema = z.object({
-  blockId: z.string(),
+/** One take's trimmed span, in that take's own raw-clip seconds. */
+export const TakeTrimSchema = z.object({
   srcInSec: z.number().min(0),
   srcOutSec: z.number().positive(),
+});
+
+export const BlockTrimSchema = z.object({
+  blockId: z.string(),
+  /** One entry per take, in playback order (parallel to the block's
+   *  BlockTranscript.takes) — concatenated back-to-back, this is the
+   *  block's full trimmed duration. A single-clip block just has one. */
+  takes: z.array(TakeTrimSchema).min(1),
 });
 
 export const TrimPointsSchema = z.object({

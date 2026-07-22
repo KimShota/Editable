@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { BlockTrim, FilledFormat, Format, Transcript, TrimPoints } from "./types";
+import { BlockTrim, BoundFile, FilledFormat, Format, TakeTrim, Transcript, TrimPoints, Word } from "./types";
 
 /**
  * Module 4 — Trim.
@@ -10,6 +10,11 @@ import { BlockTrim, FilledFormat, Format, Transcript, TrimPoints } from "./types
  *   - ffmpeg silencedetect (leading silence end / trailing silence start)
  * The tighter bound wins on each side. Silent b-roll blocks pass through
  * roughly as filmed (v1 decision), capped at the format's brollDurationSec.
+ *
+ * A multi-take voice block (see transcribe.ts) gets this treatment PER
+ * TAKE — each take's own dead air is trimmed independently — which is what
+ * makes concatenating them back-to-back read as one continuous clip with
+ * no lingering silence at the seams.
  *
  * Everything downstream times against the trimmed clip (trim-then-time).
  */
@@ -68,6 +73,47 @@ export const detectSilenceBounds = (
   return { leadingSilenceEndSec, trailingSilenceStartSec };
 };
 
+/** Trims dead air from one take (or a single-clip block, treated as a
+ *  one-take block) — the same logic the old single-clip trim() used. */
+const trimOneTake = (file: BoundFile, words: Word[]): TakeTrim => {
+  const clipDuration = file.durationSec;
+  if (clipDuration === undefined) {
+    throw new Error(`trim: "${file.path}" has no known duration`);
+  }
+  if (words.length === 0) {
+    // Graceful degradation: no detected speech → pass through as filmed.
+    return { srcInSec: 0, srcOutSec: clipDuration };
+  }
+
+  const bounds = detectSilenceBounds(file.absPath, clipDuration);
+  const speechStart = Math.max(words[0].startSec, bounds.leadingSilenceEndSec);
+  const speechEnd = Math.min(words[words.length - 1].endSec, bounds.trailingSilenceStartSec);
+
+  let srcInSec = Math.max(0, speechStart - PAD_SEC);
+  let srcOutSec = Math.min(clipDuration, Math.max(speechEnd, speechStart) + PAD_SEC);
+  if (srcOutSec - srcInSec < 0.1) {
+    // Never emit an unrenderably short take; fall back to the full clip.
+    srcInSec = 0;
+    srcOutSec = clipDuration;
+  }
+  return { srcInSec, srcOutSec };
+};
+
+/** Cuts a block's total (concatenated) duration down to maxDurationSec by
+ *  shortening from the tail of its last take(s) backward — the least
+ *  disruptive place to lose time, since it never touches the opening
+ *  marker or an earlier take's content. */
+const applyMaxDuration = (takes: TakeTrim[], maxDurationSec: number): void => {
+  const total = takes.reduce((s, t) => s + (t.srcOutSec - t.srcInSec), 0);
+  let over = total - maxDurationSec;
+  for (let i = takes.length - 1; i >= 0 && over > 1e-6; i--) {
+    const dur = takes[i].srcOutSec - takes[i].srcInSec;
+    const cut = Math.min(over, Math.max(0, dur - 0.1));
+    takes[i].srcOutSec -= cut;
+    over -= cut;
+  }
+};
+
 export const trim = (
   format: Format,
   filled: FilledFormat,
@@ -77,47 +123,30 @@ export const trim = (
 
   for (const block of format.blocks) {
     const clip = filled.bindings[block.videoSlot];
-    if (clip?.type !== "file" || clip.durationSec === undefined) {
-      throw new Error(`trim: block "${block.id}" has no bound clip with a duration`);
-    }
-    const clipDuration = clip.durationSec;
 
     if (block.kind === "broll") {
-      const target = block.brollDurationSec ?? clipDuration;
+      if (clip?.type !== "file" || clip.durationSec === undefined) {
+        throw new Error(`trim: block "${block.id}" has no bound clip with a duration`);
+      }
+      const target = block.brollDurationSec ?? clip.durationSec;
       blocks.push({
         blockId: block.id,
-        srcInSec: 0,
-        srcOutSec: Math.min(clipDuration, target),
+        takes: [{ srcInSec: 0, srcOutSec: Math.min(clip.durationSec, target) }],
       });
       continue;
     }
 
-    const words = transcript.blocks.find((b) => b.blockId === block.id)?.words ?? [];
-    if (words.length === 0) {
-      // Graceful degradation: no detected speech → pass through as filmed.
-      blocks.push({ blockId: block.id, srcInSec: 0, srcOutSec: clipDuration });
-      continue;
-    }
+    const files = clip?.type === "file" ? [clip] : clip?.type === "files" ? clip.files : undefined;
+    if (!files) throw new Error(`trim: block "${block.id}" has no bound clip`);
 
-    const bounds = detectSilenceBounds(clip.absPath, clipDuration);
-    const speechStart = Math.max(words[0].startSec, bounds.leadingSilenceEndSec);
-    const speechEnd = Math.min(
-      words[words.length - 1].endSec,
-      bounds.trailingSilenceStartSec,
-    );
+    const blockTranscript = transcript.blocks.find((b) => b.blockId === block.id);
+    const takeOrder = blockTranscript?.takeOrder ?? files.map((_, i) => i);
+    const takeWords = blockTranscript?.takes ?? files.map(() => []);
 
-    let srcInSec = Math.max(0, speechStart - PAD_SEC);
-    let srcOutSec = Math.min(clipDuration, Math.max(speechEnd, speechStart) + PAD_SEC);
-    if (block.maxDurationSec !== undefined) {
-      srcOutSec = Math.min(srcOutSec, srcInSec + block.maxDurationSec);
-    }
-    if (srcOutSec - srcInSec < 0.1) {
-      // Never emit an unrenderably short block; fall back to the full clip.
-      srcInSec = 0;
-      srcOutSec = clipDuration;
-    }
+    const takes = takeOrder.map((uploadIdx, pos) => trimOneTake(files[uploadIdx], takeWords[pos] ?? []));
+    if (block.maxDurationSec !== undefined) applyMaxDuration(takes, block.maxDurationSec);
 
-    blocks.push({ blockId: block.id, srcInSec, srcOutSec });
+    blocks.push({ blockId: block.id, takes });
   }
 
   return { blocks };

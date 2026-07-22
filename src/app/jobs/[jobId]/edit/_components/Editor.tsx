@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Player, PlayerRef } from "@remotion/player";
 import { EdlVideo } from "@backend/remotion/EdlVideo";
@@ -91,14 +91,27 @@ export function Editor({
   const [error, setError] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [pending, setPending] = useState(false);
-  const [layout, setLayout] = useState<Layout>(loadLayout);
+  const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
   const [undoStack, setUndoStack] = useState<Edl[]>([]);
   const [redoStack, setRedoStack] = useState<Edl[]>([]);
 
   const playerRef = useRef<PlayerRef>(null);
   const totalFrames = Math.max(1, Math.round(edl.durationSec * edl.fps));
+  // Stable object identity across the ~30/sec re-renders driven by
+  // currentTimeSec — otherwise the Player treats every frame tick as a
+  // composition-props change and invalidates the whole render tree.
+  const playerInputProps = useMemo(() => ({ edl, previewMode: true }), [edl]);
 
+  const isFirstPersist = useRef(true);
+
+  // Skips its own first run so the mount-time load below (which changes
+  // `layout` from DEFAULT_LAYOUT to the stored value) can't be raced by
+  // this effect writing DEFAULT_LAYOUT back over the stored value.
   useEffect(() => {
+    if (isFirstPersist.current) {
+      isFirstPersist.current = false;
+      return;
+    }
     try {
       window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
     } catch {
@@ -106,6 +119,13 @@ export function Editor({
       // panel sizes won't persist across reloads.
     }
   }, [layout]);
+
+  // Runs after hydration so the first client render still matches the
+  // server's DEFAULT_LAYOUT — reading localStorage during render (e.g. via
+  // a useState lazy initializer) would cause a hydration mismatch.
+  useEffect(() => {
+    setLayout(loadLayout());
+  }, []);
 
   const resizeMediaPanel = (dx: number) =>
     setLayout((l) => ({ ...l, mediaPanelWidth: clamp(l.mediaPanelWidth + dx, 180, 480) }));
@@ -348,11 +368,12 @@ export function Editor({
                 <Player
                   ref={playerRef}
                   component={EdlVideo}
-                  inputProps={{ edl }}
+                  inputProps={playerInputProps}
                   durationInFrames={totalFrames}
                   fps={edl.fps}
                   compositionWidth={edl.width}
                   compositionHeight={edl.height}
+                  numberOfSharedAudioTags={24}
                   style={{ width: "100%", height: "100%" }}
                   loop
                 />

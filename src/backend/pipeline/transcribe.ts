@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { orderTakes } from "./literal";
 import { FilledFormat, Format, Transcript, Word } from "./types";
 import { modelsDir } from "./paths";
 
@@ -10,6 +11,14 @@ import { modelsDir } from "./paths";
  * For each voice block, runs whisper.cpp to produce word-level timestamps.
  * Silent b-roll blocks are skipped. Word times are seconds relative to the
  * RAW clip (trimming happens downstream, against these times).
+ *
+ * A voice block's main clip may be filmed as several separate takes (e.g.
+ * the marker line "First is …" and the explanation shot separately) instead
+ * of one continuous recording — see intake.ts. This is the earliest stage
+ * with each take's own words, so it's also where playback order is decided
+ * (orderTakes, in literal.ts): everything downstream (trim, roles, assemble)
+ * just walks `takes` in that order and never needs to know it was more than
+ * one file.
  */
 
 const MODEL_FILE = path.join(modelsDir, "ggml-base.en.bin");
@@ -69,16 +78,30 @@ export const transcribe = (format: Format, filled: FilledFormat): Transcript => 
     for (const block of format.blocks) {
       if (block.kind !== "voice") continue;
       const clip = filled.bindings[block.videoSlot];
-      if (clip?.type !== "file") {
-        throw new Error(`transcribe: block "${block.id}" has no bound clip`);
+
+      if (clip?.type === "file") {
+        const words = transcribeClip(clip.absPath, workDir);
+        if (words.length === 0) {
+          console.warn(
+            `transcribe: no speech detected in voice block "${block.id}" (${clip.path})`,
+          );
+        }
+        blocks.push({ blockId: block.id, takeOrder: [0], takes: [words] });
+        continue;
       }
-      const words = transcribeClip(clip.absPath, workDir);
-      if (words.length === 0) {
-        console.warn(
-          `transcribe: no speech detected in voice block "${block.id}" (${clip.path})`,
-        );
+
+      if (clip?.type === "files") {
+        const rawTakes = clip.files.map((f) => transcribeClip(f.absPath, workDir));
+        const takeOrder = orderTakes(block, rawTakes);
+        const takes = takeOrder.map((idx) => rawTakes[idx]);
+        if (takes.every((w) => w.length === 0)) {
+          console.warn(`transcribe: no speech detected in any take of voice block "${block.id}"`);
+        }
+        blocks.push({ blockId: block.id, takeOrder, takes });
+        continue;
       }
-      blocks.push({ blockId: block.id, words });
+
+      throw new Error(`transcribe: block "${block.id}" has no bound clip`);
     }
     return { blocks };
   } finally {

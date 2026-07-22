@@ -24,6 +24,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
   if (!slot) {
     return NextResponse.json({ error: `format has no slot "${slotName}"` }, { status: 400 });
   }
+  // Multiple takes are only meaningful for a voice block's main clip (see
+  // intake.ts) — that's the one slot where a 2nd/3rd upload APPENDS a take
+  // instead of replacing the binding.
+  const isMultiSlot = format.blocks.some((b) => b.kind === "voice" && b.videoSlot === slotName);
 
   if (slot.mediaType === "text") {
     const text = formData.get("text");
@@ -34,6 +38,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     writeJobManifest(jobId, manifest);
     return NextResponse.json({ slot: slotName, binding: manifest.bindings[slotName] });
   }
+
+  const existing = manifest.bindings[slotName];
+  const existingFiles = isMultiSlot && existing && "files" in existing ? existing.files : [];
+  let takeCount = existingFiles.length;
+  const nextRelPath = (ext: string) => path.posix.join("assets", `${slotName}-${++takeCount}${ext}`);
 
   // Dragged in from the Library: copy by reference instead of re-uploading bytes.
   const libraryRef = formData.get("libraryRef");
@@ -47,26 +56,46 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
       return NextResponse.json({ error: "library asset not found" }, { status: 404 });
     }
     const ext = path.extname(filename);
-    const relPath = path.posix.join("assets", `${slotName}${ext}`);
+    const relPath = isMultiSlot ? nextRelPath(ext) : path.posix.join("assets", `${slotName}${ext}`);
     const absPath = path.join(jobDir(jobId), relPath);
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
     fs.copyFileSync(srcPath, absPath);
+    manifest.bindings[slotName] = isMultiSlot
+      ? { files: [...existingFiles, relPath] }
+      : { file: relPath };
+    writeJobManifest(jobId, manifest);
+    return NextResponse.json({ slot: slotName, binding: manifest.bindings[slotName] });
+  }
+
+  // A multi-take slot may receive several files in one drop (formData
+  // supports repeated keys); a single-file slot only ever reads the first.
+  const files = formData.getAll("file").filter((f): f is File => f instanceof File);
+  if (files.length === 0) {
+    return NextResponse.json({ error: "missing file or libraryRef" }, { status: 400 });
+  }
+
+  if (!isMultiSlot) {
+    const file = files[0];
+    const ext = path.extname(file.name) || "";
+    const relPath = path.posix.join("assets", `${slotName}${ext}`);
+    const absPath = path.join(jobDir(jobId), relPath);
+    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    fs.writeFileSync(absPath, Buffer.from(await file.arrayBuffer()));
     manifest.bindings[slotName] = { file: relPath };
     writeJobManifest(jobId, manifest);
     return NextResponse.json({ slot: slotName, binding: manifest.bindings[slotName] });
   }
 
-  const file = formData.get("file");
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "missing file or libraryRef" }, { status: 400 });
+  const newRelPaths: string[] = [];
+  for (const file of files) {
+    const ext = path.extname(file.name) || "";
+    const relPath = nextRelPath(ext);
+    const absPath = path.join(jobDir(jobId), relPath);
+    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    fs.writeFileSync(absPath, Buffer.from(await file.arrayBuffer()));
+    newRelPaths.push(relPath);
   }
-  const ext = path.extname(file.name) || "";
-  const relPath = path.posix.join("assets", `${slotName}${ext}`);
-  const absPath = path.join(jobDir(jobId), "assets", `${slotName}${ext}`);
-  fs.mkdirSync(path.dirname(absPath), { recursive: true });
-  fs.writeFileSync(absPath, Buffer.from(await file.arrayBuffer()));
-
-  manifest.bindings[slotName] = { file: relPath };
+  manifest.bindings[slotName] = { files: [...existingFiles, ...newRelPaths] };
   writeJobManifest(jobId, manifest);
   return NextResponse.json({ slot: slotName, binding: manifest.bindings[slotName] });
 }

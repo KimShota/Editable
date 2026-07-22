@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { JobManifestSchema } from "./schemas";
-import { BoundAsset, FilledFormat, Format, Slot } from "./types";
+import { BoundAsset, BoundFile, FilledFormat, Format, Slot } from "./types";
 import { loadFormat } from "./loader";
 
 /**
@@ -99,12 +99,34 @@ export const intake = (jobDir: string): FilledFormat => {
   const bindings: Record<string, BoundAsset> = {};
   const slots = allSlots(format);
   const slotNames = new Set(slots.map((s) => s.name));
+  // Multiple takes are only meaningful for a voice block's main clip — it's
+  // the one slot with a transcript to auto-order/concatenate takes by.
+  // Screen recordings, memes, music etc. always bind exactly one file.
+  const multiTakeSlots = new Set(
+    format.blocks.filter((b) => b.kind === "voice").map((b) => b.videoSlot),
+  );
 
   for (const name of Object.keys(manifest.bindings)) {
     if (!slotNames.has(name)) {
       console.warn(`intake: ignoring binding "${name}" — format declares no such slot`);
     }
   }
+
+  /** Probes one job-dir-relative file path into a BoundFile, or pushes an error and returns null. */
+  const bindOneFile = (slotName: string, relPath: string): BoundFile | null => {
+    const absPath = path.resolve(absJobDir, relPath);
+    if (!fs.existsSync(absPath)) {
+      errors.push(`slot "${slotName}": file not found: ${relPath}`);
+      return null;
+    }
+    try {
+      const probed = probeFile(absPath);
+      return { path: relPath, absPath, ...probed };
+    } catch (err) {
+      errors.push(`slot "${slotName}": ${(err as Error).message}`);
+      return null;
+    }
+  };
 
   for (const slot of slots) {
     const fill = manifest.bindings[slot.name];
@@ -125,34 +147,49 @@ export const intake = (jobDir: string): FilledFormat => {
     }
 
     if (slot.mediaType === "text") {
-      errors.push(`slot "${slot.name}" expects text but got a file (${fill.file})`);
+      errors.push(`slot "${slot.name}" expects text but got a file`);
       continue;
     }
-    const absPath = path.resolve(absJobDir, fill.file);
-    if (!fs.existsSync(absPath)) {
-      errors.push(`slot "${slot.name}": file not found: ${fill.file}`);
+
+    if ("files" in fill) {
+      if (!multiTakeSlots.has(slot.name)) {
+        errors.push(
+          `slot "${slot.name}": multiple clips are only supported for a voice block's main clip`,
+        );
+        continue;
+      }
+      const files = fill.files
+        .map((f) => bindOneFile(slot.name, f))
+        .filter((f): f is BoundFile => f !== null);
+      if (files.length !== fill.files.length) continue; // a per-file error was already pushed
+      const mismatch = files.find((f) => f.mediaType !== slot.mediaType);
+      if (mismatch) {
+        errors.push(
+          `slot "${slot.name}" expects ${slot.mediaType} but ${mismatch.path} is ${mismatch.mediaType}`,
+        );
+        continue;
+      }
+      bindings[slot.name] = { type: "files", files };
       continue;
     }
-    let probed: ProbedMedia;
-    try {
-      probed = probeFile(absPath);
-    } catch (err) {
-      errors.push(`slot "${slot.name}": ${(err as Error).message}`);
-      continue;
-    }
-    if (probed.mediaType !== slot.mediaType) {
+
+    const bound = bindOneFile(slot.name, fill.file);
+    if (!bound) continue;
+    if (bound.mediaType !== slot.mediaType) {
       errors.push(
-        `slot "${slot.name}" expects ${slot.mediaType} but ${fill.file} is ${probed.mediaType}`,
+        `slot "${slot.name}" expects ${slot.mediaType} but ${fill.file} is ${bound.mediaType}`,
       );
       continue;
     }
-    bindings[slot.name] = { type: "file", path: fill.file, absPath, ...probed };
+    bindings[slot.name] = { type: "file", ...bound };
   }
 
-  // Voice blocks are transcribed — their clips must actually carry audio.
+  // Voice blocks are transcribed — their clip(s) must actually carry audio.
   for (const block of format.blocks) {
     const clip = bindings[block.videoSlot];
-    if (block.kind === "voice" && clip?.type === "file" && clip.hasAudio === false) {
+    if (block.kind !== "voice") continue;
+    const files = clip?.type === "file" ? [clip] : clip?.type === "files" ? clip.files : [];
+    if (files.some((f) => f.hasAudio === false)) {
       errors.push(
         `block "${block.id}" is a voice block but its clip "${block.videoSlot}" has no audio track`,
       );

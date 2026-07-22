@@ -16,7 +16,7 @@ import {
   TrimPoints,
 } from "./types";
 import { EdlSchema } from "./schemas";
-import { anchoredTimeSec, clamp, toTrimmedWords } from "./timing";
+import { anchoredTimeSec, clamp, concatenateTakes } from "./timing";
 import { publicJobPrefix } from "./paths";
 
 /**
@@ -41,6 +41,25 @@ type FileAsset = Extract<BoundAsset, { type: "file" }>;
 const fileAsset = (filled: FilledFormat, slotName: string): FileAsset | undefined => {
   const asset = filled.bindings[slotName];
   return asset?.type === "file" ? asset : undefined;
+};
+
+const brollFile = (filled: FilledFormat, block: { id: string; videoSlot: string }): FileAsset[] => {
+  const asset = fileAsset(filled, block.videoSlot);
+  if (!asset) throw new Error(`assemble: block "${block.id}" has no bound clip`);
+  return [asset];
+};
+
+/** A voice block's main clip as an ordered list of takes to concatenate —
+ *  one entry for an ordinary single-clip block, several for one filmed as
+ *  separate takes (the marker line and the explanation shot apart). */
+const videoTakeFiles = (
+  filled: FilledFormat,
+  slotName: string,
+): Array<{ path: string; absPath: string; durationSec?: number }> => {
+  const asset = filled.bindings[slotName];
+  if (asset?.type === "file") return [asset];
+  if (asset?.type === "files") return asset.files;
+  throw new Error(`assemble: slot "${slotName}" has no bound clip`);
 };
 
 const textAsset = (filled: FilledFormat, slotName: string): string | undefined => {
@@ -76,8 +95,9 @@ export const assemble = (
   const resolveComponentParams = (
     ref: ComponentRef,
     blockId: string,
-  ): { component: string; params: Record<string, unknown> } | null => {
+  ): { component: string; params: Record<string, unknown>; audioDurationSec?: number } | null => {
     const params: Record<string, unknown> = {};
+    let audioDurationSec: number | undefined;
     for (const [key, value] of Object.entries(ref.params)) {
       if (key === "textSlot") {
         const text = textAsset(filled, String(value));
@@ -87,6 +107,7 @@ export const assemble = (
         const asset = fileAsset(filled, String(value));
         if (!asset) return null;
         params.src = stage(asset);
+        if (key === "audioSlot") audioDurationSec = asset.durationSec;
       } else if (key === "textAnchor") {
         const captured = resolved.roles.find(
           (r) => r.blockId === blockId && r.roleId === String(value),
@@ -101,7 +122,7 @@ export const assemble = (
         params[key] = value;
       }
     }
-    return { component: ref.component, params };
+    return { component: ref.component, params, audioDurationSec };
   };
 
   /** Resolve a timing (fixed anchor or anchor span edge) to trimmed-block seconds. */
@@ -153,26 +174,40 @@ export const assemble = (
   for (const block of format.blocks) {
     const trim = trims.blocks.find((b) => b.blockId === block.id);
     if (!trim) throw new Error(`assemble: no trim points for block "${block.id}"`);
-    const clip = fileAsset(filled, block.videoSlot);
-    if (!clip) throw new Error(`assemble: block "${block.id}" has no bound clip`);
 
-    const blockDurationSec = trim.srcOutSec - trim.srcInSec;
+    const blockDurationSec = trim.takes.reduce((s, t) => s + (t.srcOutSec - t.srcInSec), 0);
     const tlInSec = cursor;
     const tlOutSec = cursor + blockDurationSec;
 
-    video.push({
-      // 1:1 with the block at generation time; ids diverge from blockId
-      // once the timeline editor splits a clip into two.
-      id: block.id,
-      blockId: block.id,
-      src: stage(clip),
-      srcInSec: trim.srcInSec,
-      srcOutSec: trim.srcOutSec,
-      srcDurationSec: clip.durationSec,
-      tlInSec,
-      tlOutSec,
-      // B-roll plays under the music/voice; its own audio is muted.
-      muted: block.kind === "broll",
+    // A block is usually one clip (one take === the whole trim), but a
+    // voice block's main clip may have been filmed as several separate
+    // takes (see intake.ts/transcribe.ts) — here they're just N segments
+    // laid back to back, sharing blockId. Multiple ids per block only
+    // otherwise happens when the timeline editor splits a clip by hand.
+    const takeFiles = block.kind === "broll" ? brollFile(filled, block) : videoTakeFiles(filled, block.videoSlot);
+    const takeOrder =
+      transcript.blocks.find((b) => b.blockId === block.id)?.takeOrder ?? takeFiles.map((_, i) => i);
+
+    let segCursor = tlInSec;
+    let lastSegId = block.id;
+    trim.takes.forEach((t, i) => {
+      const file = takeFiles[takeOrder[i] ?? i];
+      const segId = trim.takes.length > 1 ? `${block.id}__take${i}` : block.id;
+      const durationSec = t.srcOutSec - t.srcInSec;
+      video.push({
+        id: segId,
+        blockId: block.id,
+        src: stage(file),
+        srcInSec: t.srcInSec,
+        srcOutSec: t.srcOutSec,
+        srcDurationSec: file.durationSec,
+        tlInSec: segCursor,
+        tlOutSec: segCursor + durationSec,
+        // B-roll plays under the music/voice; its own audio is muted.
+        muted: block.kind === "broll",
+      });
+      segCursor += durationSec;
+      lastSegId = segId;
     });
 
     for (const event of block.events) {
@@ -209,21 +244,26 @@ export const assemble = (
         });
       } else {
         const volume = resolvedRef.params.volume;
+        // SFX default to playing out; only an explicit end cuts them short.
+        // "Playing out" means the cue's own natural length, not forever —
+        // fall back to the source file's probed duration so a one-shot
+        // (bell, click, punchline stinger) actually unmounts once it's
+        // done instead of staying mounted for the rest of the timeline.
+        const explicitDurationSec =
+          (event.until || event.durationSec) && endSec > atSec ? endSec - atSec : undefined;
         sfx.push({
           id: event.id,
           src: String(resolvedRef.params.src),
           tlInSec: atSec,
-          // SFX default to playing out; only an explicit end cuts them.
-          durationSec:
-            (event.until || event.durationSec) && endSec > atSec ? endSec - atSec : undefined,
+          durationSec: explicitDurationSec ?? resolvedRef.audioDurationSec,
           volume: typeof volume === "number" ? clamp(volume, 0, 1) : 1,
         });
       }
     }
 
     if (block.kind === "voice" && block.captions) {
-      const rawWords = transcript.blocks.find((b) => b.blockId === block.id)?.words ?? [];
-      const words = toTrimmedWords(rawWords, trim.srcInSec, blockDurationSec);
+      const rawTakes = transcript.blocks.find((b) => b.blockId === block.id)?.takes ?? [[]];
+      const { words } = concatenateTakes(rawTakes, trim.takes);
 
       let group: EdlCaptionGroup | null = null;
       for (const w of words) {
@@ -255,7 +295,7 @@ export const assemble = (
           ? transitionRef.params.durationSec
           : DEFAULT_TRANSITION_SEC;
       transitions.push({
-        afterClipId: block.id,
+        afterClipId: lastSegId,
         component: transitionRef.component,
         params: transitionRef.params,
         atSec: tlOutSec,
