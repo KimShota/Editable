@@ -14,8 +14,8 @@ import { Edl, EdlTransition, EdlVideoSegment } from "../pipeline/types";
 import { TextOverlay } from "./components/TextOverlay";
 import { ImageOverlay } from "./components/ImageOverlay";
 import { VideoOverlay } from "./components/VideoOverlay";
-import { TitleCard } from "./components/TitleCard";
 import { StickerTitle } from "./components/StickerTitle";
+import { SkillCard } from "./components/SkillCard";
 import { Captions } from "./components/Captions";
 
 /**
@@ -34,8 +34,8 @@ const OVERLAY_COMPONENTS: Record<
   TextOverlay: TextOverlay as React.FC<Record<string, unknown>>,
   ImageOverlay: ImageOverlay as React.FC<Record<string, unknown>>,
   VideoOverlay: VideoOverlay as React.FC<Record<string, unknown>>,
-  TitleCard: TitleCard as React.FC<Record<string, unknown>>,
   StickerTitle: StickerTitle as React.FC<Record<string, unknown>>,
+  SkillCard: SkillCard as React.FC<Record<string, unknown>>,
 };
 
 /**
@@ -161,7 +161,7 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
           }
           name={`sfx:${s.id}`}
         >
-          <Audio src={staticFile(s.src)} volume={() => s.volume} />
+          <Audio src={staticFile(s.src)} volume={() => s.volume} trimBefore={toFrames(s.srcInSec)} />
         </Sequence>
       ))}
 

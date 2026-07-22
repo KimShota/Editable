@@ -17,6 +17,7 @@ import {
 } from "./types";
 import { EdlSchema } from "./schemas";
 import { anchoredTimeSec, clamp, concatenateTakes } from "./timing";
+import { audioOnsetSec } from "./trim";
 import { publicJobPrefix } from "./paths";
 
 /**
@@ -93,6 +94,18 @@ export const assemble = (
     component: string;
     params: Record<string, unknown>;
     audioDurationSec?: number;
+    audioOnsetSec?: number;
+  };
+
+  // Several events commonly share one sfx file (e.g. every "click" cue) —
+  // cache its onset instead of re-running ffmpeg silencedetect per event.
+  const audioOnsetCache = new Map<string, number>();
+  const cachedAudioOnsetSec = (absPath: string, durationSec: number): number => {
+    const cached = audioOnsetCache.get(absPath);
+    if (cached !== undefined) return cached;
+    const onset = audioOnsetSec(absPath, durationSec);
+    audioOnsetCache.set(absPath, onset);
+    return onset;
   };
 
   /**
@@ -110,6 +123,7 @@ export const assemble = (
   ): ResolvedComponent | { skipReason: string } => {
     const params: Record<string, unknown> = {};
     let audioDurationSec: number | undefined;
+    let onsetSec: number | undefined;
     for (const [key, value] of Object.entries(ref.params)) {
       if (key === "textSlot") {
         const text = textAsset(filled, String(value));
@@ -122,7 +136,10 @@ export const assemble = (
           return { skipReason: `${kind} slot "${value}" is not filled` };
         }
         params.src = stage(asset);
-        if (key === "audioSlot") audioDurationSec = asset.durationSec;
+        if (key === "audioSlot") {
+          audioDurationSec = asset.durationSec;
+          onsetSec = asset.durationSec !== undefined ? cachedAudioOnsetSec(asset.absPath, asset.durationSec) : 0;
+        }
       } else if (key === "textAnchor") {
         const captured = resolved.roles.find(
           (r) => r.blockId === blockId && r.roleId === String(value),
@@ -141,7 +158,7 @@ export const assemble = (
         params[key] = value;
       }
     }
-    return { component: ref.component, params, audioDurationSec };
+    return { component: ref.component, params, audioDurationSec, audioOnsetSec: onsetSec };
   };
 
   /** Where an anchor's chosen edge (start/end/captureStart) actually lands. */
@@ -307,18 +324,25 @@ export const assemble = (
         });
       } else {
         const volume = resolvedRef.params.volume;
+        const srcInSec = resolvedRef.audioOnsetSec ?? 0;
         // SFX default to playing out; only an explicit end cuts them short.
         // "Playing out" means the cue's own natural length, not forever —
-        // fall back to the source file's probed duration so a one-shot
+        // fall back to the source file's probed duration (minus its onset,
+        // since playback now starts srcInSec into the file) so a one-shot
         // (bell, click, punchline stinger) actually unmounts once it's
         // done instead of staying mounted for the rest of the timeline.
         const explicitDurationSec =
           (event.until || event.durationSec) && endSec > atSec ? endSec - atSec : undefined;
+        const playsOutDurationSec =
+          resolvedRef.audioDurationSec !== undefined
+            ? Math.max(0, resolvedRef.audioDurationSec - srcInSec)
+            : undefined;
         sfx.push({
           id: event.id,
           src: String(resolvedRef.params.src),
           tlInSec: atSec,
-          durationSec: explicitDurationSec ?? resolvedRef.audioDurationSec,
+          srcInSec,
+          durationSec: explicitDurationSec ?? playsOutDurationSec,
           volume: typeof volume === "number" ? clamp(volume, 0, 1) : 1,
         });
       }

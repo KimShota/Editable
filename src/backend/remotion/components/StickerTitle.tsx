@@ -12,6 +12,7 @@ import {
   STICKER_ACCENT,
 } from "../../components/style";
 import { ensureStickerFonts } from "../fonts";
+import { PaperPatch } from "./PaperPatch";
 
 /**
  * The "5 SECRET / Claude codes" hook title: a rotated sticky-note patch
@@ -99,18 +100,7 @@ export const StickerTitle: React.FC<{
           }}
         >
           {resolvedPatch && (
-            <div
-              style={{
-                position: "relative",
-                transform: "rotate(-4deg)",
-                background:
-                  "linear-gradient(155deg, #ffffff 0%, #f3f1ec 55%, #eae7df 100%)",
-                borderRadius: 10,
-                boxShadow:
-                  "0 10px 20px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.25)",
-                padding: `${fontSize * 0.08}px ${fontSize * 0.28}px`,
-              }}
-            >
+            <PaperPatch rotateDeg={-4} padding={`${fontSize * 0.08}px ${fontSize * 0.28}px`}>
               <span
                 style={{
                   fontFamily: ARCHIVO_BLACK_STACK,
@@ -122,7 +112,7 @@ export const StickerTitle: React.FC<{
               >
                 {resolvedPatch}
               </span>
-            </div>
+            </PaperPatch>
           )}
           {resolvedHeadline && (
             <span

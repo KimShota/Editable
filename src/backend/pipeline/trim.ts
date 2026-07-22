@@ -76,12 +76,9 @@ type SilenceInterval = { startSec: number; endSec: number };
 /** A maximal span of real (non-silent) audio. */
 type SpeechRegion = { startSec: number; endSec: number };
 
-/** Every silence interval ffmpeg detects in the clip, in order, adjacent
- *  ones merged together. A silence still open at EOF closes at durationSec. */
-export const detectSilenceIntervals = (
-  clipAbsPath: string,
-  durationSec: number,
-): SilenceInterval[] => {
+/** Every silence interval ffmpeg detects in the clip, unmerged, in order.
+ *  A silence still open at EOF closes at durationSec. */
+const rawSilenceIntervals = (clipAbsPath: string, durationSec: number): SilenceInterval[] => {
   // silencedetect reports on stderr.
   const out = spawnSync(
     "ffmpeg",
@@ -101,7 +98,20 @@ export const detectSilenceIntervals = (
     }
   }
   if (openStart !== null) intervals.push({ startSec: openStart, endSec: durationSec });
+  return intervals;
+};
 
+/** Silence intervals with adjacent ones (gap <= SILENCE_MERGE_GAP_SEC)
+ *  merged together — appropriate for speech, where a stray micro-pause
+ *  shouldn't split one continuous delivery into separate regions. NOT
+ *  appropriate for a short one-shot sound effect, whose entire audible
+ *  content can be shorter than the merge gap itself (see audioOnsetSec,
+ *  which uses the unmerged intervals directly for exactly this reason). */
+export const detectSilenceIntervals = (
+  clipAbsPath: string,
+  durationSec: number,
+): SilenceInterval[] => {
+  const intervals = rawSilenceIntervals(clipAbsPath, durationSec);
   const merged: SilenceInterval[] = [];
   for (const s of intervals) {
     const prev = merged[merged.length - 1];
@@ -125,6 +135,23 @@ const speechRegions = (silences: SilenceInterval[], durationSec: number): Speech
   }
   if (cursor < durationSec) regions.push({ startSec: cursor, endSec: durationSec });
   return regions;
+};
+
+/** First moment of real (non-silent) audio in a file — reused for one-shot
+ *  sfx assets, which routinely have a quiet lead-in (a "click" sample that's
+ *  mostly a fraction of a second of near-silence before the actual click):
+ *  scheduling playback from src time 0 makes the cue sound noticeably late
+ *  relative to whatever it's meant to land on. Returns 0 if the file has no
+ *  detectable leading silence.
+ *
+ *  Uses the UNMERGED intervals deliberately: a short sfx's entire audible
+ *  content can be briefer than SILENCE_MERGE_GAP_SEC (a ~0.1s click between
+ *  two silences would merge into "no speech region at all" under the
+ *  speech-tuned merge gap), so onset detection only needs the first raw
+ *  interval that actually touches the start of the file. */
+export const audioOnsetSec = (absPath: string, durationSec: number): number => {
+  const leading = rawSilenceIntervals(absPath, durationSec).find((s) => s.startSec <= 0.02);
+  return leading ? Math.min(leading.endSec, durationSec) : 0;
 };
 
 /** Merge speech regions separated by less than FILLER_GAP_SEC into one

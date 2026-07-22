@@ -491,6 +491,10 @@ export const EdlSfxSchema = z.object({
   id: z.string(),
   src: z.string(),
   tlInSec: z.number().min(0),
+  /** Where playback starts within the source file — skips a quiet lead-in
+   *  a one-shot sfx asset commonly has (see assemble.ts/audioOnsetSec), so
+   *  the audible part of the cue actually lands at tlInSec. */
+  srcInSec: z.number().min(0).default(0),
   /** Cut the effect after this long (span-aligned SFX). Omitted = play out. */
   durationSec: z.number().positive().optional(),
   volume: z.number().min(0).max(1).default(1),
