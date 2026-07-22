@@ -16,6 +16,8 @@ const CLICK_THRESHOLD_PX = 3;
 export function TimelineClip({
   left,
   width,
+  top,
+  height,
   label,
   sublabel,
   colorClass,
@@ -29,6 +31,11 @@ export function TimelineClip({
 }: {
   left: number;
   width: number;
+  /** Vertical slot this clip occupies within its track — the track's
+   *  lane assignment (see lanes.ts) turns into this pixel offset/height so
+   *  overlapping clips stack instead of drawing on top of each other. */
+  top: number;
+  height: number;
   label: string;
   sublabel?: string;
   colorClass: string;
@@ -92,10 +99,12 @@ export function TimelineClip({
       onClick={(e) => e.stopPropagation()}
       style={{
         left: previewLeft,
+        top: top + 4,
+        height: Math.max(height - 8, 4),
         width: Math.max(previewWidth, 4),
         transform: `translateX(${translateX}px)`,
       }}
-      className={`group absolute top-1 bottom-1 flex flex-col justify-center overflow-hidden rounded-lg border px-2 text-left transition-shadow duration-150 ${
+      className={`group absolute flex flex-col justify-center overflow-hidden rounded-lg border px-2 text-left transition-shadow duration-150 ${
         onCommitMove ? "cursor-grab active:cursor-grabbing" : "cursor-default"
       } ${colorClass} ${
         selected

@@ -7,7 +7,7 @@ import {
   TrimPoints,
   Word,
 } from "./types";
-import { anchoredTimeSec, clamp, concatenateTakes } from "./timing";
+import { anchoredTimeSec, clamp, concatenateTakesForMatching } from "./timing";
 import { matchLiteralAnchor } from "./literal";
 import { pickResolver, ResolverChoice } from "./resolvers";
 import { RoleResolution, SemanticQuery } from "./resolvers/protocol";
@@ -72,7 +72,10 @@ export const resolveRoles = async (
     if (!trim) throw new Error(`resolveRoles: no trim points for block "${block.id}"`);
 
     const rawTakes = transcript.blocks.find((b) => b.blockId === block.id)?.takes ?? [[]];
-    const { words, blockDurationSec } = concatenateTakes(rawTakes, trim.takes);
+    // Matching, not the filtered/trimmed word list captions use: a phrase
+    // whisper mistimed into a padding/dead-air region trim.ts cut from
+    // playback must still be findable (see concatenateTakesForMatching).
+    const { words, blockDurationSec } = concatenateTakesForMatching(rawTakes, trim.takes);
 
     // Pass 1 — literal anchors. Their spans scaffold the semantic windows;
     // a missed match contributes its fallback so windows stay computable.

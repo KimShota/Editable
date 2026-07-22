@@ -28,6 +28,12 @@ export function ResourcesBoard({
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [building, setBuilding] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
+  /** What assemble() skipped/altered from the format's declared structure
+   *  (unfilled slot, unmatched anchor, a beat sequence that didn't fit its
+   *  runway, a duplicate sfx collapsed to one) — shown here instead of only
+   *  a server console.warn, since this is the moment the user can actually
+   *  do something about it (fill a slot, re-film a take). */
+  const [diagnostics, setDiagnostics] = useState<string[] | null>(null);
 
   const requiredSlots = useMemo(() => allSlots(format).filter((s) => s.required), [format]);
   const filledCount = requiredSlots.filter((s) => bindings[s.name]).length;
@@ -37,7 +43,7 @@ export function ResourcesBoard({
     setBindings((prev) => ({ ...prev, [slotName]: binding }));
   };
 
-  const continueToEditor = async () => {
+  const continueToEditor = async (opts: { force?: boolean } = {}) => {
     setBuilding(true);
     setBuildError(null);
     try {
@@ -48,6 +54,12 @@ export function ResourcesBoard({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "build failed");
+      const buildDiagnostics: string[] = data.edl?.diagnostics ?? [];
+      if (buildDiagnostics.length > 0 && !opts.force) {
+        setDiagnostics(buildDiagnostics);
+        setBuilding(false);
+        return;
+      }
       router.push(`/jobs/${jobId}/edit`);
     } catch (err) {
       setBuildError((err as Error).message);
@@ -119,6 +131,32 @@ export function ResourcesBoard({
           </Card>
         )}
 
+        {diagnostics && diagnostics.length > 0 && (
+          <div className="sticky bottom-[104px] z-10 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-5 backdrop-blur-md">
+            <p className="mb-2 text-sm font-medium text-amber-300">
+              The build skipped {diagnostics.length} {diagnostics.length === 1 ? "thing" : "things"} —
+              worth a look before you edit:
+            </p>
+            <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-amber-200/90">
+              {diagnostics.map((d, i) => (
+                <li key={i}>{d}</li>
+              ))}
+            </ul>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setDiagnostics(null)} className="!px-4 !py-2 text-xs">
+                Fix and rebuild
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => continueToEditor({ force: true })}
+                className="!px-4 !py-2 text-xs"
+              >
+                Continue to editor anyway
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="sticky bottom-6 z-10 flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-[color:var(--bg)]/90 p-5 backdrop-blur-md">
           <div>
             <p className="text-sm text-[color:var(--ink)]">
@@ -126,7 +164,7 @@ export function ResourcesBoard({
             </p>
             {buildError && <p className="text-xs text-red-400">{buildError}</p>}
           </div>
-          <Button onClick={continueToEditor} disabled={!ready || building}>
+          <Button onClick={() => continueToEditor()} disabled={!ready || building}>
             {building ? "Building…" : "Continue to editor"}
           </Button>
         </div>

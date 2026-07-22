@@ -15,6 +15,7 @@ import { TextOverlay } from "./components/TextOverlay";
 import { ImageOverlay } from "./components/ImageOverlay";
 import { VideoOverlay } from "./components/VideoOverlay";
 import { TitleCard } from "./components/TitleCard";
+import { StickerTitle } from "./components/StickerTitle";
 import { Captions } from "./components/Captions";
 
 /**
@@ -34,6 +35,7 @@ const OVERLAY_COMPONENTS: Record<
   ImageOverlay: ImageOverlay as React.FC<Record<string, unknown>>,
   VideoOverlay: VideoOverlay as React.FC<Record<string, unknown>>,
   TitleCard: TitleCard as React.FC<Record<string, unknown>>,
+  StickerTitle: StickerTitle as React.FC<Record<string, unknown>>,
 };
 
 /**

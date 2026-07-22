@@ -35,6 +35,10 @@ const CAPTION_WORDS_PER_GROUP = 3;
 /** How long the last caption group of a run lingers after its final word. */
 const CAPTION_TAIL_SEC = 0.15;
 const DEFAULT_TRANSITION_SEC = 0.3;
+/** Two sfx cues within this long of each other, from the same source file,
+ *  are the same beat firing twice (e.g. a "sequence" whose runway collapsed
+ *  before this fix) rather than two intentionally distinct sounds. */
+const SFX_DEDUPE_EPS_SEC = 0.05;
 
 type FileAsset = Extract<BoundAsset, { type: "file" }>;
 
@@ -85,34 +89,49 @@ export const assemble = (
     return src;
   };
 
+  type ResolvedComponent = {
+    component: string;
+    params: Record<string, unknown>;
+    audioDurationSec?: number;
+  };
+
   /**
    * Resolve a component ref's slot indirection against the job bindings:
    * textSlot → text param; imageSlot/audioSlot/videoSlot → src param;
    * textAnchor → text param from the anchor's captured words (optionally
    * shaped by a textTemplate containing "{captured}").
-   * Returns null if a required slot/capture is unbound (event is skipped).
+   * Returns a `skipReason` if a required slot/capture is unbound — specific
+   * enough to show a user why an event never showed up, instead of a
+   * server-only console.warn (the event is skipped either way).
    */
   const resolveComponentParams = (
     ref: ComponentRef,
     blockId: string,
-  ): { component: string; params: Record<string, unknown>; audioDurationSec?: number } | null => {
+  ): ResolvedComponent | { skipReason: string } => {
     const params: Record<string, unknown> = {};
     let audioDurationSec: number | undefined;
     for (const [key, value] of Object.entries(ref.params)) {
       if (key === "textSlot") {
         const text = textAsset(filled, String(value));
-        if (text === undefined) return null;
+        if (text === undefined) return { skipReason: `text slot "${value}" is not filled` };
         params.text = text;
       } else if (key === "imageSlot" || key === "audioSlot" || key === "videoSlot") {
         const asset = fileAsset(filled, String(value));
-        if (!asset) return null;
+        if (!asset) {
+          const kind = key === "imageSlot" ? "image" : key === "audioSlot" ? "audio" : "video";
+          return { skipReason: `${kind} slot "${value}" is not filled` };
+        }
         params.src = stage(asset);
         if (key === "audioSlot") audioDurationSec = asset.durationSec;
       } else if (key === "textAnchor") {
         const captured = resolved.roles.find(
           (r) => r.blockId === blockId && r.roleId === String(value),
         )?.capturedText;
-        if (captured === undefined) return null;
+        if (captured === undefined) {
+          return {
+            skipReason: `anchor "${value}" has no captured text — its literal phrase wasn't matched in the transcript`,
+          };
+        }
         const template = ref.params.textTemplate;
         params.text =
           typeof template === "string" ? template.split("{captured}").join(captured) : captured;
@@ -125,7 +144,23 @@ export const assemble = (
     return { component: ref.component, params, audioDurationSec };
   };
 
-  /** Resolve a timing (fixed anchor or anchor span edge) to trimmed-block seconds. */
+  /** Where an anchor's chosen edge (start/end/captureStart) actually lands. */
+  const roleEdgeSec = (roleId: string, edge: "start" | "end" | "captureStart", blockId: string): number => {
+    const role = resolved.roles.find((r) => r.blockId === blockId && r.roleId === roleId);
+    if (!role) {
+      throw new Error(`assemble: anchor "${roleId}" in block "${blockId}" was not resolved`);
+    }
+    return edge === "end"
+      ? (role.endSec ?? role.timeSec)
+      : edge === "captureStart"
+        ? (role.captureStartSec ?? role.timeSec)
+        : role.timeSec;
+  };
+
+  /** Resolve a timing (fixed anchor or anchor span edge) to trimmed-block
+   *  seconds. Not for "sequence" timings — those go through
+   *  resolveSequenceAtSec, which can drop an event instead of always
+   *  returning a number. */
   const timingSec = (
     timing: FormatEvent["timing"],
     blockId: string,
@@ -134,21 +169,42 @@ export const assemble = (
     if (timing.kind === "fixed") {
       return anchoredTimeSec(timing, blockDurationSec);
     }
-    const role = resolved.roles.find(
-      (r) => r.blockId === blockId && r.roleId === timing.roleId,
-    );
-    if (!role) {
-      throw new Error(
-        `assemble: anchor "${timing.roleId}" in block "${blockId}" was not resolved`,
-      );
+    if (timing.kind === "sequence") {
+      throw new Error(`assemble: a "sequence" timing can't be used as an "until" — only as an event's own timing`);
     }
-    const edgeSec =
-      timing.edge === "end"
-        ? (role.endSec ?? role.timeSec)
-        : timing.edge === "captureStart"
-          ? (role.captureStartSec ?? role.timeSec)
-          : role.timeSec;
+    const edgeSec = roleEdgeSec(timing.roleId, timing.edge, blockId);
     return clamp(edgeSec + timing.offsetSec, 0, blockDurationSec);
+  };
+
+  /**
+   * Places one member of a "sequence" timing: N sibling events distributed
+   * across whatever runway exists after an anchor. Compresses spacing to
+   * fit before ever dropping anything; if even the minimum spacing can't
+   * fit everyone, drops from the tail (highest index first) rather than
+   * collapsing every sibling onto the same instant.
+   */
+  const resolveSequenceAtSec = (
+    timing: Extract<FormatEvent["timing"], { kind: "sequence" }>,
+    blockId: string,
+    blockDurationSec: number,
+  ): { atSec: number } | { skipReason: string } => {
+    const edgeSec = roleEdgeSec(timing.roleId, timing.edge, blockId);
+    // Reserve minGapSec of daylight AFTER the last item too — otherwise the
+    // last item's position lands exactly on blockDurationSec, leaving it
+    // zero visible duration (and it gets dropped by the endSec<=atSec
+    // guard) even though the spacing math "fit."
+    const runwaySec = Math.max(0, blockDurationSec - edgeSec - timing.minGapSec);
+    const maxFittable =
+      timing.count <= 1 ? timing.count : clamp(Math.floor(runwaySec / timing.minGapSec) + 1, 0, timing.count);
+    if (timing.index >= maxFittable) {
+      return {
+        skipReason:
+          `sequence "${timing.roleId}" only fits ${maxFittable}/${timing.count} items in ` +
+          `${runwaySec.toFixed(2)}s of runway after the anchor (need >=${timing.minGapSec.toFixed(2)}s each)`,
+      };
+    }
+    const gap = timing.count > 1 ? Math.min(timing.targetGapSec, runwaySec / (timing.count - 1)) : 0;
+    return { atSec: clamp(edgeSec + timing.index * gap, 0, Math.max(0, blockDurationSec - timing.minGapSec)) };
   };
 
   /** Event start relative to the block's trimmed start, overrides applied. */
@@ -156,12 +212,15 @@ export const assemble = (
     event: FormatEvent,
     blockId: string,
     blockDurationSec: number,
-  ): number => {
+  ): { atSec: number } | { skipReason: string } => {
     const override = overrides?.events[event.id];
     if (override?.timeSec !== undefined) {
-      return clamp(override.timeSec, 0, blockDurationSec);
+      return { atSec: clamp(override.timeSec, 0, blockDurationSec) };
     }
-    return timingSec(event.timing, blockId, blockDurationSec);
+    if (event.timing.kind === "sequence") {
+      return resolveSequenceAtSec(event.timing, blockId, blockDurationSec);
+    }
+    return { atSec: timingSec(event.timing, blockId, blockDurationSec) };
   };
 
   const video: EdlVideoSegment[] = [];
@@ -169,6 +228,7 @@ export const assemble = (
   const sfx: EdlSfx[] = [];
   const captions: EdlCaptionGroup[] = [];
   const transitions: EdlTransition[] = [];
+  const diagnostics: string[] = [...trims.diagnostics];
 
   let cursor = 0;
   for (const block of format.blocks) {
@@ -214,13 +274,16 @@ export const assemble = (
       const override = overrides?.events[event.id];
       const ref = override?.component ?? event.component;
       const resolvedRef = resolveComponentParams(ref, block.id);
-      if (!resolvedRef) {
-        console.warn(
-          `assemble: skipping event "${event.id}" — an optional slot/capture it needs is not filled`,
-        );
+      if ("skipReason" in resolvedRef) {
+        diagnostics.push(`skipped "${event.id}" in block "${block.id}" — ${resolvedRef.skipReason}`);
         continue;
       }
-      const atSec = tlInSec + eventTimeSec(event, block.id, blockDurationSec);
+      const placement = eventTimeSec(event, block.id, blockDurationSec);
+      if ("skipReason" in placement) {
+        diagnostics.push(`skipped "${event.id}" in block "${block.id}" — ${placement.skipReason}`);
+        continue;
+      }
+      const atSec = tlInSec + placement.atSec;
       // End priority: `until` (an anchor span edge) > durationSec > block end.
       const endSec = event.until
         ? tlInSec + timingSec(event.until, block.id, blockDurationSec)
@@ -230,8 +293,8 @@ export const assemble = (
 
       if (event.kind === "overlay") {
         if (endSec <= atSec) {
-          console.warn(
-            `assemble: skipping overlay "${event.id}" — its "until" resolves before its start`,
+          diagnostics.push(
+            `skipped overlay "${event.id}" in block "${block.id}" — its "until" resolves before its start`,
           );
           continue;
         }
@@ -306,6 +369,22 @@ export const assemble = (
     cursor = tlOutSec;
   }
 
+  // Collapse duplicate simultaneous sfx: the same source firing within
+  // SFX_DEDUPE_EPS_SEC of a cue already kept is the same beat re-triggering
+  // (e.g. a "sequence" whose runway collapsed), not five intentional clicks
+  // stacked louder than any one of them. Keeps the earliest of each cluster.
+  const dedupedSfx: EdlSfx[] = [];
+  for (const s of sfx) {
+    const dupe = dedupedSfx.find(
+      (d) => d.src === s.src && Math.abs(d.tlInSec - s.tlInSec) <= SFX_DEDUPE_EPS_SEC,
+    );
+    if (dupe) {
+      diagnostics.push(`skipped sfx "${s.id}" — duplicate of "${dupe.id}" (same sound within ${SFX_DEDUPE_EPS_SEC}s)`);
+      continue;
+    }
+    dedupedSfx.push(s);
+  }
+
   const musicAsset = format.musicSlot ? fileAsset(filled, format.musicSlot.name) : undefined;
 
   const edl: Edl = EdlSchema.parse({
@@ -317,12 +396,13 @@ export const assemble = (
     durationSec: cursor,
     video,
     overlays,
-    sfx,
+    sfx: dedupedSfx,
     captions,
     captionStyle: format.captionStyle,
     transitions,
     music: musicAsset ? { src: stage(musicAsset), volume: format.musicVolume } : undefined,
     assets,
+    diagnostics,
   });
 
   return edl;

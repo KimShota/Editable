@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import type { Edl } from "@backend/pipeline/types";
 import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import { TimelineClip } from "./TimelineClip";
+import { assignLanes, laneCount } from "./lanes";
 import { Selection, SelectionTrack, MUSIC_ID } from "./selection";
 import { buildMajorLadder, chooseTickScale, formatTick } from "./tickScale";
 import { FitIcon, ScissorsIcon, TrashIcon, ZoomInIcon, ZoomOutIcon } from "./Icons";
@@ -24,6 +25,9 @@ const TRACK_LABEL_WIDTH = 96;
 /** Frame-level precision: enough px/frame that individual frames are
  *  visually distinct once fully zoomed in. */
 const PX_PER_FRAME_AT_MAX_ZOOM = 12;
+/** Height of one clip lane — matches the track row's old fixed h-14. A
+ *  track with overlapping clips grows to laneCount * LANE_HEIGHT tall. */
+const LANE_HEIGHT = 56;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
@@ -50,33 +54,43 @@ const trackRow = (
   pxPerSec: number,
   locked = false,
   trimEdges: ("in" | "out")[] = BOTH_TRIM_EDGES,
-) => (
-  <div key={track} className="relative flex h-14 border-b border-[color:var(--ed-border)]">
-    <div className="sticky left-0 z-20 flex w-24 shrink-0 items-center gap-2 bg-[color:var(--ed-panel)] px-3 text-[11px] text-[color:var(--ed-ink-dim)]">
-      <span className={`h-2 w-2 shrink-0 rounded-[3px] ${colorClass}`} />
-      {label}
+) => {
+  const lanes = assignLanes(clips);
+  const rowHeight = laneCount(lanes) * LANE_HEIGHT;
+  return (
+    <div
+      key={track}
+      className="relative flex border-b border-[color:var(--ed-border)]"
+      style={{ height: rowHeight }}
+    >
+      <div className="sticky left-0 z-20 flex w-24 shrink-0 items-center gap-2 bg-[color:var(--ed-panel)] px-3 text-[11px] text-[color:var(--ed-ink-dim)]">
+        <span className={`h-2 w-2 shrink-0 rounded-[3px] ${colorClass}`} />
+        {label}
+      </div>
+      <div className="relative flex-1">
+        {clips.map((c) => (
+          <TimelineClip
+            key={c.id}
+            left={c.tlInSec * pxPerSec}
+            width={(c.tlOutSec - c.tlInSec) * pxPerSec}
+            top={(lanes.get(c.id) ?? 0) * LANE_HEIGHT}
+            height={LANE_HEIGHT}
+            label={c.label}
+            sublabel={c.sublabel}
+            colorClass={colorClass}
+            selected={selection?.track === track && selection.id === c.id}
+            locked={locked}
+            trimEdges={trimEdges}
+            pxPerSec={pxPerSec}
+            onSelect={() => onSelect({ track, id: c.id })}
+            onCommitMove={handlers.move ? (d) => handlers.move!(c.id, d) : undefined}
+            onCommitTrim={handlers.trim ? (edge, d) => handlers.trim!(c.id, edge, d) : undefined}
+          />
+        ))}
+      </div>
     </div>
-    <div className="relative flex-1">
-      {clips.map((c) => (
-        <TimelineClip
-          key={c.id}
-          left={c.tlInSec * pxPerSec}
-          width={(c.tlOutSec - c.tlInSec) * pxPerSec}
-          label={c.label}
-          sublabel={c.sublabel}
-          colorClass={colorClass}
-          selected={selection?.track === track && selection.id === c.id}
-          locked={locked}
-          trimEdges={trimEdges}
-          pxPerSec={pxPerSec}
-          onSelect={() => onSelect({ track, id: c.id })}
-          onCommitMove={handlers.move ? (d) => handlers.move!(c.id, d) : undefined}
-          onCommitTrim={handlers.trim ? (edge, d) => handlers.trim!(c.id, edge, d) : undefined}
-        />
-      ))}
-    </div>
-  </div>
-);
+  );
+};
 
 /**
  * Everything on the timeline that does NOT depend on the playhead position:

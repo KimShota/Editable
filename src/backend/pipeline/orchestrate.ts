@@ -46,7 +46,7 @@ export const buildJob = async (
   const transcript = transcribe(format, filled);
   writeArtifact(jobId, "transcript", transcript);
 
-  const trims = trim(format, filled, transcript);
+  const trims = await trim(format, filled, transcript, resolver);
   writeArtifact(jobId, "trim", trims);
 
   const resolved = await resolveRoles(format, transcript, trims, resolver);

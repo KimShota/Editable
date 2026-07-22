@@ -108,9 +108,12 @@ const main = async () => {
   if (args.only === "transcribe") return;
 
   const trims = wants("trim")
-    ? trim(format, filled, transcript)
+    ? await trim(format, filled, transcript, args.resolver)
     : read("trim", TrimPointsSchema);
-  if (wants("trim")) write("trim", trims);
+  if (wants("trim")) {
+    write("trim", trims);
+    for (const d of trims.diagnostics) console.log(`    ${d}`);
+  }
   if (args.only === "trim") return;
 
   const resolved = wants("roles")

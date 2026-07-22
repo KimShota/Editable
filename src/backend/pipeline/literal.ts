@@ -96,14 +96,35 @@ export type LiteralMatch = {
   capturedText?: string;
 };
 
+/** Best-scoring phrasing that actually occurs in `words`, or null if none
+ *  of the accepted phrasings match anywhere. Ties (equal confidence) prefer
+ *  whichever occurs earliest, matching a single-phrase anchor's old
+ *  behavior of finding the earliest occurrence. */
+const findBestPhrasing = (
+  phrases: string[],
+  words: Word[],
+): { at: number; tokens: string[]; confidence: number } | null => {
+  let best: { at: number; tokens: string[]; confidence: number } | null = null;
+  for (const phrase of phrases) {
+    const tokens = tokenize(phrase);
+    if (tokens.length === 0) continue;
+    const at = findPhrase(words, tokens);
+    if (at === -1) continue;
+    const confidence = windowScore(words, at, tokens);
+    if (!best || confidence > best.confidence || (confidence === best.confidence && at < best.at)) {
+      best = { at, tokens, confidence };
+    }
+  }
+  return best;
+};
+
 export const matchLiteralAnchor = (
   anchor: LiteralAnchor,
   words: Word[],
 ): LiteralMatch | null => {
-  const tokens = tokenize(anchor.phrase);
-  if (tokens.length === 0) return null;
-  const at = findPhrase(words, tokens);
-  if (at === -1) return null;
+  const found = findBestPhrasing(anchor.phrases, words);
+  if (!found) return null;
+  const { at, tokens, confidence } = found;
 
   const phraseWords = words.slice(at, at + tokens.length);
   let last = at + tokens.length - 1;
@@ -128,7 +149,7 @@ export const matchLiteralAnchor = (
     startSec: phraseWords[0].startSec,
     endSec: words[last].endSec,
     captureStartSec: captured.length > 0 ? captured[0].startSec : undefined,
-    confidence: windowScore(words, at, tokens),
+    confidence,
     quote: words.slice(at, last + 1).map((w) => w.text).join(" "),
     capturedText: anchor.capture
       ? captured.map((w) => cleanCaptured(w.text)).filter((t) => t.length > 0).join(" ")

@@ -37,4 +37,5 @@ export const defaultEdl: Edl = {
   captions: [],
   transitions: [],
   assets: {},
+  diagnostics: [],
 };

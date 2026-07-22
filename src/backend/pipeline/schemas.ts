@@ -77,8 +77,11 @@ export const AnchorWindowSchema = z.object({
 export const LiteralAnchorSchema = z.object({
   id: z.string(),
   kind: z.literal("literal"),
-  /** The fixed words the instruction tells the user to say. */
-  phrase: z.string().min(1),
+  /** The fixed words the instruction tells the user to say — one entry per
+   *  natural phrasing a user might actually speak (e.g. an instruction to
+   *  say "First is" commonly comes back as "Number one is" instead). Every
+   *  phrasing is tried; the best-scoring match wins. */
+  phrases: z.array(z.string().min(1)).min(1),
   /** Capture the user's own words following the phrase. */
   capture: z.boolean().default(false),
   /** Fixed continuation that terminates the capture ("and I'll …"). */
@@ -114,8 +117,12 @@ export const SlotSchema = z.object({
 
 /**
  * When an event fires: at a resolved anchor (kind "role", the historical
- * name), or at a fixed anchored time. Anchor timings pick an `edge` of the
- * resolved span and may nudge from it with `offsetSec`.
+ * name), at a fixed anchored time, or as one member of a "sequence" — N
+ * sibling events distributed across whatever runway actually exists after
+ * an anchor, rather than each pinned to a hardcoded offset. A sequence
+ * degrades gracefully: it compresses spacing to fit before it ever drops an
+ * item, and only drops from the tail (highest `index` first) when even the
+ * minimum spacing can't fit everyone in the available time.
  */
 export const EventTimingSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -126,6 +133,20 @@ export const EventTimingSchema = z.discriminatedUnion("kind", [
     offsetSec: z.number().default(0),
   }),
   z.object({ kind: z.literal("fixed") }).extend(AnchoredTimeSchema.shape),
+  z.object({
+    kind: z.literal("sequence"),
+    roleId: z.string(),
+    edge: z.enum(["start", "end", "captureStart"]).default("end"),
+    /** This event's 0-based position among its siblings. */
+    index: z.number().int().min(0),
+    /** Total events sharing this sequence (every sibling repeats this). */
+    count: z.number().int().min(1),
+    /** Spacing between items when the runway comfortably fits them all. */
+    targetGapSec: z.number().positive(),
+    /** Never space tighter than this — items beyond what fits even here
+     *  are dropped (highest index first), not crushed together. */
+    minGapSec: z.number().positive().default(0.12),
+  }),
 ]);
 
 /** An overlay or sound-effect event authored in the format. */
@@ -402,6 +423,10 @@ export const BlockTrimSchema = z.object({
 
 export const TrimPointsSchema = z.object({
   blocks: z.array(BlockTrimSchema),
+  /** What trim() cut beyond plain dead air — a leading/trailing chunk
+   *  judged to be filler rather than the scripted delivery — so it's
+   *  visible instead of a silent edit decision. */
+  diagnostics: z.array(z.string()).default([]),
 });
 
 // ---------------------------------------------------------------------------
@@ -524,4 +549,9 @@ export const EdlSchema = z.object({
    * mechanical; carries no timing information.
    */
   assets: z.record(z.string(), z.string()).default({}),
+  /** Every event/effect assemble() skipped or altered from what the format
+   *  declared (unfilled slot, unmatched anchor, a sequence that didn't fit
+   *  its runway, a duplicate sfx collapsed to one) — surfaced to the build
+   *  UI instead of only a server-side console.warn. */
+  diagnostics: z.array(z.string()).default([]),
 });
