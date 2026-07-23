@@ -107,7 +107,8 @@ function TrackRow({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     e.currentTarget.setPointerCapture(e.pointerId);
-    setMarquee({ startX: x, startY: y, curX: x, curY: y, additive: e.shiftKey });
+    // Shift or Cmd/Ctrl — see TimelineClip's beginDrag for why both.
+    setMarquee({ startX: x, startY: y, curX: x, curY: y, additive: e.shiftKey || e.metaKey || e.ctrlKey });
   };
 
   const onMarqueeMove = (e: React.PointerEvent) => {

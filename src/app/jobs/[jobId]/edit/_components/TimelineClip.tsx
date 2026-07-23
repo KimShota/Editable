@@ -65,7 +65,11 @@ export function TimelineClip({
   const beginDrag = (e: React.PointerEvent, kind: "move" | "in" | "out") => {
     if (locked) return;
     e.stopPropagation();
-    onSelect(e.shiftKey);
+    // Shift (the range/add convention on Windows and in most web apps) or
+    // Cmd/Ctrl (the individual-toggle convention native to macOS Finder) —
+    // accept either so it works regardless of which one someone reaches
+    // for by habit.
+    onSelect(e.shiftKey || e.metaKey || e.ctrlKey);
     // Move needs onCommitMove; a trim edge needs both onCommitTrim and to be
     // in trimEdges — otherwise this is a plain select-only click.
     if (kind === "move" ? !onCommitMove : !onCommitTrim || !trimEdges.includes(kind)) return;

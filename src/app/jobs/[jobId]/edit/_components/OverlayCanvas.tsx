@@ -128,7 +128,8 @@ export function OverlayCanvas({
 
   const selectOverlay = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    onSelect(toggleSelect(selection, "overlay", id, e.shiftKey));
+    // Shift or Cmd/Ctrl — see TimelineClip's beginDrag for why both.
+    onSelect(toggleSelect(selection, "overlay", id, e.shiftKey || e.metaKey || e.ctrlKey));
   };
 
   const renderClickableOverlay = (o: Edl["overlays"][number]) => (

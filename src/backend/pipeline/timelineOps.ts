@@ -158,6 +158,40 @@ const findIndexOrThrow = <T extends { id: string }>(arr: T[], id: string, what: 
   return i;
 };
 
+/**
+ * Captions render one group at a time in the finished video (Captions.tsx
+ * picks whichever group's time window contains the current frame — first
+ * array match wins). Unlike sfx/overlays, which can legitimately overlap
+ * and play/show simultaneously, two caption groups can NEVER overlap: if
+ * they did, one of them would just silently never appear for however long
+ * their windows overlapped — which is exactly what "the one being dragged
+ * disappears" is. So dragging one into another's time window snaps it to
+ * start right after whichever group(s) it now overlaps, keeping its own
+ * duration, instead of ever allowing the overlap to exist.
+ *
+ * One push can land inside a THIRD group sitting right after the one just
+ * pushed past (captions often sit back-to-back with little gap) — so this
+ * resolves in a loop until settled, not just once. The iteration cap is a
+ * safety net against a pathological/cyclic edge case, not the expected
+ * path; in practice this converges in 1-2 passes.
+ */
+const resolveCaptionOverlap = (edl: Edl, moved: EdlCaptionGroup): void => {
+  for (let i = 0; i < edl.captions.length; i++) {
+    const overlapping = edl.captions.filter(
+      (g) => g.id !== moved.id && g.tlInSec < moved.tlOutSec && g.tlOutSec > moved.tlInSec,
+    );
+    if (overlapping.length === 0) return;
+    const pushToSec = Math.max(...overlapping.map((g) => g.tlOutSec));
+    const delta = pushToSec - moved.tlInSec;
+    moved.tlInSec += delta;
+    moved.tlOutSec += delta;
+    for (const w of moved.words) {
+      w.tlStartSec += delta;
+      w.tlEndSec += delta;
+    }
+  }
+};
+
 /** Shift one clip on a free-floating track by a relative delta — shared by
  *  the single-clip "move" (which derives its own delta from an absolute
  *  target) and the multi-select "moveMany" (which already has one). */
@@ -182,6 +216,7 @@ const shiftFloatingClip = (edl: Edl, track: "overlay" | "sfx" | "captions", id: 
     w.tlStartSec += deltaSec;
     w.tlEndSec += deltaSec;
   }
+  resolveCaptionOverlap(edl, clip);
 };
 
 const applyMove = (edl: Edl, op: Extract<TimelineOp, { type: "move" }>): void => {
