@@ -350,6 +350,13 @@ export const JobManifestSchema = z.object({
   format: z.string(),
   bindings: z.record(z.string(), SlotFillSchema),
   overrides: OverridesSchema.optional(),
+  /** Domain vocabulary (proper nouns, brand names, coined terms) THIS
+   *  video is expected to use — the format is reused across niches, so
+   *  this belongs to the job's content, not the format's structure.
+   *  Whisper has no reason to expect these and reliably mishears them;
+   *  passed to the transcript-correction pass (see correctTranscript.ts)
+   *  as a bias. Omitted/empty skips correction. */
+  lexicon: z.array(z.string()).default([]),
 });
 
 /** One probed file — shared shape between a single-file binding and each
@@ -382,6 +389,7 @@ export const FilledFormatSchema = z.object({
   formatId: z.string(),
   bindings: z.record(z.string(), BoundAssetSchema),
   overrides: OverridesSchema.optional(),
+  lexicon: z.array(z.string()).default([]),
 });
 
 // ---------------------------------------------------------------------------

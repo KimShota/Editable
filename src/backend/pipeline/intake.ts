@@ -210,5 +210,6 @@ export const intake = (jobDir: string): FilledFormat => {
     formatId: format.id,
     bindings,
     overrides: manifest.overrides,
+    lexicon: manifest.lexicon,
   };
 };

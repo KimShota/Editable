@@ -54,7 +54,7 @@ const slugify = (s: string): string =>
 export const createJob = (formatId: string): string => {
   const jobId = `${slugify(formatId)}-${randomBytes(3).toString("hex")}`;
   fs.mkdirSync(path.join(jobDir(jobId), "assets"), { recursive: true });
-  writeJobManifest(jobId, { format: formatId, bindings: {} });
+  writeJobManifest(jobId, { format: formatId, bindings: {}, lexicon: [] });
   return jobId;
 };
 

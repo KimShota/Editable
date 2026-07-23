@@ -12,6 +12,7 @@ import {
 import { intake } from "./intake";
 import { loadFormat } from "./loader";
 import { transcribe } from "./transcribe";
+import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
 import { resolveRoles } from "./resolveRoles";
 import { ResolverChoice } from "./resolvers";
@@ -101,10 +102,28 @@ const main = async () => {
   const format = loadFormat(filled.formatId);
   if (args.only === "intake") return;
 
-  const transcript = wants("transcribe")
+  let transcript = wants("transcribe")
     ? transcribe(format, filled)
     : read("transcript", TranscriptSchema);
-  if (wants("transcribe")) write("transcript", transcript);
+  if (wants("transcribe")) {
+    const before = transcript;
+    transcript = await correctTranscript(filled, transcript, args.resolver);
+    if (transcript !== before) {
+      for (const block of transcript.blocks) {
+        const rawBlock = before.blocks.find((b) => b.blockId === block.blockId)!;
+        for (let t = 0; t < block.takes.length; t++) {
+          for (let i = 0; i < block.takes[t].length; i++) {
+            const was = rawBlock.takes[t][i].text;
+            const now = block.takes[t][i].text;
+            if (was !== now) {
+              console.log(`    correction ${block.blockId}: "${was}" → "${now}"`);
+            }
+          }
+        }
+      }
+    }
+    write("transcript", transcript);
+  }
   if (args.only === "transcribe") return;
 
   const trims = wants("trim")

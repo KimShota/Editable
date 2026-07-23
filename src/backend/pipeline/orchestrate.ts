@@ -3,6 +3,7 @@ import path from "node:path";
 import { intake } from "./intake";
 import { loadFormat } from "./loader";
 import { transcribe } from "./transcribe";
+import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
 import { resolveRoles } from "./resolveRoles";
 import { ResolverChoice } from "./resolvers";
@@ -43,7 +44,8 @@ export const buildJob = async (
 
   const format = loadFormat(filled.formatId);
 
-  const transcript = transcribe(format, filled);
+  const rawTranscript = transcribe(format, filled);
+  const transcript = await correctTranscript(filled, rawTranscript, resolver);
   writeArtifact(jobId, "transcript", transcript);
 
   const trims = await trim(format, filled, transcript, resolver);
