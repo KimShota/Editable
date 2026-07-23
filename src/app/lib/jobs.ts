@@ -6,6 +6,8 @@ import { z } from "zod";
 import { JobManifestSchema } from "@backend/pipeline/schemas";
 import { JobManifest } from "@backend/pipeline/types";
 import { repoRoot, artifactsDir, outDir } from "@backend/pipeline/paths";
+import { HookFeedbackResultSchema, ScriptSuggestionSchema } from "@backend/content/schemas";
+import { HookFeedbackResult, ScriptSuggestion } from "@backend/content/types";
 
 /**
  * Job directories ARE the app's "projects" — a job is created the moment a
@@ -45,6 +47,34 @@ export const readJobManifest = (jobId: string): JobManifest => {
 
 export const writeJobManifest = (jobId: string, manifest: JobManifest): void => {
   fs.writeFileSync(manifestPath(jobId), JSON.stringify(manifest, null, 2));
+};
+
+/**
+ * Script suggestions and hook feedback (see @backend/content/) live beside
+ * job.json, not in artifacts/ — they're job CONTENT (a creative aid the
+ * user asked for), never read by any pipeline stage, unlike the
+ * intake/transcribe/trim/roles/edl artifacts that ARE derived-and-consumed
+ * pipeline state.
+ */
+const scriptPath = (jobId: string): string => path.join(jobDir(jobId), "script.json");
+const hookFeedbackPath = (jobId: string): string => path.join(jobDir(jobId), "hook-feedback.json");
+
+export const jobScriptExists = (jobId: string): boolean => fs.existsSync(scriptPath(jobId));
+
+export const readJobScript = (jobId: string): ScriptSuggestion =>
+  ScriptSuggestionSchema.parse(JSON.parse(fs.readFileSync(scriptPath(jobId), "utf8")));
+
+export const writeJobScript = (jobId: string, script: ScriptSuggestion): void => {
+  fs.writeFileSync(scriptPath(jobId), JSON.stringify(script, null, 2));
+};
+
+export const jobHookFeedbackExists = (jobId: string): boolean => fs.existsSync(hookFeedbackPath(jobId));
+
+export const readJobHookFeedback = (jobId: string): HookFeedbackResult =>
+  HookFeedbackResultSchema.parse(JSON.parse(fs.readFileSync(hookFeedbackPath(jobId), "utf8")));
+
+export const writeJobHookFeedback = (jobId: string, feedback: HookFeedbackResult): void => {
+  fs.writeFileSync(hookFeedbackPath(jobId), JSON.stringify(feedback, null, 2));
 };
 
 const slugify = (s: string): string =>

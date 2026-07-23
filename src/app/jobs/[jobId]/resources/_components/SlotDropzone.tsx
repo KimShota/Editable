@@ -30,7 +30,7 @@ async function bindLibraryRef(jobId: string, slotName: string, ref: LibraryDragP
   return data.binding;
 }
 
-async function bindText(jobId: string, slotName: string, text: string): Promise<Binding> {
+export async function bindText(jobId: string, slotName: string, text: string): Promise<Binding> {
   const body = new FormData();
   body.set("slot", slotName);
   body.set("text", text);

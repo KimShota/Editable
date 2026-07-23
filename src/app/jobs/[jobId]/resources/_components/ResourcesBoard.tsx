@@ -3,9 +3,12 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Format, Slot } from "@backend/pipeline/types";
+import type { HookFeedbackResult, ScriptSuggestion } from "@backend/content/types";
 import { Button, Card, Pill } from "../../../../_components/ui";
 import { LibraryPanel } from "../../../../_components/library/LibraryPanel";
-import { Binding, SlotDropzone } from "./SlotDropzone";
+import { Binding, SlotDropzone, bindText } from "./SlotDropzone";
+import { ScriptPanel } from "./ScriptPanel";
+import { HookFeedbackPanel } from "./HookFeedbackPanel";
 
 /** Every slot the format declares: block slots, shared slots, and music — same shape allSlots() computes server-side. */
 const allSlots = (format: Format): Slot[] => [
@@ -18,13 +21,18 @@ export function ResourcesBoard({
   jobId,
   format,
   initialBindings,
+  initialScript = null,
+  initialHookFeedback = null,
 }: {
   jobId: string;
   format: Format;
   initialBindings: Record<string, Binding>;
+  initialScript?: ScriptSuggestion | null;
+  initialHookFeedback?: HookFeedbackResult | null;
 }) {
   const router = useRouter();
   const [bindings, setBindings] = useState<Record<string, Binding | undefined>>(initialBindings);
+  const [script, setScript] = useState<ScriptSuggestion | null>(initialScript);
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [building, setBuilding] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
@@ -38,9 +46,16 @@ export function ResourcesBoard({
   const requiredSlots = useMemo(() => allSlots(format).filter((s) => s.required), [format]);
   const filledCount = requiredSlots.filter((s) => bindings[s.name]).length;
   const ready = filledCount === requiredSlots.length;
+  /** "The hook" = the first voice block, true across every format so far
+   *  without hardcoding an id string — see content/virality.ts. */
+  const hookBlock = useMemo(() => format.blocks.find((b) => b.kind === "voice"), [format]);
 
   const setBinding = (slotName: string, binding: Binding | undefined) => {
     setBindings((prev) => ({ ...prev, [slotName]: binding }));
+  };
+
+  const applySuggestion = async (slotName: string, text: string) => {
+    setBinding(slotName, await bindText(jobId, slotName, text));
   };
 
   const continueToEditor = async (opts: { force?: boolean } = {}) => {
@@ -70,6 +85,8 @@ export function ResourcesBoard({
   return (
     <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1fr_340px]">
       <div className="flex flex-col gap-6">
+        <ScriptPanel jobId={jobId} script={script} onScriptUpdated={setScript} />
+
         {format.blocks.map((block) => (
           <Card key={block.id} className="p-6">
             <div className="mb-4 flex items-center gap-2">
@@ -79,17 +96,42 @@ export function ResourcesBoard({
               <Pill>{block.kind === "voice" ? "spoken" : "b-roll"}</Pill>
             </div>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-              {block.slots.map((slot) => (
-                <SlotDropzone
-                  key={slot.name}
-                  jobId={jobId}
-                  slot={slot}
-                  binding={bindings[slot.name]}
-                  onChange={setBinding}
-                  multi={block.kind === "voice" && slot.name === block.videoSlot}
-                />
-              ))}
+              {block.slots.map((slot) => {
+                const suggestion = script?.suggestions.find(
+                  (s) => s.blockId === block.id && s.slotName === slot.name,
+                );
+                return (
+                  <div key={slot.name} className="flex flex-col gap-2">
+                    {suggestion && (
+                      <div className="rounded-lg border border-dashed border-[color:var(--accent)]/40 bg-[color:var(--accent)]/5 p-3">
+                        <p className="mb-1 text-[11px] tracking-wide text-[color:var(--accent)] uppercase">
+                          Suggested
+                        </p>
+                        <p className="text-sm text-[color:var(--ink-dim)] italic">&ldquo;{suggestion.text}&rdquo;</p>
+                        {slot.mediaType === "text" && (
+                          <button
+                            onClick={() => applySuggestion(slot.name, suggestion.text)}
+                            className="mt-1 text-xs font-medium text-[color:var(--accent)]"
+                          >
+                            Use this
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <SlotDropzone
+                      jobId={jobId}
+                      slot={slot}
+                      binding={bindings[slot.name]}
+                      onChange={setBinding}
+                      multi={block.kind === "voice" && slot.name === block.videoSlot}
+                    />
+                  </div>
+                );
+              })}
             </div>
+            {hookBlock && block.id === hookBlock.id && (
+              <HookFeedbackPanel jobId={jobId} initialFeedback={initialHookFeedback} />
+            )}
           </Card>
         ))}
 

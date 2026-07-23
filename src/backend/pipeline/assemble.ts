@@ -14,6 +14,7 @@ import {
   ResolvedRoles,
   Transcript,
   TrimPoints,
+  Word,
 } from "./types";
 import { EdlSchema } from "./schemas";
 import { anchoredTimeSec, clamp, concatenateTakes } from "./timing";
@@ -412,6 +413,17 @@ export const assemble = (
       const rawTakes = transcript.blocks.find((b) => b.blockId === block.id)?.takes ?? [[]];
       const { words } = concatenateTakes(rawTakes, trim.takes);
 
+      // A literal anchor's captured span is the format author's own signal
+      // for "this is the thing that matters here" (a code's name, a
+      // captured keyword) — free to derive, since resolveRoles already
+      // computed it; no extra LLM call needed to know which words to
+      // emphasize in the caption.
+      const captureSpans = resolved.roles
+        .filter((r) => r.blockId === block.id && r.captureStartSec !== undefined)
+        .map((r) => ({ start: r.captureStartSec!, end: r.endSec ?? r.captureStartSec! }));
+      const isEmphasized = (w: Word): boolean =>
+        captureSpans.some((span) => w.startSec < span.end && w.endSec > span.start);
+
       let group: EdlCaptionGroup | null = null;
       for (const w of words) {
         const tlStartSec = tlInSec + w.startSec;
@@ -425,7 +437,7 @@ export const assemble = (
           group = { id: `caption-${captions.length}`, words: [], tlInSec: tlStartSec, tlOutSec: tlEndSec };
           captions.push(group);
         }
-        group!.words.push({ text: w.text, tlStartSec, tlEndSec });
+        group!.words.push({ text: w.text, tlStartSec, tlEndSec, emphasis: isEmphasized(w) });
         group!.tlOutSec = Math.min(tlEndSec + CAPTION_TAIL_SEC, tlOutSec);
       }
       // A group stays up until the next one takes over.

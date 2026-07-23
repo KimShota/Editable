@@ -532,6 +532,12 @@ export const EdlCaptionWordSchema = z.object({
   text: z.string(),
   tlStartSec: z.number(),
   tlEndSec: z.number(),
+  /** True when this word falls inside a literal anchor's captured span
+   *  (the format author's own signal for "this is the thing that matters
+   *  here" — a code's name, a captured keyword). Drives which words get
+   *  the strong highlight treatment in Captions.tsx, instead of every
+   *  currently-spoken word getting it regardless of semantic weight. */
+  emphasis: z.boolean().default(false),
 });
 
 export const EdlCaptionGroupSchema = z.object({
