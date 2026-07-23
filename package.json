@@ -35,6 +35,7 @@
   },
   "scripts": {
     "pipeline": "tsx src/backend/pipeline/run.ts",
+    "author": "tsx src/backend/authoring/run.ts",
     "dev": "remotion studio src/backend/index.ts",
     "build": "remotion bundle src/backend/index.ts",
     "upgrade": "remotion upgrade",

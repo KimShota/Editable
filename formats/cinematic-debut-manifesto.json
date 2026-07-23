@@ -1,0 +1,373 @@
+{
+  "id": "cinematic-debut-manifesto",
+  "name": "The [Profession] Debut Manifesto",
+  "niche": "any person launching a personal brand / creator account in a specific field (finance, fitness, law, cooking, etc.) who wants a dramatic trailer-style intro",
+  "description": "A talking-head delivers a line-by-line self-introduction — a bold audience call-out, name reveal, credential, and outrageous ambition — with each beat punched by a single giant word overlay and intercut with moody silhouette b-roll, resolving into a dramatic music montage, a third-party 'please follow him/her' CTA, and a full-screen title card.",
+  "fps": 30,
+  "width": 720,
+  "height": 1280,
+  "captionStyle": {
+    "component": "Captions",
+    "params": {
+      "position": "lowerThird"
+    }
+  },
+  "musicVolume": 0.5,
+  "sharedSlots": [
+    {
+      "name": "dramatic-music",
+      "mediaType": "audio",
+      "required": false,
+      "instructions": "A tense, building cinematic/trailer track. Should swell right as the spoken intro ends and carry the silent montage."
+    }
+  ],
+  "blocks": [
+    {
+      "id": "hook",
+      "title": "Hook — call out your audience",
+      "kind": "voice",
+      "videoSlot": "hook-clip",
+      "slots": [
+        {
+          "name": "hook-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Sit at a desk framed like an office/authority setting (e.g. a wall map or shelf behind you), lit dark and moody. Look straight into the lens, hands steepled, and say slowly and gravely: 'This is a message to all [your audience]' — e.g. 'to all finance pros', 'to all personal trainers'. Deliver it like a threat, not a greeting."
+        }
+      ],
+      "captions": true,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "hook-marker",
+          "kind": "literal",
+          "phrases": [
+            "This is a message to all",
+            "This is a message to",
+            "This is a message for"
+          ],
+          "capture": true,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.1
+          }
+        }
+      ],
+      "events": [],
+      "transitionAfter": {
+        "component": "cut",
+        "params": {
+          "durationSec": 0
+        }
+      }
+    },
+    {
+      "id": "name-reveal",
+      "title": "Name reveal",
+      "kind": "voice",
+      "videoSlot": "name-clip",
+      "slots": [
+        {
+          "name": "name-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Same dark desk framing, calm and confident. Say: 'My name is [your name].' Pause on your name so the big word can hit."
+        }
+      ],
+      "captions": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "name-marker",
+          "kind": "literal",
+          "phrases": [
+            "My name is",
+            "The name is",
+            "I'm",
+            "I am"
+          ],
+          "capture": true,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.4
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "name-word-overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "name-marker",
+              "textTemplate": "{captured}",
+              "variant": "title",
+              "fontSize": 110
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "name-marker",
+            "edge": "captureStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "transitionAfter": {
+        "component": "cut",
+        "params": {
+          "durationSec": 0
+        }
+      }
+    },
+    {
+      "id": "credential",
+      "title": "Credential",
+      "kind": "voice",
+      "videoSlot": "credential-clip",
+      "slots": [
+        {
+          "name": "credential-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Same setup. State your background in one short phrase: 'I'm a [credential]' — e.g. 'a retired accountant', 'a former lawyer'. Land hard on the key title word."
+        }
+      ],
+      "captions": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "cred-marker",
+          "kind": "literal",
+          "phrases": [
+            "I'm a",
+            "I am a",
+            "I'm an",
+            "I am an"
+          ],
+          "capture": true,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.3
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "cred-word-overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "cred-marker",
+              "textTemplate": "{captured}",
+              "variant": "title",
+              "fontSize": 90
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cred-marker",
+            "edge": "captureStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "transitionAfter": {
+        "component": "cut",
+        "params": {
+          "durationSec": 0
+        }
+      }
+    },
+    {
+      "id": "bold-claim",
+      "title": "The outrageous ambition",
+      "kind": "voice",
+      "videoSlot": "claim-clip",
+      "slots": [
+        {
+          "name": "claim-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Same dark desk. Deliver your grand, slightly over-the-top mission in one breath: 'And I'm gonna [take over / become the biggest X in the world]'. Escalate your intensity toward the end."
+        },
+        {
+          "name": "keyword-text",
+          "mediaType": "text",
+          "required": true,
+          "instructions": "The single biggest, boldest word of your ambition to slam on screen (e.g. 'BIGGEST', 'DOMINATE', 'EVERYWHERE'). One word, ALL CAPS."
+        }
+      ],
+      "captions": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "claim-marker",
+          "kind": "literal",
+          "phrases": [
+            "And I'm gonna",
+            "And I'm going to",
+            "I'm gonna",
+            "I am going to"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "claim-word-overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "keyword-text",
+              "variant": "title",
+              "fontSize": 120
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "claim-marker",
+            "edge": "end",
+            "offsetSec": 1
+          }
+        }
+      ],
+      "transitionAfter": {
+        "component": "whooshZoom",
+        "params": {
+          "durationSec": 0.4
+        }
+      }
+    },
+    {
+      "id": "cinematic-montage",
+      "title": "Silent dramatic montage",
+      "kind": "broll",
+      "videoSlot": "montage-clip",
+      "slots": [
+        {
+          "name": "montage-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Silent, high-contrast montage against a plain backdrop: shoot yourself as a backlit silhouette from a few angles (thinking pose, arms crossed, turning to camera) plus one slow close-up 'reveal' of a prop symbolizing your field (cash, a tool, a book). No talking — this rides on the music. Keep each shot ~1s and moody."
+        }
+      ],
+      "captions": false,
+      "roles": [],
+      "anchors": [],
+      "events": [
+        {
+          "id": "montage-music",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "dramatic-music",
+              "volume": 0.9
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "transitionAfter": {
+        "component": "cut",
+        "params": {
+          "durationSec": 0
+        }
+      }
+    },
+    {
+      "id": "cta",
+      "title": "Third-party follow CTA",
+      "kind": "voice",
+      "videoSlot": "cta-clip",
+      "slots": [
+        {
+          "name": "cta-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Break the serious tone completely: bright, normal lighting, a partner/friend/family member appears with you and says the ask warmly and a little jokingly: '[This person] wants to be famous, so please follow him/her.' End on a candid laugh or playful beat."
+        }
+      ],
+      "captions": true,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "cta-marker",
+          "kind": "literal",
+          "phrases": [
+            "so please follow",
+            "please follow him",
+            "please follow her",
+            "make sure to follow"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockEnd",
+            "offsetSec": -1.5
+          }
+        }
+      ],
+      "events": [],
+      "transitionAfter": {
+        "component": "cut",
+        "params": {
+          "durationSec": 0
+        }
+      }
+    },
+    {
+      "id": "end-card",
+      "title": "Title card",
+      "kind": "broll",
+      "videoSlot": "endcard-clip",
+      "slots": [
+        {
+          "name": "endcard-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Full-body shot against a plain seamless backdrop, standing still and confident (arms crossed), holding the pose for ~2s. Leave clear space at the top and bottom of frame for the title text."
+        },
+        {
+          "name": "debut-title",
+          "mediaType": "text",
+          "required": true,
+          "instructions": "The title-card text, e.g. \"[NAME]'S DEBUT\". Keep it short and dramatic, ALL CAPS."
+        }
+      ],
+      "captions": false,
+      "roles": [],
+      "anchors": [],
+      "events": [
+        {
+          "id": "endcard-title-overlay",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "debut-title",
+              "variant": "title",
+              "fontSize": 100
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ]
+    }
+  ]
+}

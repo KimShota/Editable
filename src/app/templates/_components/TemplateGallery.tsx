@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { Card, Pill } from "../../_components/ui";
 import type { FormatSummary } from "../../lib/formats";
 import type { JobSummary } from "../../lib/jobs";
@@ -64,6 +65,13 @@ export function TemplateGallery({
             </div>
           </>
         )}
+
+        <Link
+          href="/authoring/new"
+          className="ml-auto rounded-full bg-[color:var(--accent)] px-4 py-1.5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-wide text-[color:var(--accent-ink)] transition-transform hover:scale-[1.03]"
+        >
+          + Create from a reel
+        </Link>
       </div>
 
       {tab === "browse" ? (

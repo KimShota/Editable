@@ -11,6 +11,10 @@ models
 artifacts
 public/jobs
 
+# Format-authoring: downloaded reference clips, sampled frames, drafts
+# (root-anchored — src/backend/authoring/ and src/app/authoring/ are source code)
+/authoring
+
 # Next.js app
 .next
 next-env.d.ts

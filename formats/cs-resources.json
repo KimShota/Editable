@@ -1,7 +1,7 @@
 {
   "id": "cs-resources",
   "name": "3 Resources for [Painpoint]",
-  "niche": "CS students",
+  "niche": "AI",
   "description": "Hook states a painpoint to camera and pivots to the solution; three quick resource cards over screen recordings; follow CTA. Ported from the reference reel (timings at 30fps: hook 2.93s, resources 1.77/1.63/1.60s, cta 1.60s).",
   "fps": 30,
   "width": 1080,

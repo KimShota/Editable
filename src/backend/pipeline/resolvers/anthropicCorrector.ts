@@ -18,7 +18,9 @@ const DEFAULT_MODEL = "claude-opus-4-8";
 
 export const anthropicCorrector = (): TranscriptCorrector => {
   const client = new Anthropic();
-  const model = process.env.EDITABLE_LLM_MODEL ?? DEFAULT_MODEL;
+  // `||` (not `??`) deliberately — an EDITABLE_LLM_MODEL="" in .env is "not
+  // set", not "use an empty model string" (which the API rejects outright).
+  const model = process.env.EDITABLE_LLM_MODEL || DEFAULT_MODEL;
 
   return {
     name: `anthropic:${model}`,

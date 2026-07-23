@@ -19,3 +19,9 @@ export const artifactsDir = (jobId: string): string =>
 
 /** public/-relative staging prefix for a job's assets (served by staticFile). */
 export const publicJobPrefix = (jobId: string): string => `jobs/${jobId}`;
+
+/** Where a format-authoring draft's working files (reference clip, sampled
+ *  frames, analysis/draft artifacts) land — the authoring-pipeline analog
+ *  of artifactsDir. */
+export const authoringDir = (draftId: string): string =>
+  path.join(repoRoot, "authoring", draftId);
