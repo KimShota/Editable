@@ -20,6 +20,7 @@ export function TimelineClip({
   height,
   label,
   sublabel,
+  thumbnailSrc,
   colorClass,
   selected,
   locked = false,
@@ -38,6 +39,10 @@ export function TimelineClip({
   height: number;
   label: string;
   sublabel?: string;
+  /** An image/gif clip's own source, shown as a filmstrip-style background
+   *  fill so it reads as "that picture" at a glance instead of a plain
+   *  color box with a filename. */
+  thumbnailSrc?: string;
   colorClass: string;
   selected: boolean;
   locked?: boolean;
@@ -46,7 +51,10 @@ export function TimelineClip({
    *  its trailing edge (duration) is ever draggable. */
   trimEdges?: ("in" | "out")[];
   pxPerSec: number;
-  onSelect: () => void;
+  /** True when the click was additive (Shift held) — lets the parent
+   *  decide whether to toggle this clip in/out of a multi-selection or
+   *  replace it with just this one. */
+  onSelect: (additive: boolean) => void;
   onCommitMove?: (deltaSec: number) => void;
   onCommitTrim?: (edge: "in" | "out", deltaSec: number) => void;
 }) {
@@ -57,7 +65,7 @@ export function TimelineClip({
   const beginDrag = (e: React.PointerEvent, kind: "move" | "in" | "out") => {
     if (locked) return;
     e.stopPropagation();
-    onSelect();
+    onSelect(e.shiftKey);
     // Move needs onCommitMove; a trim edge needs both onCommitTrim and to be
     // in trimEdges — otherwise this is a plain select-only click.
     if (kind === "move" ? !onCommitMove : !onCommitTrim || !trimEdges.includes(kind)) return;
@@ -112,8 +120,14 @@ export function TimelineClip({
           : "border-black/20"
       } ${locked ? "opacity-80" : ""}`}
     >
-      <p className="truncate text-[11px] leading-tight font-medium text-white">{label}</p>
-      {sublabel && <p className="truncate text-[10px] leading-tight text-white/70">{sublabel}</p>}
+      {thumbnailSrc && (
+        <>
+          <img src={thumbnailSrc} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
+        </>
+      )}
+      <p className="relative truncate text-[11px] leading-tight font-medium text-white">{label}</p>
+      {sublabel && <p className="relative truncate text-[10px] leading-tight text-white/70">{sublabel}</p>}
 
       {!locked && onCommitTrim && trimEdges.includes("in") && (
         <div

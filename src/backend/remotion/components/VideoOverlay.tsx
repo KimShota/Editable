@@ -12,11 +12,12 @@ import {
  * ON TOP of the talking clip rather than replacing it — the voice track
  * underneath keeps playing, so the overlay itself is muted. Loops nothing;
  * if the recording is shorter than its window it holds its last frame.
+ *
+ * Fills its wrapper box entirely (see ImageOverlay.tsx for why — the box
+ * itself already carries the right size/position and is what the editor's
+ * canvas drags/resizes directly).
  */
-export const VideoOverlay: React.FC<{ src?: string; widthPct?: number }> = ({
-  src,
-  widthPct = 88,
-}) => {
+export const VideoOverlay: React.FC<{ src?: string }> = ({ src }) => {
   const frame = useCurrentFrame();
   if (!src) return null;
   const progress = interpolate(frame, [0, 5], [0, 1], {
@@ -27,8 +28,8 @@ export const VideoOverlay: React.FC<{ src?: string; widthPct?: number }> = ({
     <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
       <div
         style={{
-          width: `${widthPct}%`,
-          maxHeight: "62%",
+          width: "100%",
+          height: "100%",
           borderRadius: 24,
           overflow: "hidden",
           opacity: progress,
@@ -39,7 +40,7 @@ export const VideoOverlay: React.FC<{ src?: string; widthPct?: number }> = ({
         <OffthreadVideo
           src={staticFile(src)}
           muted
-          style={{ width: "100%", display: "block" }}
+          style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
         />
       </div>
     </AbsoluteFill>

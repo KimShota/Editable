@@ -289,13 +289,19 @@ export const FormatSchema = z
           ctx.addIssue({ code: "custom", message: `duplicate event id "${event.id}"` });
         }
         eventIds.add(event.id);
-        if (event.timing.kind === "role" && !anchorIds.has(event.timing.roleId)) {
+        if (
+          (event.timing.kind === "role" || event.timing.kind === "sequence") &&
+          !anchorIds.has(event.timing.roleId)
+        ) {
           ctx.addIssue({
             code: "custom",
             message: `event "${event.id}": unknown anchor "${event.timing.roleId}" in block "${block.id}"`,
           });
         }
-        if (event.until?.kind === "role" && !anchorIds.has(event.until.roleId)) {
+        if (
+          (event.until?.kind === "role" || event.until?.kind === "sequence") &&
+          !anchorIds.has(event.until.roleId)
+        ) {
           ctx.addIssue({
             code: "custom",
             message: `event "${event.id}": unknown "until" anchor "${event.until.roleId}" in block "${block.id}"`,
@@ -476,6 +482,9 @@ export const EdlVideoSegmentSchema = z.object({
   tlInSec: z.number().min(0),
   tlOutSec: z.number().positive(),
   muted: z.boolean().default(false),
+  /** Independent of `muted` (which is all-or-nothing) — lets a clip's own
+   *  audio be dialed down/up rather than only ever fully on or fully off. */
+  volume: z.number().min(0).max(1).default(1),
 });
 
 export const EdlOverlaySchema = z.object({
@@ -485,6 +494,17 @@ export const EdlOverlaySchema = z.object({
   params: z.record(z.string(), z.unknown()).default({}),
   tlInSec: z.number().min(0),
   tlOutSec: z.number().positive(),
+  /**
+   * On-canvas box, as a fraction of the composition's width/height —
+   * resolution-independent, and every overlay component already renders as
+   * a full-frame, self-centering AbsoluteFill, so wrapping it in a box this
+   * size/position (see EdlVideo.tsx) reproduces today's behavior exactly
+   * at the default (0, 0, 1, 1) with zero changes inside the components.
+   */
+  x: z.number().default(0),
+  y: z.number().default(0),
+  width: z.number().positive().default(1),
+  height: z.number().positive().default(1),
 });
 
 export const EdlSfxSchema = z.object({

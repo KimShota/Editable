@@ -88,6 +88,7 @@ const Segment: React.FC<{
       <OffthreadVideo
         src={src}
         muted={seg.muted}
+        volume={() => seg.volume}
         startFrom={Math.round(seg.srcInSec * fps)}
         endAt={Math.round(seg.srcOutSec * fps)}
         style={{ width: "100%", height: "100%", objectFit: "cover" }}
@@ -138,7 +139,17 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
             durationInFrames={toFrames(overlay.tlOutSec) - toFrames(overlay.tlInSec)}
             name={`overlay:${overlay.id}`}
           >
-            <Component {...overlay.params} />
+            <div
+              style={{
+                position: "absolute",
+                left: `${overlay.x * 100}%`,
+                top: `${overlay.y * 100}%`,
+                width: `${overlay.width * 100}%`,
+                height: `${overlay.height * 100}%`,
+              }}
+            >
+              <Component {...overlay.params} />
+            </div>
           </Sequence>
         );
       })}

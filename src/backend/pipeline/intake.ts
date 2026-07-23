@@ -27,10 +27,6 @@ type ProbedMedia = {
 
 /** Classify a media file and pull the metadata later stages rely on. */
 export const probeFile = (absPath: string): ProbedMedia => {
-  if (IMAGE_EXTENSIONS.has(path.extname(absPath).toLowerCase())) {
-    return { mediaType: "image" };
-  }
-
   const raw = execFileSync(
     "ffprobe",
     ["-v", "error", "-show_streams", "-show_format", "-of", "json", absPath],
@@ -54,6 +50,14 @@ export const probeFile = (absPath: string): ProbedMedia => {
     (s) => s.codec_type === "video" && s.disposition?.attached_pic !== 1,
   );
   const hasAudio = streams.some((s) => s.codec_type === "audio");
+
+  // Images decode as a single-frame "video" stream under ffprobe — read it
+  // for width/height (assemble.ts needs the real aspect ratio to size an
+  // overlay's default on-canvas box to actually fit the picture, not the
+  // whole frame), but classify by extension rather than stream shape.
+  if (IMAGE_EXTENSIONS.has(path.extname(absPath).toLowerCase())) {
+    return { mediaType: "image", width: video?.width, height: video?.height };
+  }
 
   if (video) {
     return {

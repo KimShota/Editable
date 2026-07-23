@@ -53,7 +53,7 @@ export const MediaPanel = memo(function MediaPanel({
               const posterAtSec = v.srcInSec + (v.srcOutSec - v.srcInSec) / 2;
               const thumbSrc = `/api/jobs/${edl.jobId}/preview-thumbnail?src=${encodeURIComponent(v.src)}&t=${posterAtSec}`;
               return (
-              <button key={v.id} onClick={() => onJumpTo({ track: "video", id: v.id }, v.tlInSec)} className={cardClass}>
+              <button key={v.id} onClick={() => onJumpTo({ track: "video", ids: [v.id] }, v.tlInSec)} className={cardClass}>
                 <div className="aspect-9/16 overflow-hidden rounded-t-lg bg-black/40">
                   {/* A static poster frame, not a live <video> — 16+ of
                       those mounted at once competed with the Player for
@@ -76,7 +76,7 @@ export const MediaPanel = memo(function MediaPanel({
           <div className="flex flex-col gap-2">
             {edl.music && (
               <button
-                onClick={() => onJumpTo({ track: "music", id: MUSIC_ID }, 0)}
+                onClick={() => onJumpTo({ track: "music", ids: [MUSIC_ID] }, 0)}
                 className={`flex items-center gap-2.5 p-2 ${cardClass}`}
               >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[color:var(--ed-accent-dim)] text-[color:var(--ed-accent)]">
@@ -91,7 +91,7 @@ export const MediaPanel = memo(function MediaPanel({
             {edl.sfx.map((s) => (
               <button
                 key={s.id}
-                onClick={() => onJumpTo({ track: "sfx", id: s.id }, s.tlInSec)}
+                onClick={() => onJumpTo({ track: "sfx", ids: [s.id] }, s.tlInSec)}
                 className={`flex items-center gap-2.5 p-2 ${cardClass}`}
               >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[color:var(--ed-accent-dim)] text-[color:var(--ed-accent)]">
@@ -114,7 +114,7 @@ export const MediaPanel = memo(function MediaPanel({
             {edl.overlays.map((o) => (
               <button
                 key={o.id}
-                onClick={() => onJumpTo({ track: "overlay", id: o.id }, o.tlInSec)}
+                onClick={() => onJumpTo({ track: "overlay", ids: [o.id] }, o.tlInSec)}
                 className={`p-2 ${cardClass}`}
               >
                 <p className="truncate text-[11px] text-[color:var(--ed-ink)]">

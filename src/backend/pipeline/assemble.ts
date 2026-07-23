@@ -95,6 +95,49 @@ export const assemble = (
     params: Record<string, unknown>;
     audioDurationSec?: number;
     audioOnsetSec?: number;
+    /** The bound image/video's own pixel size, when known — lets the
+     *  overlay's default on-canvas box (see defaultOverlayBox below) fit
+     *  the actual picture instead of defaulting to the full frame. */
+    mediaWidth?: number;
+    mediaHeight?: number;
+  };
+
+  /** Max box size (fraction of the frame) each media overlay type used to
+   *  hard-code internally via CSS — now expressed as the box itself, so
+   *  the box IS the visible content instead of a full-frame wrapper the
+   *  component quietly shrinks inside of. */
+  const DEFAULT_MEDIA_BOX_MAX: Record<string, { maxWidthFrac: number; maxHeightFrac: number }> = {
+    ImageOverlay: { maxWidthFrac: 0.7, maxHeightFrac: 0.6 },
+    VideoOverlay: { maxWidthFrac: 0.88, maxHeightFrac: 0.62 },
+  };
+
+  /** A centered box, as large as it can be within the component's usual
+   *  max size, without exceeding the media's own aspect ratio — computed
+   *  in PIXEL space since x/y/width/height fractions are of DIFFERENT
+   *  absolute scales (format.width vs. format.height). */
+  const defaultOverlayBox = (
+    component: string,
+    params: Record<string, unknown>,
+    mediaWidth: number | undefined,
+    mediaHeight: number | undefined,
+  ): { x: number; y: number; width: number; height: number } => {
+    const bounds = DEFAULT_MEDIA_BOX_MAX[component];
+    if (!bounds || !mediaWidth || !mediaHeight) {
+      return { x: 0, y: 0, width: 1, height: 1 };
+    }
+    const widthPctParam = typeof params.widthPct === "number" ? params.widthPct / 100 : undefined;
+    const maxWidthPx = (widthPctParam ?? bounds.maxWidthFrac) * format.width;
+    const maxHeightPx = bounds.maxHeightFrac * format.height;
+    const aspect = mediaWidth / mediaHeight;
+    let widthPx = maxWidthPx;
+    let heightPx = maxWidthPx / aspect;
+    if (heightPx > maxHeightPx) {
+      heightPx = maxHeightPx;
+      widthPx = maxHeightPx * aspect;
+    }
+    const width = widthPx / format.width;
+    const height = heightPx / format.height;
+    return { x: (1 - width) / 2, y: (1 - height) / 2, width, height };
   };
 
   // Several events commonly share one sfx file (e.g. every "click" cue) —
@@ -124,6 +167,8 @@ export const assemble = (
     const params: Record<string, unknown> = {};
     let audioDurationSec: number | undefined;
     let onsetSec: number | undefined;
+    let mediaWidth: number | undefined;
+    let mediaHeight: number | undefined;
     for (const [key, value] of Object.entries(ref.params)) {
       if (key === "textSlot") {
         const text = textAsset(filled, String(value));
@@ -139,6 +184,9 @@ export const assemble = (
         if (key === "audioSlot") {
           audioDurationSec = asset.durationSec;
           onsetSec = asset.durationSec !== undefined ? cachedAudioOnsetSec(asset.absPath, asset.durationSec) : 0;
+        } else {
+          mediaWidth = asset.width;
+          mediaHeight = asset.height;
         }
       } else if (key === "textAnchor") {
         const captured = resolved.roles.find(
@@ -158,7 +206,7 @@ export const assemble = (
         params[key] = value;
       }
     }
-    return { component: ref.component, params, audioDurationSec, audioOnsetSec: onsetSec };
+    return { component: ref.component, params, audioDurationSec, audioOnsetSec: onsetSec, mediaWidth, mediaHeight };
   };
 
   /** Where an anchor's chosen edge (start/end/captureStart) actually lands. */
@@ -282,6 +330,7 @@ export const assemble = (
         tlOutSec: segCursor + durationSec,
         // B-roll plays under the music/voice; its own audio is muted.
         muted: block.kind === "broll",
+        volume: 1,
       });
       segCursor += durationSec;
       lastSegId = segId;
@@ -315,12 +364,23 @@ export const assemble = (
           );
           continue;
         }
+        const defaultBox = defaultOverlayBox(
+          resolvedRef.component,
+          resolvedRef.params,
+          resolvedRef.mediaWidth,
+          resolvedRef.mediaHeight,
+        );
         overlays.push({
           id: event.id,
           component: resolvedRef.component,
           params: resolvedRef.params,
           tlInSec: atSec,
           tlOutSec: endSec,
+          // A media overlay's default box fits the actual picture (see
+          // defaultOverlayBox); anything else (text, composite cards)
+          // defaults full-frame as before. Either way, the editor's canvas
+          // drag/resize is what the user narrows/moves it with afterward.
+          ...defaultBox,
         });
       } else {
         const volume = resolvedRef.params.volume;

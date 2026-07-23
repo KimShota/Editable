@@ -30,6 +30,30 @@ const dangerButtonClass =
 const sectionClass = "flex flex-col gap-4 overflow-y-auto p-4";
 const actionsClass = "mt-2 flex flex-col gap-2 border-t border-[color:var(--ed-border)] pt-4";
 
+/** Word-count-preserving edit → each word keeps its original timing (the
+ *  precise "fix a mis-transcription" case, e.g. "cloak coats" -> "Claude
+ *  Codes"); a different word count → best-effort, spread evenly across the
+ *  group's existing time span rather than refusing the edit outright. */
+const wordsFromEditedText = (
+  editedText: string,
+  original: { text: string; tlStartSec: number; tlEndSec: number }[],
+  tlInSec: number,
+  tlOutSec: number,
+): { text: string; tlStartSec: number; tlEndSec: number }[] | null => {
+  const tokens = editedText.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return null;
+  if (tokens.length === original.length) {
+    return original.map((w, i) => ({ ...w, text: tokens[i] }));
+  }
+  const span = tlOutSec - tlInSec;
+  const perWord = span / tokens.length;
+  return tokens.map((text, i) => ({
+    text,
+    tlStartSec: tlInSec + i * perWord,
+    tlEndSec: tlInSec + (i + 1) * perWord,
+  }));
+};
+
 export function Inspector({
   edl,
   selection,
@@ -68,8 +92,48 @@ export function Inspector({
     </div>
   );
 
+  // A multi-selection shows a generic bulk panel instead of any per-type
+  // detail — move-together already happens by dragging any one of them on
+  // the timeline, and split deliberately stays single-item-only (see
+  // Timeline.tsx), so bulk delete is the one action that belongs here.
+  if (selection.ids.length > 1) {
+    const track = selection.track;
+    const isBulkDeletable = (t: typeof track): t is "video" | "overlay" | "sfx" | "captions" =>
+      t === "video" || t === "overlay" || t === "sfx" || t === "captions";
+    const trackLabel =
+      track === "video"
+        ? "clips"
+        : track === "overlay"
+          ? "overlays"
+          : track === "sfx"
+            ? "sound effects"
+            : track === "captions"
+              ? "caption groups"
+              : "items";
+    const canDelete = isBulkDeletable(track) && !(track === "video" && edl.video.length - selection.ids.length <= 0);
+    return (
+      <div className="flex h-full flex-col">
+        {header(`${selection.ids.length} ${trackLabel} selected`, "Drag any one to move them all together")}
+        <div className={sectionClass}>
+          <div className={actionsClass}>
+            <button
+              disabled={!canDelete}
+              onClick={() => isBulkDeletable(track) && onOp({ type: "deleteMany", track, ids: selection.ids })}
+              className={dangerButtonClass}
+            >
+              <TrashIcon className="h-4 w-4" />
+              Delete {selection.ids.length} {trackLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const id = selection.ids[0];
+
   if (selection.track === "video") {
-    const clip = edl.video.find((v) => v.id === selection.id);
+    const clip = edl.video.find((v) => v.id === id);
     if (!clip) return null;
     const isLast = edl.video[edl.video.length - 1].id === clip.id;
     const transition = edl.transitions.find((t) => t.afterClipId === clip.id);
@@ -104,6 +168,20 @@ export function Inspector({
             />
             Muted
           </label>
+          <Field label={`Volume — ${Math.round(clip.volume * 100)}%`}>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              defaultValue={clip.volume}
+              disabled={clip.muted}
+              onChange={(e) =>
+                onOp({ type: "setProp", track: "video", id: clip.id, patch: { volume: Number(e.target.value) } })
+              }
+              className="w-full accent-[color:var(--ed-accent)] disabled:opacity-40"
+            />
+          </Field>
 
           {!isLast && (
             <Field label="Transition after this clip">
@@ -147,7 +225,7 @@ export function Inspector({
   }
 
   if (selection.track === "overlay") {
-    const clip = edl.overlays.find((o) => o.id === selection.id);
+    const clip = edl.overlays.find((o) => o.id === id);
     if (!clip) return null;
     const canSplit = currentTimeSec > clip.tlInSec + 0.1 && currentTimeSec < clip.tlOutSec - 0.1;
     const hasText = typeof clip.params.text === "string";
@@ -198,7 +276,7 @@ export function Inspector({
   }
 
   if (selection.track === "sfx") {
-    const clip = edl.sfx.find((s) => s.id === selection.id);
+    const clip = edl.sfx.find((s) => s.id === id);
     if (!clip) return null;
     return (
       <div className="flex h-full flex-col">
@@ -229,7 +307,7 @@ export function Inspector({
   }
 
   if (selection.track === "transition") {
-    const t = edl.transitions.find((t) => t.afterClipId === selection.id);
+    const t = edl.transitions.find((t) => t.afterClipId === id);
     if (!t) return null;
     return (
       <div className="flex h-full flex-col">
@@ -242,7 +320,7 @@ export function Inspector({
                 onOp({
                   type: "setProp",
                   track: "transition",
-                  id: selection.id,
+                  id,
                   patch: { component: e.target.value },
                 })
               }
@@ -266,7 +344,7 @@ export function Inspector({
                 onOp({
                   type: "setProp",
                   track: "transition",
-                  id: selection.id,
+                  id,
                   patch: { durationSec: Number(e.target.value) },
                 })
               }
@@ -313,16 +391,33 @@ export function Inspector({
   }
 
   if (selection.track === "captions") {
-    const group = edl.captions.find((c) => c.id === selection.id);
+    const group = edl.captions.find((c) => c.id === id);
     if (!group) return null;
     const canSplit = currentTimeSec > group.tlInSec + 0.1 && currentTimeSec < group.tlOutSec - 0.1;
     return (
       <div className="flex h-full flex-col">
         {header("Caption group", `${group.tlInSec.toFixed(2)}s – ${group.tlOutSec.toFixed(2)}s`)}
         <div className={sectionClass}>
-          <Field label="Text (auto-transcribed, drag to retime)">
-            <p className="text-sm text-[color:var(--ed-ink)]">{group.words.map((w) => w.text).join(" ")}</p>
+          <Field label="Text (auto-transcribed — fix a misheard word freely)">
+            <textarea
+              defaultValue={group.words.map((w) => w.text).join(" ")}
+              onBlur={(e) => {
+                const words = wordsFromEditedText(e.target.value, group.words, group.tlInSec, group.tlOutSec);
+                if (!words) {
+                  e.target.value = group.words.map((w) => w.text).join(" ");
+                  return;
+                }
+                onOp({ type: "setProp", track: "captions", id: group.id, patch: { words } });
+              }}
+              rows={3}
+              className={inputClass}
+            />
           </Field>
+          <p className="text-xs text-[color:var(--ed-ink-dim)]">
+            Keeping the same number of words keeps each word&apos;s original timing (best for fixing a
+            mis-transcription). Adding or removing words spreads the new text evenly across the group&apos;s span
+            instead.
+          </p>
           <div className={actionsClass}>
             <button
               disabled={!canSplit}

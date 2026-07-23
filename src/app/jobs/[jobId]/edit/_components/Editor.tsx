@@ -9,6 +9,7 @@ import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import { Timeline } from "./Timeline";
 import { Inspector } from "./Inspector";
 import { MediaPanel } from "./MediaPanel";
+import { OverlayCanvas } from "./OverlayCanvas";
 import { RenderPanel } from "./RenderPanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { Selection } from "./selection";
@@ -16,6 +17,8 @@ import { formatTimecode } from "./timeFormat";
 import {
   ArrowLeftIcon,
   CheckIcon,
+  CollapseIcon,
+  ExpandIcon,
   FrameBackIcon,
   FrameForwardIcon,
   PauseIcon,
@@ -88,6 +91,7 @@ export function Editor({
   const [selection, setSelection] = useState<Selection>(null);
   const [currentTimeSec, setCurrentTimeSec] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -140,13 +144,17 @@ export function Editor({
     const onFrame = (e: { detail: { frame: number } }) => setCurrentTimeSec(e.detail.frame / edl.fps);
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
+    const onFullscreenChange = (e: { detail: { isFullscreen: boolean } }) =>
+      setIsFullscreen(e.detail.isFullscreen);
     player.addEventListener("frameupdate", onFrame);
     player.addEventListener("play", onPlay);
     player.addEventListener("pause", onPause);
+    player.addEventListener("fullscreenchange", onFullscreenChange);
     return () => {
       player.removeEventListener("frameupdate", onFrame);
       player.removeEventListener("play", onPlay);
       player.removeEventListener("pause", onPause);
+      player.removeEventListener("fullscreenchange", onFullscreenChange);
     };
   }, [edl.fps]);
 
@@ -253,9 +261,14 @@ export function Editor({
       }
 
       if ((e.key === "Delete" || e.key === "Backspace") && selection) {
-        if (selection.track === "video" || selection.track === "overlay" || selection.track === "sfx") {
+        if (
+          selection.track === "video" ||
+          selection.track === "overlay" ||
+          selection.track === "sfx" ||
+          selection.track === "captions"
+        ) {
           e.preventDefault();
-          submitOp({ type: "delete", track: selection.track, id: selection.id });
+          submitOp({ type: "deleteMany", track: selection.track, ids: selection.ids });
         }
       }
       if (e.key === " ") {
@@ -364,7 +377,7 @@ export function Editor({
 
           <div className={`flex min-w-0 flex-1 flex-col ${panelClass}`}>
             <div className="flex flex-1 items-center justify-center overflow-hidden bg-black p-6">
-              <div className="h-full max-h-full" style={{ aspectRatio: `${edl.width} / ${edl.height}` }}>
+              <div className="relative h-full max-h-full" style={{ aspectRatio: `${edl.width} / ${edl.height}` }}>
                 <Player
                   ref={playerRef}
                   component={EdlVideo}
@@ -376,6 +389,13 @@ export function Editor({
                   numberOfSharedAudioTags={24}
                   style={{ width: "100%", height: "100%" }}
                   loop
+                />
+                <OverlayCanvas
+                  edl={edl}
+                  selection={selection}
+                  currentTimeSec={currentTimeSec}
+                  onSelect={setSelection}
+                  onOp={submitOp}
                 />
               </div>
             </div>
@@ -406,12 +426,21 @@ export function Editor({
                 {formatTimecode(currentTimeSec)}{" "}
                 <span className="text-[color:var(--ed-ink-faint)]">/</span> {formatTimecode(edl.durationSec)}
               </p>
+              <TransportButton
+                onClick={() =>
+                  isFullscreen ? playerRef.current?.exitFullscreen() : playerRef.current?.requestFullscreen()
+                }
+                title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              >
+                {isFullscreen ? <CollapseIcon className="h-4 w-4" /> : <ExpandIcon className="h-4 w-4" />}
+              </TransportButton>
             </div>
           </div>
 
           <ResizeHandle orientation="vertical" onResize={resizeInspector} />
           <div style={{ width: layout.inspectorWidth }} className={`shrink-0 ${panelClass}`}>
             <Inspector
+              key={selection ? `${selection.track}:${selection.ids.join(",")}` : "none"}
               edl={edl}
               selection={selection}
               currentTimeSec={currentTimeSec}

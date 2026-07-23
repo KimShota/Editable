@@ -17,7 +17,7 @@ import { repoRoot, artifactsDir, outDir } from "@backend/pipeline/paths";
 
 type RenderStatus =
   | { status: "idle" }
-  | { status: "rendering"; startedAt: string }
+  | { status: "rendering"; startedAt: string; percent: number }
   | { status: "done"; startedAt: string; finishedAt: string; outUrl: string }
   | { status: "error"; startedAt: string; finishedAt: string; error: string };
 
@@ -28,6 +28,42 @@ const readStatus = (jobId: string): RenderStatus | null =>
     : null;
 const writeStatus = (jobId: string, status: RenderStatus): void =>
   fs.writeFileSync(statusPath(jobId), JSON.stringify(status, null, 2));
+
+/**
+ * `remotion render`'s CLI progress ("Bundling N%", "Rendered N/TOTAL",
+ * "Encoded N/TOTAL") is plain stdout text, not a structured event — this
+ * pipeline shells out to that CLI (see pipeline/render.ts) rather than
+ * Remotion's programmatic renderMedia()/onProgress API, so parsing the text
+ * is the integration point without restructuring how rendering is invoked.
+ * The three phases are weighted into one overall percent; each phase is
+ * monotonic on its own, and the max() against the running total keeps the
+ * combined number from ever ticking backward across a phase boundary.
+ */
+const BUNDLE_PCT = 8;
+const RENDER_PCT = 84;
+const ENCODE_PCT = 100 - BUNDLE_PCT - RENDER_PCT;
+
+const parseProgressPercent = (text: string, current: number): number => {
+  let percent = current;
+  for (const line of text.split("\n")) {
+    const bundling = line.match(/Bundling (\d+)%/);
+    if (bundling) {
+      percent = Math.max(percent, (Number(bundling[1]) / 100) * BUNDLE_PCT);
+    }
+    const rendered = line.match(/Rendered (\d+)\/(\d+)/);
+    if (rendered) {
+      percent = Math.max(percent, BUNDLE_PCT + (Number(rendered[1]) / Number(rendered[2])) * RENDER_PCT);
+    }
+    const encoded = line.match(/Encoded (\d+)\/(\d+)/);
+    if (encoded) {
+      percent = Math.max(
+        percent,
+        BUNDLE_PCT + RENDER_PCT + (Number(encoded[1]) / Number(encoded[2])) * ENCODE_PCT,
+      );
+    }
+  }
+  return percent;
+};
 
 export async function POST(_req: Request, { params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;
@@ -43,7 +79,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ jobId:
   }
 
   const startedAt = new Date().toISOString();
-  writeStatus(jobId, { status: "rendering", startedAt });
+  let percent = 0;
+  writeStatus(jobId, { status: "rendering", startedAt, percent });
 
   const child = spawn(
     "npm",
@@ -54,6 +91,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ jobId:
   child.stderr.on("data", (chunk) => {
     stderrTail = (stderrTail + chunk.toString()).slice(-4000);
   });
+  child.stdout.on("data", (chunk) => {
+    const next = parseProgressPercent(chunk.toString(), percent);
+    if (next !== percent) {
+      percent = next;
+      writeStatus(jobId, { status: "rendering", startedAt, percent });
+    }
+  });
   child.on("close", (code) => {
     const finishedAt = new Date().toISOString();
     if (code === 0 && fs.existsSync(path.join(outDir, `${jobId}.mp4`))) {
@@ -63,7 +107,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ jobId:
     }
   });
 
-  return NextResponse.json({ status: "rendering", startedAt }, { status: 202 });
+  return NextResponse.json({ status: "rendering", startedAt, percent }, { status: 202 });
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ jobId: string }> }) {

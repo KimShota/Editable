@@ -22,6 +22,7 @@ export const defaultEdl: Edl = {
       tlInSec: 0,
       tlOutSec: 2,
       muted: true,
+      volume: 1,
     },
   ],
   overlays: [
@@ -31,6 +32,10 @@ export const defaultEdl: Edl = {
       params: { text: "EDL preview\nrender with --props", variant: "hook" },
       tlInSec: 0,
       tlOutSec: 2,
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
     },
   ],
   sfx: [],

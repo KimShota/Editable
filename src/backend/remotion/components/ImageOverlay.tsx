@@ -11,11 +11,16 @@ import { Gif } from "@remotion/gif";
 /**
  * A user-supplied image/meme popped over the footage (e.g. a punchline).
  * Animated gifs play in sync with the timeline via @remotion/gif.
+ *
+ * Fills its wrapper box entirely (see EdlVideo.tsx, which sizes/positions
+ * that box from the overlay's own x/y/width/height) rather than applying
+ * its own internal max-size/centering — the box itself already carries the
+ * right size (assemble.ts fits it to the image's real aspect ratio by
+ * default), and is what the editor's canvas lets the user drag/resize
+ * directly, so this needs to trust it completely rather than shrinking
+ * again inside it.
  */
-export const ImageOverlay: React.FC<{ src?: string; widthPct?: number }> = ({
-  src,
-  widthPct = 70,
-}) => {
+export const ImageOverlay: React.FC<{ src?: string }> = ({ src }) => {
   const frame = useCurrentFrame();
   if (!src) return null;
   const progress = interpolate(frame, [0, 5], [0, 1], {
@@ -23,8 +28,8 @@ export const ImageOverlay: React.FC<{ src?: string; widthPct?: number }> = ({
   });
 
   const style: React.CSSProperties = {
-    maxWidth: `${widthPct}%`,
-    maxHeight: "60%",
+    width: "100%",
+    height: "100%",
     borderRadius: 24,
     opacity: progress,
     transform: `scale(${interpolate(progress, [0, 1], [0.85, 1])})`,
@@ -34,9 +39,9 @@ export const ImageOverlay: React.FC<{ src?: string; widthPct?: number }> = ({
   return (
     <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
       {src.toLowerCase().endsWith(".gif") ? (
-        <Gif src={staticFile(src)} fit="contain" style={{ ...style, width: `${widthPct}%`, height: "60%" }} />
+        <Gif src={staticFile(src)} fit="contain" style={style} />
       ) : (
-        <Img src={staticFile(src)} style={style} />
+        <Img src={staticFile(src)} style={{ ...style, objectFit: "contain" }} />
       )}
     </AbsoluteFill>
   );

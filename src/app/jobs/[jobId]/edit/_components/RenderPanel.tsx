@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 type RenderStatus =
   | { status: "idle" }
-  | { status: "rendering"; startedAt: string }
+  | { status: "rendering"; startedAt: string; percent: number }
   | { status: "done"; startedAt: string; finishedAt: string; outUrl: string }
   | { status: "error"; startedAt: string; finishedAt: string; error: string };
 
@@ -50,9 +50,17 @@ export function RenderPanel({ jobId }: { jobId: string }) {
           disabled={status.status === "rendering"}
           className="rounded-lg bg-[color:var(--ed-accent)] px-4 py-2 text-sm font-semibold text-[color:var(--ed-accent-ink)] transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40"
         >
-          {status.status === "rendering" ? "Rendering…" : "Render final video"}
+          {status.status === "rendering" ? `Rendering… ${Math.round(status.percent)}%` : "Render final video"}
         </button>
       </div>
+      {status.status === "rendering" && (
+        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--ed-border)]">
+          <div
+            className="h-full rounded-full bg-[color:var(--ed-accent)] transition-[width] duration-300 ease-out"
+            style={{ width: `${Math.min(100, Math.max(0, status.percent))}%` }}
+          />
+        </div>
+      )}
       {status.status === "error" && (
         <p className="mt-3 text-sm text-[color:var(--ed-danger)]">{status.error}</p>
       )}
