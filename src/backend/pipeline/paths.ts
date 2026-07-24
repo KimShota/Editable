@@ -9,6 +9,10 @@ import path from "node:path";
 export const repoRoot = process.cwd();
 
 export const formatsDir = path.join(repoRoot, "formats");
+/** Where StyleProfiles live — a subdirectory, not formatsDir itself, since
+ *  loader.ts's listFormats() treats every *.json directly in formatsDir as
+ *  a Format to enumerate on the templates page. */
+export const formatStylesDir = path.join(formatsDir, "styles");
 export const publicDir = path.join(repoRoot, "public");
 export const outDir = path.join(repoRoot, "out");
 export const modelsDir = path.join(repoRoot, "models");

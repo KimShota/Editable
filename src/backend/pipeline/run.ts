@@ -5,12 +5,15 @@ import { z } from "zod";
 import {
   EdlSchema,
   FilledFormatSchema,
+  InsertsSchema,
   ResolvedRolesSchema,
   TranscriptSchema,
   TrimPointsSchema,
 } from "./schemas";
 import { intake } from "./intake";
 import { loadFormat } from "./loader";
+import { applyInserts, generate } from "./generate";
+import { GeneratorChoice } from "./generation";
 import { transcribe } from "./transcribe";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
@@ -23,21 +26,30 @@ import { artifactsDir } from "./paths";
 /**
  * The pipeline orchestrator.
  *
- *   npm run pipeline -- --job jobs/demo [--only <stage>] [--resolver <name>]
+ *   npm run pipeline -- --job jobs/demo [--only <stage>] [--resolver <name>] [--generator <name>]
  *
- * Stages: intake → transcribe → trim → roles → assemble → render.
+ * Stages: intake → generate → transcribe → trim → roles → assemble → render.
  * Each stage writes its artifact to artifacts/<job>/ — the debugging
  * surface. When a video comes out wrong, look at which artifact first went
  * wrong, not at the video. --only re-runs a single stage against the
  * artifacts already on disk.
+ *
+ * "generate" fills any slot the format marks with a `generation` spec (an
+ * insert — a cutaway or montage clip, never a voice block's own spoken
+ * clip) with a synthesized MP4 and rewrites filled.json to include it —
+ * the same "transform, then only the transformed version is persisted"
+ * shape correctTranscript already uses for the transcript. A format with
+ * no generated slots (every format prior to this) makes "generate" a
+ * no-op that passes `filled` through unchanged.
  */
 
-const STAGES = ["intake", "transcribe", "trim", "roles", "assemble", "render"] as const;
+const STAGES = ["intake", "generate", "transcribe", "trim", "roles", "assemble", "render"] as const;
 type Stage = (typeof STAGES)[number];
 
 const parseArgs = (argv: string[]) => {
-  const args: { job?: string; only?: Stage; resolver: ResolverChoice } = {
+  const args: { job?: string; only?: Stage; resolver: ResolverChoice; generator: GeneratorChoice } = {
     resolver: "auto",
+    generator: "auto",
   };
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
@@ -60,16 +72,24 @@ const parseArgs = (argv: string[]) => {
         args.resolver = resolver as ResolverChoice;
         break;
       }
+      case "--generator": {
+        const generator = argv[++i];
+        if (!["fallback", "auto"].includes(generator)) {
+          throw new Error("--generator must be fallback | auto");
+        }
+        args.generator = generator as GeneratorChoice;
+        break;
+      }
       default:
         throw new Error(`unknown argument "${argv[i]}"`);
     }
   }
   if (!args.job) {
     throw new Error(
-      "usage: npm run pipeline -- --job <jobDir> [--only <stage>] [--resolver <name>]",
+      "usage: npm run pipeline -- --job <jobDir> [--only <stage>] [--resolver <name>] [--generator <name>]",
     );
   }
-  return args as { job: string; only?: Stage; resolver: ResolverChoice };
+  return args as { job: string; only?: Stage; resolver: ResolverChoice; generator: GeneratorChoice };
 };
 
 const main = async () => {
@@ -97,10 +117,42 @@ const main = async () => {
   console.log(`editable pipeline — job "${jobId}"${args.only ? ` (only: ${args.only})` : ""}`);
 
   // Each stage either runs or is rehydrated from its artifact on disk.
-  const filled = wants("intake") ? intake(args.job) : read("filled", FilledFormatSchema);
+  let filled = wants("intake") ? intake(args.job) : read("filled", FilledFormatSchema);
   if (wants("intake")) write("filled", filled);
   const format = loadFormat(filled.formatId);
   if (args.only === "intake") return;
+
+  if (wants("generate")) {
+    const result = await generate(format, filled, args.generator);
+    // filled.json on disk stays pure intake output, always — generate's
+    // merged view (with generated slots bound) is used in-memory for the
+    // rest of THIS run, but only inserts.json records what was generated.
+    // Persisting the merged view instead would make a later slot binding
+    // indistinguishable from "the user supplied this," so a re-run of just
+    // this stage could never tell a real user override apart from its own
+    // prior output (and would treat every generated slot as already
+    // filled, permanently skipping regeneration).
+    filled = result.filled;
+    write("inserts", result.inserts);
+    for (const i of result.inserts.inserts) {
+      console.log(
+        `    generated ${i.blockId}/${i.slotName} (${i.kind}, ${i.durationSec.toFixed(2)}s${i.cacheHit ? ", cache hit" : ""})`,
+      );
+    }
+    for (const s of result.inserts.skipped) {
+      console.log(`    skipped generation for ${s.blockId}/${s.slotName} — user supplied their own clip`);
+    }
+  } else {
+    // generate didn't run this invocation (e.g. --only transcribe) — restore
+    // any bindings a prior run generated, from inserts.json alone (no
+    // re-probing, no provider call), so later stages still see them bound.
+    const insertsFile = artifactPath("inserts");
+    if (fs.existsSync(insertsFile)) {
+      const inserts = InsertsSchema.parse(JSON.parse(fs.readFileSync(insertsFile, "utf8")));
+      filled = applyInserts(filled, inserts);
+    }
+  }
+  if (args.only === "generate") return;
 
   let transcript = wants("transcribe")
     ? transcribe(format, filled)

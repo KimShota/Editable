@@ -106,6 +106,30 @@ export const AnchorSchema = z.union([LiteralAnchorSchema, SemanticAnchorSchema])
 
 export const MediaTypeSchema = z.enum(["video", "image", "audio", "text"]);
 
+/**
+ * Marks a video slot as filled by the `generate` stage instead of the user
+ * — an "insert" (a b-roll cutaway or montage clip) whose pixels are
+ * synthesized from the job's identity photos + the format's StyleProfile,
+ * rather than footage the user films. See generation/provider.ts.
+ *
+ * Scoped to inserts only (kind "cutaway" | "montage") — this never applies
+ * to a voice block's own spoken clip, which is always the user's real
+ * performance. If the user supplies their own file for a generation-marked
+ * slot anyway, intake honors it as-is and generation is skipped for that
+ * slot (a natural opt-out, no separate flag needed).
+ */
+export const GenerationSpecSchema = z.object({
+  kind: z.enum(["cutaway", "montage"]),
+  /** Plain-language description of the shot to generate — environment,
+   *  framing, action — combined with the format's StyleProfile to build
+   *  the generation request. Not consumed by any renderer component. */
+  shot: z.string(),
+  durationSec: z.number().positive(),
+  /** Pinned so re-running the stage reproduces the exact same clip
+   *  (see generation/provider.ts's caching, keyed in part on this). */
+  seed: z.number().int().default(0),
+});
+
 /** A named slot the user fills: a file (video/image/audio) or a text string. */
 export const SlotSchema = z.object({
   name: z.string(),
@@ -113,6 +137,8 @@ export const SlotSchema = z.object({
   required: z.boolean().default(true),
   /** Filming / sourcing instructions shown to the user. */
   instructions: z.string(),
+  /** Present = this slot is a generated insert, not user-filmed footage. */
+  generation: GenerationSpecSchema.optional(),
 });
 
 /**
@@ -208,6 +234,14 @@ export const FormatSchema = z
     musicVolume: z.number().min(0).max(1).default(0.5),
     /** Slots used by events across many blocks (shared SFX, recurring memes). */
     sharedSlots: z.array(SlotSchema).default([]),
+    /**
+     * A set of reference photos of the performer (front/side/close-up, plus
+     * optional extra angles) — the identity source the `generate` stage
+     * conditions on for every generated insert. mediaType "image", filled
+     * with a "files" binding (see intake.ts). Required only if some block
+     * slot actually declares `generation`.
+     */
+    identitySlot: SlotSchema.optional(),
     blocks: z.array(BlockSchema).min(1),
   })
   .superRefine((format, ctx) => {
@@ -219,8 +253,17 @@ export const FormatSchema = z
       slotNames.add(name);
     };
     if (format.musicSlot) addSlot(format.musicSlot.name);
+    if (format.identitySlot) addSlot(format.identitySlot.name);
     for (const slot of format.sharedSlots) addSlot(slot.name);
 
+    if (format.identitySlot && format.identitySlot.mediaType !== "image") {
+      ctx.addIssue({
+        code: "custom",
+        message: `identitySlot "${format.identitySlot.name}" must have mediaType "image"`,
+      });
+    }
+
+    let hasGeneratedSlot = false;
     const blockIds = new Set<string>();
     const eventIds = new Set<string>();
     for (const block of format.blocks) {
@@ -229,7 +272,18 @@ export const FormatSchema = z
       }
       blockIds.add(block.id);
 
-      for (const slot of block.slots) addSlot(slot.name);
+      for (const slot of block.slots) {
+        addSlot(slot.name);
+        if (slot.generation) {
+          hasGeneratedSlot = true;
+          if (slot.mediaType !== "video") {
+            ctx.addIssue({
+              code: "custom",
+              message: `block "${block.id}": generated slot "${slot.name}" must have mediaType "video"`,
+            });
+          }
+        }
+      }
 
       const videoSlot = block.slots.find((s) => s.name === block.videoSlot);
       if (!videoSlot) {
@@ -308,6 +362,13 @@ export const FormatSchema = z
           });
         }
       }
+    }
+
+    if (hasGeneratedSlot && !format.identitySlot) {
+      ctx.addIssue({
+        code: "custom",
+        message: `format declares a generated slot but no "identitySlot" — generation has no identity photos to condition on`,
+      });
     }
   });
 
@@ -554,7 +615,12 @@ export const EdlTransitionSchema = z.object({
   params: z.record(z.string(), z.unknown()).default({}),
   /** Absolute time of the cut. */
   atSec: z.number().min(0),
-  durationSec: z.number().positive(),
+  /** 0 is valid — a "cut" component's transitionAfter is an instant cut
+   *  with no animated duration (EdlVideo.tsx's IncomingTransition already
+   *  clamps to at least one frame either way). Only an animated transition
+   *  (fade, whooshZoom) needs a real positive value to have anything to
+   *  animate over. */
+  durationSec: z.number().nonnegative(),
 });
 
 export const EdlSchema = z.object({
@@ -592,4 +658,73 @@ export const EdlSchema = z.object({
    *  its runway, a duplicate sfx collapsed to one) — surfaced to the build
    *  UI instead of only a server-side console.warn. */
   diagnostics: z.array(z.string()).default([]),
+});
+
+// ---------------------------------------------------------------------------
+// StyleProfile — the visual DNA of a reference reel, hand-authored (v1)
+// alongside a format at formats/<formatId>.style.json. Consumed only by the
+// `generate` stage (generation/provider.ts) to condition generated inserts
+// (cutaways/montage) so they read as the reference's aesthetic. Optional:
+// a format with no generated slots needs no StyleProfile, and one with
+// generated slots but no style file falls back to bland defaults rather
+// than failing (see generation/styleProfile.ts).
+// ---------------------------------------------------------------------------
+
+export const StyleProfileSchema = z.object({
+  formatId: z.string(),
+  /** Plain-language description of the setting every generated insert
+   *  should appear in, e.g. "modern accounting office, warm, binders on
+   *  shelves behind the subject." */
+  environment: z.string(),
+  /** Plain-language lighting description, e.g. "hard key light from
+   *  camera-left, cool color temperature, deep shadows." */
+  lighting: z.string(),
+  /** Deterministic grade applied to every generated insert (and, in a
+   *  later phase, to the user's own real footage) via ffmpeg eq/colorbalance
+   *  — cheap, GPU-free color-matching that alone captures a large slice of
+   *  a reference's "cinematic look." */
+  grade: z
+    .object({
+      saturation: z.number().positive().default(1),
+      contrast: z.number().positive().default(1),
+      brightness: z.number().default(0),
+      /** -1 (cooler/blue) .. 1 (warmer/orange). */
+      temperatureShift: z.number().min(-1).max(1).default(0),
+    })
+    .optional(),
+});
+
+// ---------------------------------------------------------------------------
+// Inserts — the `generate` stage's own artifact (artifacts/<job>/inserts.json)
+// ---------------------------------------------------------------------------
+
+export const GeneratedInsertSchema = z.object({
+  slotName: z.string(),
+  blockId: z.string(),
+  kind: z.enum(["cutaway", "montage"]),
+  shot: z.string(),
+  durationSec: z.number().positive(),
+  seed: z.number().int(),
+  provider: z.string(),
+  /** True when a prior run's output for the same request hash was reused
+   *  instead of calling the provider again. */
+  cacheHit: z.boolean(),
+  /** Job-dir-relative path to the generated MP4 (same convention as
+   *  BoundFile.path), e.g. "generated/montage-clip.mp4". */
+  path: z.string(),
+  /** Probed from the generated file — carried here (not just in filled.json)
+   *  so a later stage can reconstruct the BoundFile from inserts.json alone,
+   *  without re-probing or re-running generation (see generate.ts's
+   *  applyInserts). filled.json itself always stays pure intake output;
+   *  this artifact is the only persisted record of a generated binding. */
+  width: z.number().optional(),
+  height: z.number().optional(),
+  hasAudio: z.boolean().optional(),
+});
+
+export const InsertsSchema = z.object({
+  inserts: z.array(GeneratedInsertSchema),
+  /** Slots that declared `generation` but were left as the user's own
+   *  supplied footage instead (an opt-out — see SlotSchema's doc comment). */
+  skipped: z.array(z.object({ slotName: z.string(), blockId: z.string() })).default([]),
 });

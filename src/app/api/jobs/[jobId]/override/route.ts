@@ -33,7 +33,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
   writeJobManifest(jobId, manifest);
 
   try {
-    const edl = reassembleJob(jobDir(jobId), jobId);
+    const edl = await reassembleJob(jobDir(jobId), jobId);
     return NextResponse.json({ edl });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 400 });

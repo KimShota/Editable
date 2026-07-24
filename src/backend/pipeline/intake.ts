@@ -74,11 +74,12 @@ export const probeFile = (absPath: string): ProbedMedia => {
   throw new Error(`no decodable audio or video stream in ${absPath}`);
 };
 
-/** Every slot the format declares: block, shared, and the music slot. */
+/** Every slot the format declares: block, shared, music, and identity slots. */
 export const allSlots = (format: Format): Slot[] => [
   ...format.blocks.flatMap((b) => b.slots),
   ...format.sharedSlots,
   ...(format.musicSlot ? [format.musicSlot] : []),
+  ...(format.identitySlot ? [format.identitySlot] : []),
 ];
 
 export const intake = (jobDir: string): FilledFormat => {
@@ -103,12 +104,14 @@ export const intake = (jobDir: string): FilledFormat => {
   const bindings: Record<string, BoundAsset> = {};
   const slots = allSlots(format);
   const slotNames = new Set(slots.map((s) => s.name));
-  // Multiple takes are only meaningful for a voice block's main clip — it's
-  // the one slot with a transcript to auto-order/concatenate takes by.
-  // Screen recordings, memes, music etc. always bind exactly one file.
-  const multiTakeSlots = new Set(
-    format.blocks.filter((b) => b.kind === "voice").map((b) => b.videoSlot),
-  );
+  // Multiple files are only meaningful for a voice block's main clip (takes
+  // to auto-order/concatenate by transcript) or the identity slot (several
+  // reference photos of the same person). Screen recordings, memes, music
+  // etc. always bind exactly one file.
+  const multiFileSlots = new Set([
+    ...format.blocks.filter((b) => b.kind === "voice").map((b) => b.videoSlot),
+    ...(format.identitySlot ? [format.identitySlot.name] : []),
+  ]);
 
   for (const name of Object.keys(manifest.bindings)) {
     if (!slotNames.has(name)) {
@@ -135,7 +138,11 @@ export const intake = (jobDir: string): FilledFormat => {
   for (const slot of slots) {
     const fill = manifest.bindings[slot.name];
     if (!fill) {
-      if (slot.required) {
+      // A generated slot is filled by the `generate` stage, not the
+      // manifest — its absence here is normal, not an error. If the user
+      // supplies a binding anyway (the "files"/"file" branches below), it's
+      // honored as-is and generation is skipped for that slot.
+      if (slot.required && !slot.generation) {
         errors.push(`required slot "${slot.name}" (${slot.mediaType}) is not filled`);
       }
       continue;
@@ -156,9 +163,9 @@ export const intake = (jobDir: string): FilledFormat => {
     }
 
     if ("files" in fill) {
-      if (!multiTakeSlots.has(slot.name)) {
+      if (!multiFileSlots.has(slot.name)) {
         errors.push(
-          `slot "${slot.name}": multiple clips are only supported for a voice block's main clip`,
+          `slot "${slot.name}": multiple files are only supported for a voice block's main clip or the identity slot`,
         );
         continue;
       }

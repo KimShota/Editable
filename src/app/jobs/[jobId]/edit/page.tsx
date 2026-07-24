@@ -22,7 +22,7 @@ export default async function EditPage({ params }: { params: Promise<{ jobId: st
   // Migration-safe: backfills clip ids via one reassemble if this edl.json
   // predates the timeline-ops schema, then edl.json is the source of
   // truth from here on — the editor never re-derives from the format again.
-  const edl = readOrMigrateEdl(jobDir(jobId), jobId);
+  const edl = await readOrMigrateEdl(jobDir(jobId), jobId);
   // Idempotent: makes sure the Player's staticFile() lookups resolve even
   // after a server restart, without waiting for a real render.
   stageAssets(edl);

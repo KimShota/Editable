@@ -13,6 +13,12 @@
     }
   },
   "musicVolume": 0.5,
+  "identitySlot": {
+    "name": "identity-photos",
+    "mediaType": "image",
+    "required": true,
+    "instructions": "3+ clear, well-lit photos of your face and body: one front-on, one side profile, one close-up. These are used to automatically generate the silent montage shot in Kumar's cinematic style, so you don't have to film it yourself."
+  },
   "sharedSlots": [
     {
       "name": "dramatic-music",
@@ -256,7 +262,13 @@
           "name": "montage-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Silent, high-contrast montage against a plain backdrop: shoot yourself as a backlit silhouette from a few angles (thinking pose, arms crossed, turning to camera) plus one slow close-up 'reveal' of a prop symbolizing your field (cash, a tool, a book). No talking — this rides on the music. Keep each shot ~1s and moody."
+          "instructions": "Generated automatically from your identity photos in Kumar's cinematic style (backlit silhouette, moody, high contrast). Supply your own clip here instead if you'd rather film this shot yourself.",
+          "generation": {
+            "kind": "montage",
+            "shot": "backlit silhouette portrait, high contrast, subject slowly turns toward camera in a moody thinking pose, arms crossed, plain dark backdrop",
+            "durationSec": 5,
+            "seed": 1
+          }
         }
       ],
       "captions": false,

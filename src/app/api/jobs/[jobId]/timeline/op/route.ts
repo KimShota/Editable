@@ -26,7 +26,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
   }
 
   try {
-    const edl = readOrMigrateEdl(jobDir(jobId), jobId);
+    const edl = await readOrMigrateEdl(jobDir(jobId), jobId);
     const next = applyOp(edl, op);
     stageAssets(next);
     fs.writeFileSync(path.join(artifactsDir(jobId), "edl.json"), JSON.stringify(next, null, 2));

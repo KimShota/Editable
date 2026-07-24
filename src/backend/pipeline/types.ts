@@ -19,6 +19,9 @@ import {
   FilledFormatSchema,
   FormatEventSchema,
   FormatSchema,
+  GeneratedInsertSchema,
+  GenerationSpecSchema,
+  InsertsSchema,
   JobManifestSchema,
   LiteralAnchorSchema,
   MediaTypeSchema,
@@ -27,6 +30,7 @@ import {
   ResolvedRolesSchema,
   SemanticAnchorSchema,
   SlotSchema,
+  StyleProfileSchema,
   TakeTrimSchema,
   TranscriptSchema,
   TrimPointsSchema,
@@ -46,6 +50,7 @@ export type LiteralAnchor = z.infer<typeof LiteralAnchorSchema>;
 export type SemanticAnchor = z.infer<typeof SemanticAnchorSchema>;
 export type Anchor = z.infer<typeof AnchorSchema>;
 export type MediaType = z.infer<typeof MediaTypeSchema>;
+export type GenerationSpec = z.infer<typeof GenerationSpecSchema>;
 export type Slot = z.infer<typeof SlotSchema>;
 export type FormatEvent = z.infer<typeof FormatEventSchema>;
 export type Block = z.infer<typeof BlockSchema>;
@@ -75,3 +80,8 @@ export type EdlCaptionWord = z.infer<typeof EdlCaptionWordSchema>;
 export type EdlCaptionGroup = z.infer<typeof EdlCaptionGroupSchema>;
 export type EdlTransition = z.infer<typeof EdlTransitionSchema>;
 export type Edl = z.infer<typeof EdlSchema>;
+
+export type StyleProfile = z.infer<typeof StyleProfileSchema>;
+
+export type GeneratedInsert = z.infer<typeof GeneratedInsertSchema>;
+export type Inserts = z.infer<typeof InsertsSchema>;

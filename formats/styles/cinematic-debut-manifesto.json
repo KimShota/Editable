@@ -1,0 +1,11 @@
+{
+  "formatId": "cinematic-debut-manifesto",
+  "environment": "a dim, minimalist study or office at night — a single wall or bookshelf barely visible in the background, otherwise pure dark negative space",
+  "lighting": "hard single-source key light from one side, deep shadows, high contrast, almost silhouette-like rim lighting on the subject's edge",
+  "grade": {
+    "saturation": 0.75,
+    "contrast": 1.35,
+    "brightness": -0.06,
+    "temperatureShift": -0.3
+  }
+}
