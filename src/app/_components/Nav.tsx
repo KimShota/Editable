@@ -10,7 +10,7 @@ export function Nav() {
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[color:var(--bg)]/70 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between px-6">
         <Link
-          href="/templates"
+          href="/"
           className="font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.22em] text-[color:var(--ink)]"
         >
           EDITABLE
