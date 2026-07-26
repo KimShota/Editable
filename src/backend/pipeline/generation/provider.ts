@@ -45,15 +45,74 @@ const colorBalanceArgs = (temperatureShift: number): string => {
 };
 
 /**
- * Zero-spend, zero-GPU stand-in for real generation: a slow push-in over
- * one of the job's own identity photos, with the format's StyleProfile
- * grade applied via ffmpeg. Doesn't synthesize a new environment — it
- * exists to prove the `generate` stage's contract (a generated slot ends
- * up bound to a real MP4 that flows through the unchanged engine) with no
- * external dependency, exactly as the "fallback" role/content resolvers
- * let the rest of the pipeline run with no LLM. Swap in a real provider
- * (see this file's GenerationProvider interface) without touching
- * generate.ts or anything downstream.
+ * Turns one still image into a `durationSec`-long clip: a slow Ken-Burns
+ * push-in with the format's StyleProfile grade applied via ffmpeg. Shared
+ * by every provider that ends up needing to animate a still — the fallback
+ * stub (over an unmodified identity photo) and any real provider (over its
+ * own generated still) alike — so the "turn a still into a graded,
+ * moving clip" mechanics exist exactly once.
+ */
+export const animateStillToClip = (
+  imagePath: string,
+  opts: {
+    durationSec: number;
+    width: number;
+    height: number;
+    fps: number;
+    grade?: StyleProfile["grade"];
+    outPath: string;
+  },
+): void => {
+  const frames = Math.max(1, Math.round(opts.durationSec * opts.fps));
+  const grade = opts.grade;
+
+  const filters = [
+    // Cover-fit the image to the target frame, then oversample 2x so
+    // zoompan has room to push in without visibly softening/pixelating.
+    `scale=${opts.width * 2}:${opts.height * 2}:force_original_aspect_ratio=increase`,
+    `crop=${opts.width * 2}:${opts.height * 2}`,
+    `zoompan=z='min(zoom+${ZOOM_PER_FRAME},${MAX_ZOOM})':d=${frames}:s=${opts.width}x${opts.height}:fps=${opts.fps}`,
+    `eq=brightness=${(grade?.brightness ?? 0).toFixed(3)}:contrast=${(grade?.contrast ?? 1).toFixed(3)}:saturation=${(grade?.saturation ?? 1).toFixed(3)}`,
+    colorBalanceArgs(grade?.temperatureShift ?? 0),
+    "format=yuv420p",
+  ].join(",");
+
+  try {
+    execFileSync(
+      "ffmpeg",
+      [
+        "-y",
+        "-v",
+        "error",
+        "-loop",
+        "1",
+        "-i",
+        imagePath,
+        "-frames:v",
+        String(frames),
+        "-vf",
+        filters,
+        "-r",
+        String(opts.fps),
+        opts.outPath,
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+  } catch (err) {
+    const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? (err as Error).message;
+    throw new Error(`animateStillToClip: ffmpeg failed for "${opts.outPath}":\n${stderr.slice(-2000)}`);
+  }
+};
+
+/**
+ * Zero-spend, zero-GPU stand-in for real generation: animates one of the
+ * job's own identity photos as-is. Doesn't synthesize a new environment —
+ * it exists to prove the `generate` stage's contract (a generated slot
+ * ends up bound to a real MP4 that flows through the unchanged engine)
+ * with no external dependency, exactly as the "fallback" role/content
+ * resolvers let the rest of the pipeline run with no LLM. Swap in a real
+ * provider (see this file's GenerationProvider interface) without
+ * touching generate.ts or anything downstream.
  */
 export const fallbackGenerationProvider: GenerationProvider = {
   name: "fallback",
@@ -66,44 +125,13 @@ export const fallbackGenerationProvider: GenerationProvider = {
     // several generated slots in one job show different angles rather than
     // all reusing the same photo.
     const image = req.identityImages[req.seed % req.identityImages.length];
-    const frames = Math.max(1, Math.round(req.durationSec * req.fps));
-    const grade = req.styleProfile.grade;
-
-    const filters = [
-      // Cover-fit the photo to the target frame, then oversample 2x so
-      // zoompan has room to push in without visibly softening/pixelating.
-      `scale=${req.width * 2}:${req.height * 2}:force_original_aspect_ratio=increase`,
-      `crop=${req.width * 2}:${req.height * 2}`,
-      `zoompan=z='min(zoom+${ZOOM_PER_FRAME},${MAX_ZOOM})':d=${frames}:s=${req.width}x${req.height}:fps=${req.fps}`,
-      `eq=brightness=${(grade?.brightness ?? 0).toFixed(3)}:contrast=${(grade?.contrast ?? 1).toFixed(3)}:saturation=${(grade?.saturation ?? 1).toFixed(3)}`,
-      colorBalanceArgs(grade?.temperatureShift ?? 0),
-      "format=yuv420p",
-    ].join(",");
-
-    try {
-      execFileSync(
-        "ffmpeg",
-        [
-          "-y",
-          "-v",
-          "error",
-          "-loop",
-          "1",
-          "-i",
-          image,
-          "-frames:v",
-          String(frames),
-          "-vf",
-          filters,
-          "-r",
-          String(req.fps),
-          req.outPath,
-        ],
-        { stdio: ["ignore", "ignore", "pipe"] },
-      );
-    } catch (err) {
-      const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? (err as Error).message;
-      throw new Error(`fallback generation provider: ffmpeg failed for "${req.outPath}":\n${stderr.slice(-2000)}`);
-    }
+    animateStillToClip(image, {
+      durationSec: req.durationSec,
+      width: req.width,
+      height: req.height,
+      fps: req.fps,
+      grade: req.styleProfile.grade,
+      outPath: req.outPath,
+    });
   },
 };

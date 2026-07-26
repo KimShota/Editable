@@ -15,6 +15,8 @@ import { loadFormat } from "./loader";
 import { applyInserts, generate } from "./generate";
 import { GeneratorChoice } from "./generation";
 import { transcribe } from "./transcribe";
+import { deriveTranscriptAndTrim } from "./splitTake";
+import { readSplit, runSplit } from "./orchestrate";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
 import { resolveRoles } from "./resolveRoles";
@@ -74,8 +76,8 @@ const parseArgs = (argv: string[]) => {
       }
       case "--generator": {
         const generator = argv[++i];
-        if (!["fallback", "auto"].includes(generator)) {
-          throw new Error("--generator must be fallback | auto");
+        if (!["fallback", "gemini", "auto"].includes(generator)) {
+          throw new Error("--generator must be fallback | gemini | auto");
         }
         args.generator = generator as GeneratorChoice;
         break;
@@ -154,8 +156,24 @@ const main = async () => {
   }
   if (args.only === "generate") return;
 
+  // Single-take mode (speakingTakeSlot set): transcript/trim both come
+  // from the split step (whisper once + sequential anchor matching — see
+  // splitTake.ts) instead of the ordinary per-block transcribe()/trim().
+  // Memoized so a full run computes it once even though both the
+  // "transcribe" and "trim" stages below consult it.
+  let singleTakeDerived: ReturnType<typeof deriveTranscriptAndTrim> | null = null;
+  const getSingleTakeDerived = () => {
+    if (!singleTakeDerived) {
+      const split = readSplit(jobId) ?? runSplit(format, filled, jobId);
+      singleTakeDerived = deriveTranscriptAndTrim(format, filled, split);
+    }
+    return singleTakeDerived;
+  };
+
   let transcript = wants("transcribe")
-    ? transcribe(format, filled)
+    ? format.speakingTakeSlot
+      ? getSingleTakeDerived().transcript
+      : transcribe(format, filled)
     : read("transcript", TranscriptSchema);
   if (wants("transcribe")) {
     const before = transcript;
@@ -179,7 +197,9 @@ const main = async () => {
   if (args.only === "transcribe") return;
 
   const trims = wants("trim")
-    ? await trim(format, filled, transcript, args.resolver)
+    ? format.speakingTakeSlot
+      ? getSingleTakeDerived().trim
+      : await trim(format, filled, transcript, args.resolver)
     : read("trim", TrimPointsSchema);
   if (wants("trim")) {
     write("trim", trims);

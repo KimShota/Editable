@@ -74,12 +74,15 @@ export const probeFile = (absPath: string): ProbedMedia => {
   throw new Error(`no decodable audio or video stream in ${absPath}`);
 };
 
-/** Every slot the format declares: block, shared, music, and identity slots. */
+/** Every slot the format declares: block, shared, music, identity, speaking
+ *  take, and final clip slots. */
 export const allSlots = (format: Format): Slot[] => [
   ...format.blocks.flatMap((b) => b.slots),
   ...format.sharedSlots,
   ...(format.musicSlot ? [format.musicSlot] : []),
   ...(format.identitySlot ? [format.identitySlot] : []),
+  ...(format.speakingTakeSlot ? [format.speakingTakeSlot] : []),
+  ...(format.finalClipSlot ? [format.finalClipSlot] : []),
 ];
 
 export const intake = (jobDir: string): FilledFormat => {
@@ -135,6 +138,16 @@ export const intake = (jobDir: string): FilledFormat => {
     }
   };
 
+  // In single-take mode, a voice block's own clip slot is DERIVED from
+  // speakingTakeSlot (see the derivation below) rather than filled
+  // directly — same "not a manifest error to be absent" treatment as a
+  // generated slot, just for a different reason.
+  const derivedFromTake = new Set(
+    format.speakingTakeSlot
+      ? format.blocks.filter((b) => b.kind === "voice").map((b) => b.videoSlot)
+      : [],
+  );
+
   for (const slot of slots) {
     const fill = manifest.bindings[slot.name];
     if (!fill) {
@@ -142,7 +155,7 @@ export const intake = (jobDir: string): FilledFormat => {
       // manifest — its absence here is normal, not an error. If the user
       // supplies a binding anyway (the "files"/"file" branches below), it's
       // honored as-is and generation is skipped for that slot.
-      if (slot.required && !slot.generation) {
+      if (slot.required && !slot.generation && !derivedFromTake.has(slot.name)) {
         errors.push(`required slot "${slot.name}" (${slot.mediaType}) is not filled`);
       }
       continue;
@@ -193,6 +206,23 @@ export const intake = (jobDir: string): FilledFormat => {
       continue;
     }
     bindings[slot.name] = { type: "file", ...bound };
+  }
+
+  // Single-take mode: every voice block's own clip binding is the SAME
+  // shared take file (splitTake.ts later locates that block's own span
+  // inside it). Cloning the binding here — rather than teaching every
+  // downstream stage about speakingTakeSlot — is what keeps
+  // transcribe/trim/resolveRoles/assemble completely unchanged; they just
+  // see an ordinary bound clip per block, same as any other format.
+  if (format.speakingTakeSlot) {
+    const take = bindings[format.speakingTakeSlot.name];
+    if (take?.type === "file") {
+      for (const slotName of derivedFromTake) {
+        bindings[slotName] = take;
+      }
+    }
+    // If the take itself failed to bind, an error for its own slot was
+    // already pushed above — no need to duplicate it per derived block.
   }
 
   // Voice blocks are transcribed — their clip(s) must actually carry audio.

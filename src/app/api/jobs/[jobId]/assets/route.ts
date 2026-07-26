@@ -24,10 +24,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
   if (!slot) {
     return NextResponse.json({ error: `format has no slot "${slotName}"` }, { status: 400 });
   }
-  // Multiple takes are only meaningful for a voice block's main clip (see
-  // intake.ts) — that's the one slot where a 2nd/3rd upload APPENDS a take
-  // instead of replacing the binding.
-  const isMultiSlot = format.blocks.some((b) => b.kind === "voice" && b.videoSlot === slotName);
+  // Multiple files are only meaningful for a voice block's main clip (takes
+  // to auto-order/concatenate — see intake.ts) or the identity slot (several
+  // reference photos of the same person) — those are the slots where a
+  // 2nd/3rd upload APPENDS instead of replacing the binding.
+  const isMultiSlot =
+    format.blocks.some((b) => b.kind === "voice" && b.videoSlot === slotName) ||
+    format.identitySlot?.name === slotName;
 
   if (slot.mediaType === "text") {
     const text = formData.get("text");

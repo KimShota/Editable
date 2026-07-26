@@ -5,6 +5,7 @@ import { loadFormat } from "./loader";
 import { generate } from "./generate";
 import { GeneratorChoice } from "./generation";
 import { transcribe } from "./transcribe";
+import { deriveTranscriptAndTrim, splitTake, SplitTakeResult } from "./splitTake";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
 import { resolveRoles } from "./resolveRoles";
@@ -12,7 +13,7 @@ import { ResolverChoice } from "./resolvers";
 import { assemble } from "./assemble";
 import { render, stageAssets } from "./render";
 import { artifactsDir } from "./paths";
-import { Edl } from "./types";
+import { Edl, FilledFormat, Format, Transcript, TrimPoints } from "./types";
 import { EdlSchema } from "./schemas";
 
 /**
@@ -33,6 +34,53 @@ const writeArtifact = (jobId: string, name: string, data: unknown): void => {
   const dir = artifactsDir(jobId);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(data, null, 2));
+};
+
+/** The persisted split (auto or manually adjusted), for a single-take-mode
+ *  format — see splitTake.ts and schemas.ts's speakingTakeSlot doc. Null
+ *  before the split step has ever run for this job. */
+export const readSplit = (jobId: string): SplitTakeResult | null => {
+  const file = path.join(artifactsDir(jobId), "splitTake.json");
+  if (!fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+};
+
+/** Runs (or re-runs, for "Re-align lines") auto-split fresh from the bound
+ *  speaking take, discarding any manual adjustment previously saved. */
+export const runSplit = (format: Format, filled: FilledFormat, jobId: string): SplitTakeResult => {
+  const slot = format.speakingTakeSlot;
+  if (!slot) throw new Error(`runSplit: format "${format.id}" has no speakingTakeSlot`);
+  const take = filled.bindings[slot.name];
+  if (take?.type !== "file" || take.durationSec === undefined) {
+    throw new Error(
+      `runSplit: speakingTakeSlot "${slot.name}" is not bound to a file with a known duration`,
+    );
+  }
+  const split = splitTake(format, take.absPath, take.durationSec);
+  writeArtifact(jobId, "splitTake", split);
+  return split;
+};
+
+/** Persists a manually dragged span for one block — re-derived from the
+ *  SAME stored whole-take words already on disk, never re-transcribing. */
+export const adjustSplit = (
+  jobId: string,
+  blockId: string,
+  srcInSec: number,
+  srcOutSec: number,
+): SplitTakeResult => {
+  const split = readSplit(jobId);
+  if (!split) {
+    throw new Error(`adjustSplit: no split exists yet for job "${jobId}" — run split first`);
+  }
+  const next: SplitTakeResult = {
+    ...split,
+    blocks: split.blocks.map((b) =>
+      b.blockId === blockId ? { ...b, srcInSec, srcOutSec, confidence: 1 } : b,
+    ),
+  };
+  writeArtifact(jobId, "splitTake", next);
+  return next;
 };
 
 /** Runs intake through assemble for a job directory, writing every artifact. Returns the EDL. */
@@ -56,11 +104,29 @@ export const buildJob = async (
   const { filled, inserts } = await generate(format, intakeFilled, generator);
   writeArtifact(jobId, "inserts", inserts);
 
-  const rawTranscript = transcribe(format, filled);
+  // Single-take mode (speakingTakeSlot set): the split UI (resources
+  // wizard Step 3) is the normal path to a good splitTake.json, but if the
+  // user skipped straight to build, auto-split now rather than failing —
+  // same "never block a build over a skipped manual step" idea a
+  // generated slot's own fallback already uses. Otherwise, the ordinary
+  // per-block transcribe/trim this pipeline always did.
+  let rawTranscript: Transcript;
+  let trims: TrimPoints | undefined;
+  if (format.speakingTakeSlot) {
+    const split = readSplit(jobId) ?? runSplit(format, filled, jobId);
+    const derived = deriveTranscriptAndTrim(format, filled, split);
+    rawTranscript = derived.transcript;
+    trims = derived.trim;
+  } else {
+    rawTranscript = transcribe(format, filled);
+  }
+
   const transcript = await correctTranscript(filled, rawTranscript, resolver);
   writeArtifact(jobId, "transcript", transcript);
 
-  const trims = await trim(format, filled, transcript, resolver);
+  if (!trims) {
+    trims = await trim(format, filled, transcript, resolver);
+  }
   writeArtifact(jobId, "trim", trims);
 
   const resolved = await resolveRoles(format, transcript, trims, resolver);

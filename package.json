@@ -7,6 +7,7 @@
   "private": true,
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
+    "@higgsfield/client": "^0.2.1",
     "@remotion/cli": "4.0.482",
     "@remotion/gif": "^4.0.482",
     "@remotion/player": "^4.0.482",

@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { loadFormat } from "@backend/pipeline/loader";
 import { ContentChoice } from "@backend/content/provider";
 import { generateScript } from "@backend/content/script";
-import { jobExists, jobScriptExists, readJobManifest, readJobScript, writeJobScript } from "../../../../lib/jobs";
+import { ScriptSuggestionSchema } from "@backend/content/schemas";
+import {
+  jobExists,
+  jobScriptExists,
+  readJobManifest,
+  readJobScript,
+  writeJobScript,
+} from "../../../../lib/jobs";
 
 /** Generates (and persists) spoken-line/short-text suggestions for a job's
  *  format, given a topic — the "what do I actually say" gap between a
@@ -27,6 +35,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 400 });
   }
+}
+
+/** Persists a hand-edited suggestion set as-is — e.g. the wizard's numbered
+ *  line editor (Step 1) lets someone rewrite a suggested line in place;
+ *  this is the save path for that, distinct from POST's generate-from-topic. */
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
+  const { jobId } = await params;
+  if (!jobExists(jobId)) {
+    return NextResponse.json({ error: "job not found" }, { status: 404 });
+  }
+  const body = await req.json().catch(() => null);
+  const parsed = ScriptSuggestionSchema.safeParse(body?.script);
+  if (!parsed.success) {
+    return NextResponse.json({ error: z.prettifyError(parsed.error) }, { status: 400 });
+  }
+  writeJobScript(jobId, parsed.data);
+  return NextResponse.json({ script: parsed.data });
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ jobId: string }> }) {

@@ -355,6 +355,24 @@ const literalAnchorsOf = (block: Block): LiteralAnchor[] =>
 const videoSlotInstructions = (block: Block): string =>
   block.slots.find((s) => s.name === block.videoSlot)?.instructions ?? block.title;
 
+/** A broll block's trim is just "as filmed, capped at brollDurationSec" —
+ *  no dead-air/filler judgment, since there's no transcript to judge
+ *  against. Exported so single-take mode (splitTake.ts's caller) can
+ *  compute broll blocks' trim entries the same way without pulling in the
+ *  rest of trim() — which assumes every VOICE block's bound clip is its
+ *  own standalone file, wrong for a shared take (see splitTake.ts). */
+export const trimBrollBlock = (block: Block, filled: FilledFormat): BlockTrim => {
+  const clip = filled.bindings[block.videoSlot];
+  if (clip?.type !== "file" || clip.durationSec === undefined) {
+    throw new Error(`trim: block "${block.id}" has no bound clip with a duration`);
+  }
+  const target = block.brollDurationSec ?? clip.durationSec;
+  return {
+    blockId: block.id,
+    takes: [{ srcInSec: 0, srcOutSec: Math.min(clip.durationSec, target) }],
+  };
+};
+
 export const trim = async (
   format: Format,
   filled: FilledFormat,
@@ -369,14 +387,7 @@ export const trim = async (
     const clip = filled.bindings[block.videoSlot];
 
     if (block.kind === "broll") {
-      if (clip?.type !== "file" || clip.durationSec === undefined) {
-        throw new Error(`trim: block "${block.id}" has no bound clip with a duration`);
-      }
-      const target = block.brollDurationSec ?? clip.durationSec;
-      blocks.push({
-        blockId: block.id,
-        takes: [{ srcInSec: 0, srcOutSec: Math.min(clip.durationSec, target) }],
-      });
+      blocks.push(trimBrollBlock(block, filled));
       continue;
     }
 

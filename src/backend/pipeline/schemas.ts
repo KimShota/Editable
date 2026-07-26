@@ -242,6 +242,25 @@ export const FormatSchema = z
      * slot actually declares `generation`.
      */
     identitySlot: SlotSchema.optional(),
+    /**
+     * When set, every voice block's own video clip is DERIVED from this one
+     * slot instead of being filmed/uploaded separately — "one continuous
+     * take of all your lines," matching how some competing tools structure
+     * filming. intake.ts clones this slot's bound file into every voice
+     * block's own videoSlot binding, and a dedicated split stage
+     * (splitTake.ts) locates each block's span inside it via the SAME
+     * literal-anchor matching the rest of the pipeline already uses — so
+     * transcribe/trim/resolveRoles/assemble need no changes; they still
+     * just see one bound clip per block, they just happen to share a file.
+     * mediaType must be "video". Mutually available alongside the
+     * per-block-clip model (a format simply omits this to keep today's
+     * per-block-upload behavior).
+     */
+    speakingTakeSlot: SlotSchema.optional(),
+    /** A final clip that plays unedited at the very end, filmed/supplied
+     *  separately from the speaking take — optional polish, mediaType
+     *  "video". Only meaningful alongside speakingTakeSlot. */
+    finalClipSlot: SlotSchema.optional(),
     blocks: z.array(BlockSchema).min(1),
   })
   .superRefine((format, ctx) => {
@@ -254,12 +273,32 @@ export const FormatSchema = z
     };
     if (format.musicSlot) addSlot(format.musicSlot.name);
     if (format.identitySlot) addSlot(format.identitySlot.name);
+    if (format.speakingTakeSlot) addSlot(format.speakingTakeSlot.name);
+    if (format.finalClipSlot) addSlot(format.finalClipSlot.name);
     for (const slot of format.sharedSlots) addSlot(slot.name);
 
     if (format.identitySlot && format.identitySlot.mediaType !== "image") {
       ctx.addIssue({
         code: "custom",
         message: `identitySlot "${format.identitySlot.name}" must have mediaType "image"`,
+      });
+    }
+    if (format.speakingTakeSlot && format.speakingTakeSlot.mediaType !== "video") {
+      ctx.addIssue({
+        code: "custom",
+        message: `speakingTakeSlot "${format.speakingTakeSlot.name}" must have mediaType "video"`,
+      });
+    }
+    if (format.finalClipSlot && format.finalClipSlot.mediaType !== "video") {
+      ctx.addIssue({
+        code: "custom",
+        message: `finalClipSlot "${format.finalClipSlot.name}" must have mediaType "video"`,
+      });
+    }
+    if (format.speakingTakeSlot && !format.blocks.some((b) => b.kind === "voice")) {
+      ctx.addIssue({
+        code: "custom",
+        message: `speakingTakeSlot is set but the format has no voice blocks to derive clips for`,
       });
     }
 

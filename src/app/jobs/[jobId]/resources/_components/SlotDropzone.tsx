@@ -157,7 +157,7 @@ export function SlotDropzone({
           {(takeFiles ?? []).map((file, i) => (
             <div key={file} className="relative overflow-hidden rounded-lg border border-white/10 bg-black/30">
               <div className="absolute top-2 left-2 z-10 rounded-full bg-black/70 px-2 py-0.5 text-[11px] text-white">
-                Take {i + 1}
+                {slot.mediaType === "image" ? `Photo ${i + 1}` : `Take ${i + 1}`}
               </div>
               <SlotPreview jobId={jobId} slot={slot} file={file} />
               <button
@@ -183,9 +183,13 @@ export function SlotDropzone({
             <p className="text-xs text-[color:var(--ink-dim)]">
               {busy
                 ? "Uploading…"
-                : takeFiles?.length
-                  ? "Drop another take, or click"
-                  : "Drop 1 or more takes, drag from Library, or click — filmed the marker line and the explanation separately? Drop both, they'll be auto-ordered and stitched together"}
+                : slot.mediaType === "image"
+                  ? takeFiles?.length
+                    ? "Drop another photo, or click"
+                    : "Drop 1 or more clear reference photos, or click"
+                  : takeFiles?.length
+                    ? "Drop another take, or click"
+                    : "Drop 1 or more takes, drag from Library, or click — filmed the marker line and the explanation separately? Drop both, they'll be auto-ordered and stitched together"}
             </p>
           </div>
         </div>

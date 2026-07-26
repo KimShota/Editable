@@ -2,7 +2,7 @@
   "id": "cinematic-debut-manifesto",
   "name": "The [Profession] Debut Manifesto",
   "niche": "any person launching a personal brand / creator account in a specific field (finance, fitness, law, cooking, etc.) who wants a dramatic trailer-style intro",
-  "description": "A talking-head delivers a line-by-line self-introduction — a bold audience call-out, name reveal, credential, and outrageous ambition — with each beat punched by a single giant word overlay and intercut with moody silhouette b-roll, resolving into a dramatic music montage, a third-party 'please follow him/her' CTA, and a full-screen title card.",
+  "description": "A talking-head delivers a line-by-line self-introduction — a bold audience call-out, name reveal, credential, and outrageous ambition — with each beat punched by a single giant word overlay and intercut with moody silhouette b-roll, resolving into a dramatic music montage and a full-screen title card.",
   "fps": 30,
   "width": 720,
   "height": 1280,
@@ -13,6 +13,12 @@
     }
   },
   "musicVolume": 0.5,
+  "speakingTakeSlot": {
+    "name": "speaking-take",
+    "mediaType": "video",
+    "required": true,
+    "instructions": "One continuous take of all your lines, straight to camera. Say each line clearly with a brief pause between them — cutaways and the montage are added for you separately."
+  },
   "identitySlot": {
     "name": "identity-photos",
     "mediaType": "image",
@@ -292,46 +298,6 @@
           }
         }
       ],
-      "transitionAfter": {
-        "component": "cut",
-        "params": {
-          "durationSec": 0
-        }
-      }
-    },
-    {
-      "id": "cta",
-      "title": "Third-party follow CTA",
-      "kind": "voice",
-      "videoSlot": "cta-clip",
-      "slots": [
-        {
-          "name": "cta-clip",
-          "mediaType": "video",
-          "required": true,
-          "instructions": "Break the serious tone completely: bright, normal lighting, a partner/friend/family member appears with you and says the ask warmly and a little jokingly: '[This person] wants to be famous, so please follow him/her.' End on a candid laugh or playful beat."
-        }
-      ],
-      "captions": true,
-      "roles": [],
-      "anchors": [
-        {
-          "id": "cta-marker",
-          "kind": "literal",
-          "phrases": [
-            "so please follow",
-            "please follow him",
-            "please follow her",
-            "make sure to follow"
-          ],
-          "capture": false,
-          "fallback": {
-            "anchor": "blockEnd",
-            "offsetSec": -1.5
-          }
-        }
-      ],
-      "events": [],
       "transitionAfter": {
         "component": "cut",
         "params": {
