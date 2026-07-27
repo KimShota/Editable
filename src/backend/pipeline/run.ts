@@ -19,6 +19,7 @@ import { deriveTranscriptAndTrim } from "./splitTake";
 import { readSplit, runSplit } from "./orchestrate";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
+import { replaceBackgrounds } from "./backgroundReplace";
 import { resolveRoles } from "./resolveRoles";
 import { ResolverChoice } from "./resolvers";
 import { assemble } from "./assemble";
@@ -196,12 +197,17 @@ const main = async () => {
   }
   if (args.only === "transcribe") return;
 
-  const trims = wants("trim")
+  let trims = wants("trim")
     ? format.speakingTakeSlot
       ? getSingleTakeDerived().trim
       : await trim(format, filled, transcript, args.resolver)
     : read("trim", TrimPointsSchema);
   if (wants("trim")) {
+    const replaced = await replaceBackgrounds(format, filled, trims, transcript);
+    filled = replaced.filled;
+    trims = replaced.trims;
+    transcript = replaced.transcript;
+    write("transcript", transcript);
     write("trim", trims);
     for (const d of trims.diagnostics) console.log(`    ${d}`);
   }

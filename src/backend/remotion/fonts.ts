@@ -1,15 +1,16 @@
 import { continueRender, delayRender, staticFile } from "remotion";
-import { ARCHIVO_BLACK_FONT, MONTSERRAT_ITALIC_FONT } from "../components/style";
+import { ARCHIVO_BLACK_FONT, MONTSERRAT_ITALIC_FONT, PLAYFAIR_DISPLAY_FONT } from "../components/style";
 
 /**
- * Injects the display faces used by StickerTitle and loads them before the
- * frame renders, so headless exports never rasterize a fallback face.
- * Safe under Next SSR (no document at module scope); idempotent so every
- * component instance can call it.
+ * Injects every display face used by non-system-font components
+ * (StickerTitle, SkillCard, TextOverlay's "kumarTitle" variant) and loads
+ * them before the frame renders, so headless exports never rasterize a
+ * fallback face. Safe under Next SSR (no document at module scope);
+ * idempotent so every component instance can call it.
  */
 let injected = false;
 
-export const ensureStickerFonts = (): void => {
+export const ensureDisplayFonts = (): void => {
   if (typeof document === "undefined" || injected) return;
   injected = true;
 
@@ -29,6 +30,13 @@ export const ensureStickerFonts = (): void => {
       font-style: italic;
       font-display: block;
     }
+    @font-face {
+      font-family: "${PLAYFAIR_DISPLAY_FONT}";
+      src: url("${staticFile("fonts/playfair-display-black.woff2")}") format("woff2");
+      font-weight: 900;
+      font-style: normal;
+      font-display: block;
+    }
   `;
   document.head.appendChild(style);
 
@@ -36,6 +44,7 @@ export const ensureStickerFonts = (): void => {
   Promise.all([
     document.fonts.load(`400 100px "${ARCHIVO_BLACK_FONT}"`),
     document.fonts.load(`800 italic 100px "${MONTSERRAT_ITALIC_FONT}"`),
+    document.fonts.load(`900 100px "${PLAYFAIR_DISPLAY_FONT}"`),
   ])
     .catch(() => {
       // Missing/blocked font files degrade to the SYSTEM_FONT fallback in

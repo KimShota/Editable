@@ -8,6 +8,7 @@ import { transcribe } from "./transcribe";
 import { deriveTranscriptAndTrim, splitTake, SplitTakeResult } from "./splitTake";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
+import { replaceBackgrounds } from "./backgroundReplace";
 import { resolveRoles } from "./resolveRoles";
 import { ResolverChoice } from "./resolvers";
 import { assemble } from "./assemble";
@@ -121,18 +122,30 @@ export const buildJob = async (
     rawTranscript = transcribe(format, filled);
   }
 
-  const transcript = await correctTranscript(filled, rawTranscript, resolver);
-  writeArtifact(jobId, "transcript", transcript);
+  let transcript = await correctTranscript(filled, rawTranscript, resolver);
 
   if (!trims) {
     trims = await trim(format, filled, transcript, resolver);
   }
+
+  // Blocks flagged backgroundReplace/punchInTailSec (see schemas.ts's
+  // BlockSchema doc comment) get their video processed here — after
+  // trim/split settles each flagged block's own span, before
+  // resolveRoles/assemble, both of which must see the REPLACED
+  // bindings/trims/transcript (a new standalone file per block starting
+  // at 0, not a sub-span of the shared take — see backgroundReplace.ts's
+  // doc comment on why the transcript has to be rebased too).
+  const replaced = await replaceBackgrounds(format, filled, trims, transcript);
+  const finalFilled = replaced.filled;
+  trims = replaced.trims;
+  transcript = replaced.transcript;
+  writeArtifact(jobId, "transcript", transcript);
   writeArtifact(jobId, "trim", trims);
 
   const resolved = await resolveRoles(format, transcript, trims, resolver);
   writeArtifact(jobId, "roles", resolved);
 
-  const edl = assemble(format, filled, transcript, trims, resolved);
+  const edl = assemble(format, finalFilled, transcript, trims, resolved);
   writeArtifact(jobId, "edl", edl);
   stageAssets(edl);
 

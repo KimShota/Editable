@@ -113,7 +113,12 @@ export const splitTake = (format: Format, absPath: string, durationSec: number):
     if (match) {
       const startSec = Math.max(searchFloor, match.startSec - PAD_SEC);
       starts.push({ blockId: block.id, startSec, confidence: match.confidence, quote: match.quote });
-      searchFloor = match.endSec;
+      // phraseEndSec, not endSec — a capture anchor's endSec runs however
+      // far the greedy capture happened to go, which has nothing to do
+      // with where the marker itself sits; using it here let one block's
+      // capture swallow the next block's opening words (and, transitively,
+      // its own srcOutSec) whenever speech had no clean pause after it.
+      searchFloor = match.phraseEndSec;
     } else {
       // No anchor found (silence, or the line wasn't said) — fall back to
       // right where the previous block ended; confidence 0 flags it.

@@ -118,6 +118,7 @@ export const generate = async (
       await provider.generate({
         identityImages,
         styleProfile,
+        kind: spec.kind,
         shot: spec.shot,
         durationSec: spec.durationSec,
         seed: spec.seed,

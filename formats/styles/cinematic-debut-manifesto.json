@@ -4,8 +4,8 @@
   "lighting": "hard single-source key light from one side, deep shadows, high contrast, almost silhouette-like rim lighting on the subject's edge",
   "grade": {
     "saturation": 0.75,
-    "contrast": 1.35,
-    "brightness": -0.06,
-    "temperatureShift": -0.3
+    "contrast": 1.15,
+    "brightness": -0.05,
+    "temperatureShift": -0.25
   }
 }

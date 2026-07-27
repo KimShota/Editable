@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import {
   BoundAsset,
@@ -19,7 +20,8 @@ import {
 import { EdlSchema } from "./schemas";
 import { anchoredTimeSec, clamp, concatenateTakes } from "./timing";
 import { audioOnsetSec } from "./trim";
-import { publicJobPrefix } from "./paths";
+import { publicJobPrefix, formatStylesDir } from "./paths";
+import { loadStyleProfile } from "./generation/styleProfile";
 
 /**
  * Module 6 — Timeline assembly.
@@ -424,6 +426,14 @@ export const assemble = (
       const isEmphasized = (w: Word): boolean =>
         captureSpans.some((span) => w.startSec < span.end && w.endSec > span.start);
 
+      // bigTitle wants word-level karaoke — a NEW title card per word,
+      // not a multi-word line — so every word starts its own group; the
+      // "extend to the next group's start" pass below then gives
+      // continuous word-to-word coverage with no gap between cards, for
+      // free, from the exact same mechanism lowerThird already uses to
+      // stitch its own multi-word groups together.
+      const oneWordPerGroup = block.captionVariant === "bigTitle";
+
       let group: EdlCaptionGroup | null = null;
       for (const w of words) {
         const tlStartSec = tlInSec + w.startSec;
@@ -431,10 +441,11 @@ export const assemble = (
         const lastEnd = group?.words[group.words.length - 1]?.tlEndSec ?? -Infinity;
         const startNew =
           !group ||
+          oneWordPerGroup ||
           group.words.length >= CAPTION_WORDS_PER_GROUP ||
           tlStartSec - lastEnd > CAPTION_GAP_SEC;
         if (startNew) {
-          group = { id: `caption-${captions.length}`, words: [], tlInSec: tlStartSec, tlOutSec: tlEndSec };
+          group = { id: `caption-${captions.length}`, words: [], tlInSec: tlStartSec, tlOutSec: tlEndSec, variant: block.captionVariant };
           captions.push(group);
         }
         group!.words.push({ text: w.text, tlStartSec, tlEndSec, emphasis: isEmphasized(w) });
@@ -444,6 +455,31 @@ export const assemble = (
       const blockGroups = captions.filter((g) => g.tlInSec >= tlInSec);
       for (let i = 0; i < blockGroups.length - 1; i++) {
         blockGroups[i].tlOutSec = blockGroups[i + 1].tlInSec;
+      }
+    }
+
+    // ecuCutaway (see schemas.ts's BlockSchema doc comment): the ONLY
+    // overlay type synthesized straight from a block flag rather than an
+    // authored `events` entry — backgroundReplace.ts already produced the
+    // cropped file at "<videoSlot>-ecu" by this point, so there's no
+    // per-format event/slot boilerplate to write, just the one config.
+    if (block.ecuCutaway) {
+      const ecuAsset = fileAsset(filled, `${block.videoSlot}-ecu`);
+      if (!ecuAsset) {
+        diagnostics.push(`skipped ecuCutaway in block "${block.id}" — no "${block.videoSlot}-ecu" binding (backgroundReplace didn't run?)`);
+      } else {
+        const atSec = clamp(block.ecuCutaway.overlayAtSec, 0, blockDurationSec);
+        const endSec = Math.min(atSec + block.ecuCutaway.durationSec, blockDurationSec);
+        if (endSec > atSec) {
+          overlays.push({
+            id: `${block.id}-ecu-cutaway`,
+            component: "CutawayOverlay",
+            params: { src: stage(ecuAsset) },
+            tlInSec: tlInSec + atSec,
+            tlOutSec: tlInSec + endSec,
+            ...defaultOverlayBox("CutawayOverlay", {}, ecuAsset.width, ecuAsset.height),
+          });
+        }
       }
     }
 
@@ -483,6 +519,13 @@ export const assemble = (
 
   const musicAsset = format.musicSlot ? fileAsset(filled, format.musicSlot.name) : undefined;
 
+  // Only load a StyleProfile if the format actually has one — most formats
+  // never will, and loadStyleProfile() warns on a miss (appropriate when
+  // generate.ts calls it for a format that DOES need one for its generated
+  // slots, noise here for formats that simply have none).
+  const hasStyleProfile = fs.existsSync(path.join(formatStylesDir, `${format.id}.json`));
+  const grade = hasStyleProfile ? loadStyleProfile(format.id).grade : undefined;
+
   const edl: Edl = EdlSchema.parse({
     jobId: filled.jobId,
     formatId: format.id,
@@ -495,6 +538,7 @@ export const assemble = (
     sfx: dedupedSfx,
     captions,
     captionStyle: format.captionStyle,
+    grade,
     transitions,
     music: musicAsset ? { src: stage(musicAsset), volume: format.musicVolume } : undefined,
     assets,

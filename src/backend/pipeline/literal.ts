@@ -88,6 +88,15 @@ export type LiteralMatch = {
   startSec: number;
   /** End of the capture's last word (or the phrase's, if no capture). */
   endSec: number;
+  /** End of the matched PHRASE itself, ignoring any capture — stable
+   *  regardless of how far a greedy capture happened to run. Callers that
+   *  need "where does this marker end" for anything other than displaying
+   *  the captured text (e.g. splitTake.ts locating the next block's search
+   *  floor) must use this, not `endSec`: a capture's length depends on
+   *  speech-gap/sentence-break luck, not on the marker's own position, and
+   *  treating it as a boundary lets a greedy capture consume the next
+   *  block's opening words. */
+  phraseEndSec: number;
   /** Start of the first captured word (capture anchors only). */
   captureStartSec?: number;
   confidence: number;
@@ -128,6 +137,7 @@ export const matchLiteralAnchor = (
 
   const phraseWords = words.slice(at, at + tokens.length);
   let last = at + tokens.length - 1;
+  const phraseEndSec = words[last].endSec;
   const captured: Word[] = [];
 
   if (anchor.capture) {
@@ -148,6 +158,7 @@ export const matchLiteralAnchor = (
   return {
     startSec: phraseWords[0].startSec,
     endSec: words[last].endSec,
+    phraseEndSec,
     captureStartSec: captured.length > 0 ? captured[0].startSec : undefined,
     confidence,
     quote: words.slice(at, last + 1).map((w) => w.text).join(" "),

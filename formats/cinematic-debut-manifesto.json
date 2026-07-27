@@ -9,7 +9,8 @@
   "captionStyle": {
     "component": "Captions",
     "params": {
-      "position": "lowerThird"
+      "position": "lowerThird",
+      "theme": "kumar"
     }
   },
   "musicVolume": 0.5,
@@ -39,12 +40,30 @@
       "title": "Hook — call out your audience",
       "kind": "voice",
       "videoSlot": "hook-clip",
+      "backgroundReplace": true,
+      "ecuCutaway": {
+        "atSec": 0.2,
+        "durationSec": 0.4,
+        "overlayAtSec": 0.9
+      },
       "slots": [
         {
           "name": "hook-clip",
           "mediaType": "video",
           "required": true,
           "instructions": "Sit at a desk framed like an office/authority setting (e.g. a wall map or shelf behind you), lit dark and moody. Look straight into the lens, hands steepled, and say slowly and gravely: 'This is a message to all [your audience]' — e.g. 'to all finance pros', 'to all personal trainers'. Deliver it like a threat, not a greeting."
+        },
+        {
+          "name": "hook-cutaway-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": {
+            "kind": "montage",
+            "shot": "backlit silhouette portrait, high contrast, still pose, plain light backdrop",
+            "durationSec": 0.8,
+            "seed": 2
+          }
         }
       ],
       "captions": true,
@@ -65,7 +84,25 @@
           }
         }
       ],
-      "events": [],
+      "events": [
+        {
+          "id": "hook-cutaway",
+          "kind": "overlay",
+          "component": {
+            "component": "CutawayOverlay",
+            "params": {
+              "videoSlot": "hook-cutaway-clip"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "hook-marker",
+            "edge": "captureStart",
+            "offsetSec": 0.05
+          },
+          "durationSec": 0.8
+        }
+      ],
       "transitionAfter": {
         "component": "cut",
         "params": {
@@ -78,15 +115,29 @@
       "title": "Name reveal",
       "kind": "voice",
       "videoSlot": "name-clip",
+      "backgroundReplace": true,
       "slots": [
         {
           "name": "name-clip",
           "mediaType": "video",
           "required": true,
           "instructions": "Same dark desk framing, calm and confident. Say: 'My name is [your name].' Pause on your name so the big word can hit."
+        },
+        {
+          "name": "name-cutaway-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": {
+            "kind": "montage",
+            "shot": "backlit silhouette portrait, high contrast, still pose, plain light backdrop",
+            "durationSec": 0.6,
+            "seed": 3
+          }
         }
       ],
-      "captions": false,
+      "captions": true,
+      "captionVariant": "bigTitle",
       "roles": [],
       "anchors": [
         {
@@ -107,23 +158,21 @@
       ],
       "events": [
         {
-          "id": "name-word-overlay",
+          "id": "name-cutaway",
           "kind": "overlay",
           "component": {
-            "component": "TextOverlay",
+            "component": "CutawayOverlay",
             "params": {
-              "textAnchor": "name-marker",
-              "textTemplate": "{captured}",
-              "variant": "title",
-              "fontSize": 110
+              "videoSlot": "name-cutaway-clip"
             }
           },
           "timing": {
             "kind": "role",
             "roleId": "name-marker",
             "edge": "captureStart",
-            "offsetSec": 0
-          }
+            "offsetSec": 0.1
+          },
+          "durationSec": 0.6
         }
       ],
       "transitionAfter": {
@@ -138,6 +187,7 @@
       "title": "Credential",
       "kind": "voice",
       "videoSlot": "credential-clip",
+      "backgroundReplace": true,
       "slots": [
         {
           "name": "credential-clip",
@@ -146,7 +196,8 @@
           "instructions": "Same setup. State your background in one short phrase: 'I'm a [credential]' — e.g. 'a retired accountant', 'a former lawyer'. Land hard on the key title word."
         }
       ],
-      "captions": false,
+      "captions": true,
+      "captionVariant": "bigTitle",
       "roles": [],
       "anchors": [
         {
@@ -165,27 +216,7 @@
           }
         }
       ],
-      "events": [
-        {
-          "id": "cred-word-overlay",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "cred-marker",
-              "textTemplate": "{captured}",
-              "variant": "title",
-              "fontSize": 90
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "cred-marker",
-            "edge": "captureStart",
-            "offsetSec": 0
-          }
-        }
-      ],
+      "events": [],
       "transitionAfter": {
         "component": "cut",
         "params": {
@@ -198,6 +229,8 @@
       "title": "The outrageous ambition",
       "kind": "voice",
       "videoSlot": "claim-clip",
+      "backgroundReplace": true,
+      "punchInTailSec": 0.9,
       "slots": [
         {
           "name": "claim-clip",
@@ -206,13 +239,20 @@
           "instructions": "Same dark desk. Deliver your grand, slightly over-the-top mission in one breath: 'And I'm gonna [take over / become the biggest X in the world]'. Escalate your intensity toward the end."
         },
         {
-          "name": "keyword-text",
-          "mediaType": "text",
+          "name": "claim-cutaway-clip",
+          "mediaType": "video",
           "required": true,
-          "instructions": "The single biggest, boldest word of your ambition to slam on screen (e.g. 'BIGGEST', 'DOMINATE', 'EVERYWHERE'). One word, ALL CAPS."
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": {
+            "kind": "montage",
+            "shot": "backlit silhouette portrait, high contrast, still pose, plain light backdrop",
+            "durationSec": 0.7,
+            "seed": 4
+          }
         }
       ],
-      "captions": false,
+      "captions": true,
+      "captionVariant": "bigTitle",
       "roles": [],
       "anchors": [
         {
@@ -233,22 +273,21 @@
       ],
       "events": [
         {
-          "id": "claim-word-overlay",
+          "id": "claim-cutaway",
           "kind": "overlay",
           "component": {
-            "component": "TextOverlay",
+            "component": "CutawayOverlay",
             "params": {
-              "textSlot": "keyword-text",
-              "variant": "title",
-              "fontSize": 120
+              "videoSlot": "claim-cutaway-clip"
             }
           },
           "timing": {
             "kind": "role",
             "roleId": "claim-marker",
             "edge": "end",
-            "offsetSec": 1
-          }
+            "offsetSec": 1.3
+          },
+          "durationSec": 0.7
         }
       ],
       "transitionAfter": {
@@ -310,6 +349,8 @@
       "title": "Title card",
       "kind": "broll",
       "videoSlot": "endcard-clip",
+      "brollDurationSec": 2.2,
+      "silhouette": true,
       "slots": [
         {
           "name": "endcard-clip",
@@ -335,7 +376,7 @@
             "component": "TextOverlay",
             "params": {
               "textSlot": "debut-title",
-              "variant": "title",
+              "variant": "kumarTitle",
               "fontSize": 100
             }
           },

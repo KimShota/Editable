@@ -14,6 +14,7 @@ import { Edl, EdlTransition, EdlVideoSegment } from "../pipeline/types";
 import { TextOverlay } from "./components/TextOverlay";
 import { ImageOverlay } from "./components/ImageOverlay";
 import { VideoOverlay } from "./components/VideoOverlay";
+import { CutawayOverlay } from "./components/CutawayOverlay";
 import { StickerTitle } from "./components/StickerTitle";
 import { SkillCard } from "./components/SkillCard";
 import { Captions } from "./components/Captions";
@@ -34,6 +35,7 @@ const OVERLAY_COMPONENTS: Record<
   TextOverlay: TextOverlay as React.FC<Record<string, unknown>>,
   ImageOverlay: ImageOverlay as React.FC<Record<string, unknown>>,
   VideoOverlay: VideoOverlay as React.FC<Record<string, unknown>>,
+  CutawayOverlay: CutawayOverlay as React.FC<Record<string, unknown>>,
   StickerTitle: StickerTitle as React.FC<Record<string, unknown>>,
   SkillCard: SkillCard as React.FC<Record<string, unknown>>,
 };
@@ -97,9 +99,25 @@ const Segment: React.FC<{
   );
 };
 
+/** CSS approximation of the StyleProfile grade (see schemas.ts's GradeSchema
+ *  doc comment) — cheap, GPU-free color-matching applied uniformly across
+ *  every video segment (real footage and generated inserts alike), unlike
+ *  generation/provider.ts's ffmpeg grade which only ever reached generated
+ *  stills. Deliberately scoped to just the video stack below, not text
+ *  overlays/captions, so a red title stays pure red under a cool grade. */
+const gradeFilter = (grade: Edl["grade"]): string | undefined => {
+  if (!grade) return undefined;
+  const brightnessMultiplier = 1 + grade.brightness;
+  // No native CSS "temperature" filter; hue-rotate is a rough stand-in —
+  // negative temperatureShift (cooler) rotates toward blue.
+  const hueRotateDeg = grade.temperatureShift * -12;
+  return `brightness(${brightnessMultiplier}) contrast(${grade.contrast}) saturate(${grade.saturation}) hue-rotate(${hueRotateDeg}deg)`;
+};
+
 export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, previewMode }) => {
   const { fps } = useVideoConfig();
   const toFrames = (sec: number) => Math.round(sec * fps);
+  const filter = gradeFilter(edl.grade);
 
   // A transition after clip N plays on the segment that follows it.
   const incomingTransitions = useMemo(() => {
@@ -114,17 +132,19 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
 
   return (
     <AbsoluteFill style={{ backgroundColor: "black" }}>
-      {edl.video.map((seg) => (
-        <Sequence
-          key={seg.id}
-          from={toFrames(seg.tlInSec)}
-          durationInFrames={toFrames(seg.tlOutSec) - toFrames(seg.tlInSec)}
-          name={`video:${seg.id}`}
-          premountFor={previewMode ? Math.round(fps * 0.75) : 0}
-        >
-          <Segment seg={seg} transition={incomingTransitions.get(seg.id)} jobId={edl.jobId} previewMode={previewMode} />
-        </Sequence>
-      ))}
+      <AbsoluteFill style={{ filter }}>
+        {edl.video.map((seg) => (
+          <Sequence
+            key={seg.id}
+            from={toFrames(seg.tlInSec)}
+            durationInFrames={toFrames(seg.tlOutSec) - toFrames(seg.tlInSec)}
+            name={`video:${seg.id}`}
+            premountFor={previewMode ? Math.round(fps * 0.75) : 0}
+          >
+            <Segment seg={seg} transition={incomingTransitions.get(seg.id)} jobId={edl.jobId} previewMode={previewMode} />
+          </Sequence>
+        ))}
+      </AbsoluteFill>
 
       {edl.overlays.map((overlay) => {
         const Component = OVERLAY_COMPONENTS[overlay.component];
@@ -158,6 +178,7 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
         <Captions
           groups={edl.captions}
           position={String(edl.captionStyle?.params.position ?? "lowerThird")}
+          theme={edl.captionStyle?.params.theme as string | undefined}
         />
       )}
 

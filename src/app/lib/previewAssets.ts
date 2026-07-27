@@ -3,18 +3,26 @@ import fs from "node:fs";
 import path from "node:path";
 import { publicDir } from "@backend/pipeline/paths";
 
+/** The two subdirectories an EDL src can point into under a job's public
+ *  dir: user-uploaded footage, and clips synthesized by the generate stage
+ *  (see generate.ts's `generatedDir`) — both staged to public/ the same
+ *  way, so the preview proxy must resolve either. */
+const ALLOWED_SUBDIRS = ["assets", "generated"];
+
 /**
  * Resolves a public/-relative asset src as it appears in an EDL (e.g.
- * "jobs/<jobId>/assets/clip.mov") to its absolute path, verifying it
- * actually belongs to the given job and can't escape the job's asset dir
- * however the path got encoded.
+ * "jobs/<jobId>/assets/clip.mov" or "jobs/<jobId>/generated/clip.mp4") to
+ * its absolute path, verifying it actually belongs to the given job and
+ * can't escape its subdirectory however the path got encoded.
  */
 export const resolveJobAssetAbsPath = (jobId: string, src: string): string | null => {
-  const prefix = `jobs/${jobId}/assets/`;
-  if (!src.startsWith(prefix)) return null;
-  const assetsDir = path.join(publicDir, "jobs", jobId, "assets");
+  const jobPrefix = `jobs/${jobId}/`;
+  if (!src.startsWith(jobPrefix)) return null;
+  const subdir = src.slice(jobPrefix.length).split("/")[0];
+  if (!ALLOWED_SUBDIRS.includes(subdir)) return null;
+  const subdirAbs = path.join(publicDir, "jobs", jobId, subdir);
   const resolved = path.join(publicDir, src);
-  if (resolved !== assetsDir && !resolved.startsWith(assetsDir + path.sep)) return null;
+  if (resolved !== subdirAbs && !resolved.startsWith(subdirAbs + path.sep)) return null;
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null;
   return resolved;
 };

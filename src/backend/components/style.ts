@@ -16,3 +16,14 @@ export const ARCHIVO_BLACK_STACK = `"${ARCHIVO_BLACK_FONT}", ${SYSTEM_FONT}`;
 export const MONTSERRAT_ITALIC_STACK = `"${MONTSERRAT_ITALIC_FONT}", ${SYSTEM_FONT}`;
 
 export const STICKER_ACCENT = "#EC7A5E";
+
+/** High-contrast Didone serif for TextOverlay's "kumarTitle" variant —
+ *  the "KUMAR'S DEBUT" / big-word look: a magazine-cover serif, not the
+ *  system sans every other variant uses. Fallback chain still ends in a
+ *  system SERIF (not SYSTEM_FONT) so a blocked font file degrades to a
+ *  native serif rather than silently becoming sans-serif. */
+export const PLAYFAIR_DISPLAY_FONT = "Playfair Display Black";
+export const PLAYFAIR_DISPLAY_STACK = `"${PLAYFAIR_DISPLAY_FONT}", Georgia, "Times New Roman", serif`;
+
+/** The red used by the reference reel's titles and captions. */
+export const KUMAR_RED = "#E31E24";

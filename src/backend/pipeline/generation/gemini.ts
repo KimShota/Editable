@@ -100,7 +100,6 @@ export const geminiGenerationProvider: GenerationProvider = {
         width: req.width,
         height: req.height,
         fps: req.fps,
-        grade: req.styleProfile.grade,
         outPath: req.outPath,
       });
     } finally {

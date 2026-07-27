@@ -9,7 +9,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { ARCHIVO_BLACK_STACK } from "../../components/style";
-import { ensureStickerFonts } from "../fonts";
+import { ensureDisplayFonts } from "../fonts";
 import { PaperPatch } from "./PaperPatch";
 
 /**
@@ -28,7 +28,7 @@ export const SkillCard: React.FC<{
   src?: string;
   fontSize?: number;
 }> = ({ text = "", src, fontSize = 72 }) => {
-  ensureStickerFonts();
+  ensureDisplayFonts();
 
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();

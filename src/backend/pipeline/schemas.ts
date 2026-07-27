@@ -34,6 +34,17 @@ export const ComponentRefSchema = z.object({
   params: z.record(z.string(), z.unknown()).default({}),
 });
 
+/** A deterministic color grade — shared by StyleProfileSchema (where a
+ *  format declares it) and EdlSchema (where assemble.ts carries it through
+ *  for EdlVideo to apply as a CSS filter across every video segment). */
+export const GradeSchema = z.object({
+  saturation: z.number().positive().default(1),
+  contrast: z.number().positive().default(1),
+  brightness: z.number().default(0),
+  /** -1 (cooler/blue) .. 1 (warmer/orange). */
+  temperatureShift: z.number().min(-1).max(1).default(0),
+});
+
 export const AnchorPointSchema = z.enum(["blockStart", "blockEnd"]);
 
 /** Deterministic position inside a block: anchor point + signed offset. */
@@ -206,8 +217,56 @@ export const BlockSchema = z.object({
   slots: z.array(SlotSchema),
   /** Whether to burn word captions for this block (voice blocks only). */
   captions: z.boolean().default(false),
+  /** Only meaningful alongside captions:true. "lowerThird" (default): the
+   *  ordinary multi-word caption line. "bigTitle": one word at a time,
+   *  full-screen, in the format's kumarTitle style — word-level karaoke
+   *  reproducing the reference reel's own title mechanic (a NEW word,
+   *  changing roughly every 0.2s, tracking the transcript verbatim — not
+   *  a hand-picked phrase held for seconds, which is what the format used
+   *  before this: a single captured phrase pinned up for its whole
+   *  anchor). Drives Captions.tsx's per-group render branch. */
+  captionVariant: z.enum(["lowerThird", "bigTitle"]).default("lowerThird"),
   /** Broll blocks: how long to show the clip (min'd with actual length). */
   brollDurationSec: z.number().positive().optional(),
+  /** Voice blocks only, and only meaningful alongside speakingTakeSlot:
+   *  swap this block's real background for a generated one, compositing
+   *  the user's own matted-out footage on top (see backgroundReplace.ts).
+   *  Every flagged block in a format shares ONE generated backdrop image
+   *  (built from the StyleProfile's environment/lighting), matching a
+   *  single-take format's own premise — one continuous take, one camera
+   *  position, one set — never a per-block backdrop. */
+  backgroundReplace: z.boolean().default(false),
+  /** Voice blocks only: crops+zooms the last N seconds of this block's own
+   *  footage into a tight close-up, cutting instantly (see
+   *  videoEffects.ts's applyPunchInTail) — the reference reel's own
+   *  emphasis-cutaway edit rhythm, built from footage that already
+   *  exists rather than anything generated. */
+  punchInTailSec: z.number().positive().optional(),
+  /** Broll blocks only: composites the last brollDurationSec of this
+   *  block's own bound clip onto a generated light vignette backdrop,
+   *  crushed via the measured SILHOUETTE_CRUSH curve (matte.ts) — the
+   *  reference reel's light-backdrop pose shots (see
+   *  backgroundReplace.ts's doc comment). Distinct from
+   *  backgroundReplace: a broll block owns its clip directly, there's no
+   *  shared take to slice a span out of. */
+  silhouette: z.boolean().default(false),
+  /** Voice blocks only: an ECU (extreme close-up) cutaway — crops+zooms a
+   *  short, silent window of THIS block's own already-processed footage
+   *  (after backgroundReplace, if flagged) and shows it as a
+   *  CutawayOverlay elsewhere in the SAME block's timeline, free/no
+   *  generation (videoEffects.ts's extractCloseUpCutaway). Self-
+   *  referential by design for now — a different moment of the same clip,
+   *  not footage borrowed from another block — the simplest version of
+   *  the reference reel's ECU shots that still adds real cutting rhythm. */
+  ecuCutaway: z
+    .object({
+      /** Where in the block's own clip to crop the close-up from. */
+      atSec: z.number().min(0),
+      durationSec: z.number().positive(),
+      /** Where in the block's OWN TIMELINE to show it as a cutaway. */
+      overlayAtSec: z.number().min(0),
+    })
+    .optional(),
   /** Optional hard cap on the block's duration after trim. */
   maxDurationSec: z.number().positive().optional(),
   /** Legacy field: semantic anchors only. New formats use `anchors`. */
@@ -348,6 +407,36 @@ export const FormatSchema = z
         ctx.addIssue({
           code: "custom",
           message: `block "${block.id}": broll blocks cannot have captions`,
+        });
+      }
+      if (block.backgroundReplace && block.kind !== "voice") {
+        ctx.addIssue({
+          code: "custom",
+          message: `block "${block.id}": backgroundReplace only applies to voice blocks`,
+        });
+      }
+      if (block.backgroundReplace && !format.speakingTakeSlot) {
+        ctx.addIssue({
+          code: "custom",
+          message: `block "${block.id}": backgroundReplace requires speakingTakeSlot (only meaningful in single-take mode)`,
+        });
+      }
+      if (block.punchInTailSec !== undefined && block.kind !== "voice") {
+        ctx.addIssue({
+          code: "custom",
+          message: `block "${block.id}": punchInTailSec only applies to voice blocks`,
+        });
+      }
+      if (block.silhouette && block.kind !== "broll") {
+        ctx.addIssue({
+          code: "custom",
+          message: `block "${block.id}": silhouette only applies to broll blocks`,
+        });
+      }
+      if (block.ecuCutaway && block.kind !== "voice") {
+        ctx.addIssue({
+          code: "custom",
+          message: `block "${block.id}": ecuCutaway only applies to voice blocks`,
         });
       }
 
@@ -645,6 +734,12 @@ export const EdlCaptionGroupSchema = z.object({
   words: z.array(EdlCaptionWordSchema).min(1),
   tlInSec: z.number().min(0),
   tlOutSec: z.number().positive(),
+  /** Carried straight from the owning block's own captionVariant (see
+   *  BlockSchema doc comment) — Captions.tsx renders each group according
+   *  to its own tag, not one global style, since a format like this one
+   *  wants BOTH a lower-third opening caption AND full-screen karaoke
+   *  titles over different blocks in the same video. */
+  variant: z.enum(["lowerThird", "bigTitle"]).default("lowerThird"),
 });
 
 export const EdlTransitionSchema = z.object({
@@ -674,6 +769,12 @@ export const EdlSchema = z.object({
   sfx: z.array(EdlSfxSchema).default([]),
   captions: z.array(EdlCaptionGroupSchema).default([]),
   captionStyle: ComponentRefSchema.optional(),
+  /** The format's StyleProfile grade (see StyleProfileSchema doc comment),
+   *  carried straight through so EdlVideo can apply it as a CSS filter
+   *  across every video segment uniformly — real footage and generated
+   *  inserts alike, unlike generation/provider.ts's ffmpeg grade which
+   *  only ever touched generated stills. */
+  grade: GradeSchema.optional(),
   transitions: z.array(EdlTransitionSchema).default([]),
   music: z
     .object({
@@ -722,15 +823,7 @@ export const StyleProfileSchema = z.object({
    *  later phase, to the user's own real footage) via ffmpeg eq/colorbalance
    *  — cheap, GPU-free color-matching that alone captures a large slice of
    *  a reference's "cinematic look." */
-  grade: z
-    .object({
-      saturation: z.number().positive().default(1),
-      contrast: z.number().positive().default(1),
-      brightness: z.number().default(0),
-      /** -1 (cooler/blue) .. 1 (warmer/orange). */
-      temperatureShift: z.number().min(-1).max(1).default(0),
-    })
-    .optional(),
+  grade: GradeSchema.optional(),
 });
 
 // ---------------------------------------------------------------------------

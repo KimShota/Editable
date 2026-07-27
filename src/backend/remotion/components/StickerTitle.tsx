@@ -11,7 +11,7 @@ import {
   MONTSERRAT_ITALIC_STACK,
   STICKER_ACCENT,
 } from "../../components/style";
-import { ensureStickerFonts } from "../fonts";
+import { ensureDisplayFonts } from "../fonts";
 import { PaperPatch } from "./PaperPatch";
 
 /**
@@ -56,7 +56,7 @@ export const StickerTitle: React.FC<{
   fontSize = 80,
   position = "top",
 }) => {
-  ensureStickerFonts();
+  ensureDisplayFonts();
 
   const derived = splitText(text);
   const resolvedPatch = patchText ?? derived.patchText;

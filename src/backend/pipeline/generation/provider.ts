@@ -13,6 +13,11 @@ export type GenerationRequest = {
   /** Absolute paths to the job's identity reference photos. */
   identityImages: string[];
   styleProfile: StyleProfile;
+  /** cutaway | montage — see schemas.ts's GenerationSpecSchema. A provider
+   *  compositing a real subject onto a synthesized backdrop (rather than
+   *  asking a model to invent one) can use this for framing decisions,
+   *  e.g. crushing a montage toward silhouette. */
+  kind: "cutaway" | "montage";
   /** Plain-language shot description from the slot's GenerationSpec. */
   shot: string;
   durationSec: number;
@@ -35,22 +40,16 @@ export interface GenerationProvider {
 const ZOOM_PER_FRAME = 0.0008;
 const MAX_ZOOM = 1.25;
 
-/** Maps a StyleProfile grade's -1..1 temperatureShift onto colorbalance's
- *  red/blue channel shifts. */
-const colorBalanceArgs = (temperatureShift: number): string => {
-  const shadow = temperatureShift * 0.3;
-  const mid = temperatureShift * 0.3;
-  const high = temperatureShift * 0.2;
-  return `colorbalance=rs=${shadow.toFixed(3)}:bs=${(-shadow).toFixed(3)}:rm=${mid.toFixed(3)}:bm=${(-mid).toFixed(3)}:rh=${high.toFixed(3)}:bh=${(-high).toFixed(3)}`;
-};
-
 /**
  * Turns one still image into a `durationSec`-long clip: a slow Ken-Burns
- * push-in with the format's StyleProfile grade applied via ffmpeg. Shared
- * by every provider that ends up needing to animate a still — the fallback
- * stub (over an unmodified identity photo) and any real provider (over its
- * own generated still) alike — so the "turn a still into a graded,
- * moving clip" mechanics exist exactly once.
+ * push-in, no grading — the format's StyleProfile grade is applied exactly
+ * once, uniformly across every segment (generated stills and real footage
+ * alike), by EdlVideo's own CSS filter (see schemas.ts's GradeSchema doc
+ * comment). Baking it in here too would double it up. Shared by every
+ * provider that ends up needing to animate a still — the fallback stub
+ * (over an unmodified identity photo) and any real provider (over its own
+ * generated/composited still) alike — so the "turn a still into a moving
+ * clip" mechanics exist exactly once.
  */
 export const animateStillToClip = (
   imagePath: string,
@@ -59,12 +58,10 @@ export const animateStillToClip = (
     width: number;
     height: number;
     fps: number;
-    grade?: StyleProfile["grade"];
     outPath: string;
   },
 ): void => {
   const frames = Math.max(1, Math.round(opts.durationSec * opts.fps));
-  const grade = opts.grade;
 
   const filters = [
     // Cover-fit the image to the target frame, then oversample 2x so
@@ -72,8 +69,6 @@ export const animateStillToClip = (
     `scale=${opts.width * 2}:${opts.height * 2}:force_original_aspect_ratio=increase`,
     `crop=${opts.width * 2}:${opts.height * 2}`,
     `zoompan=z='min(zoom+${ZOOM_PER_FRAME},${MAX_ZOOM})':d=${frames}:s=${opts.width}x${opts.height}:fps=${opts.fps}`,
-    `eq=brightness=${(grade?.brightness ?? 0).toFixed(3)}:contrast=${(grade?.contrast ?? 1).toFixed(3)}:saturation=${(grade?.saturation ?? 1).toFixed(3)}`,
-    colorBalanceArgs(grade?.temperatureShift ?? 0),
     "format=yuv420p",
   ].join(",");
 
@@ -130,7 +125,6 @@ export const fallbackGenerationProvider: GenerationProvider = {
       width: req.width,
       height: req.height,
       fps: req.fps,
-      grade: req.styleProfile.grade,
       outPath: req.outPath,
     });
   },
