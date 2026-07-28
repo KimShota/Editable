@@ -136,22 +136,37 @@ export const MediaTypeSchema = z.enum(["video", "image", "audio", "text"]);
 export const PoseTagSchema = z.enum(["standing", "closeup", "profile", "sitting", "other"]);
 
 /** One sub-shot inside a montageReel/triptych — the same plateStill/
- *  detailStill shape GenerationSpecSchema itself uses, minus the fields
- *  (durationSec, subShots) that only make sense at the top level. */
+ *  detailStill/generatedScene shape GenerationSpecSchema itself uses,
+ *  minus the fields (durationSec, subShots) that only make sense at the
+ *  top level, plus "reuse" — a montageReel member that ISN'T generated at
+ *  all, it re-plays another already-generated slot's own still (see
+ *  generatedShots.ts's doc comment: e.g. the montage's own run reuses the
+ *  beat shots rather than paying to generate near-duplicates). */
 export const SubShotSpecSchema = z.object({
-  kind: z.enum(["plateStill", "detailStill"]),
+  kind: z.enum(["plateStill", "detailStill", "generatedScene", "reuse"]),
   shot: z.string(),
-  /** plateStill only: which formats/assets/<formatId>/ plate to composite
-   *  the chosen photo onto. */
+  /** plateStill/generatedScene only: which formats/assets/<formatId>/
+   *  plate to composite/generate the chosen photo onto. */
   plate: z.string().optional(),
   treatment: z.enum(["lit", "silhouette"]).default("silhouette"),
-  /** plateStill only: which pose tag's photo to use. */
+  /** plateStill/generatedScene only: which pose tag's photo to use. */
   poseTag: PoseTagSchema.optional(),
   seed: z.number().int().default(0),
+  /** generatedScene only: the POSE/FRAMING clause of the subject-into-
+   *  scene prompt (see generatedShots.ts's buildScenePrompt). */
+  posePrompt: z.string().optional(),
+  /** reuse only: the OTHER slot name (within the same job) whose already-
+   *  generated still to replay here — see generatedShots.ts's
+   *  findGeneratedStill. */
+  reuseSlot: z.string().optional(),
+  /** reuse/generatedScene: which way the Ken-Burns push moves — lets a
+   *  reused still get a visibly different push than the shot it's reused
+   *  from, so the same source image doesn't read as a repeated shot. */
+  panDirection: z.enum(["in", "out", "left", "right"]).optional(),
 });
 
 export const GenerationSpecSchema = z.object({
-  kind: z.enum(["cutaway", "montage", "plateStill", "detailStill", "montageReel", "triptych"]),
+  kind: z.enum(["cutaway", "montage", "plateStill", "detailStill", "montageReel", "triptych", "generatedScene"]),
   /** Plain-language description of the shot to generate — environment,
    *  framing, action — combined with the format's StyleProfile to build
    *  the generation request. Not consumed by any renderer component. */
@@ -160,19 +175,29 @@ export const GenerationSpecSchema = z.object({
   /** Pinned so re-running the stage reproduces the exact same clip
    *  (see generation/provider.ts's caching, keyed in part on this). */
   seed: z.number().int().default(0),
-  /** plateStill only: which formats/assets/<formatId>/ plate to composite
-   *  the chosen identity photo onto (see PlatesManifestSchema). */
+  /** plateStill/generatedScene only: which formats/assets/<formatId>/
+   *  plate to composite/generate the chosen identity photo onto (see
+   *  PlatesManifestSchema). */
   plate: z.string().optional(),
   /** plateStill/detailStill: "silhouette" crushes dark (matte.ts's
-   *  SILHOUETTE_CRUSH); "lit" keeps relit-but-not-crushed brightness. */
+   *  SILHOUETTE_CRUSH); "lit" keeps relit-but-not-crushed brightness.
+   *  generatedScene: drives which QC target band and prompt strength are
+   *  used (see generatedShots.ts) — it does not crush anything itself,
+   *  the model is asked to render the look directly. */
   treatment: z.enum(["lit", "silhouette"]).default("silhouette"),
-  /** plateStill only: which of the job's identity photos to use, by pose
-   *  (see identityPrep.ts). Omitted lets the provider pick by seed, same
-   *  as the legacy cutaway/montage kinds did. */
+  /** plateStill/generatedScene only: which of the job's identity photos
+   *  to use as the primary pose donor (see identityPrep.ts). Omitted lets
+   *  the provider pick by seed, same as the legacy cutaway/montage kinds
+   *  did. generatedScene attaches ALL identity photos regardless — this
+   *  only decides which one leads the reference order. */
   poseTag: PoseTagSchema.optional(),
   /** montageReel (concatenated into one clip) / triptych (stacked into
    *  one composite frame) only: the sub-shots that make it up. */
   subShots: z.array(SubShotSpecSchema).optional(),
+  /** generatedScene only: the POSE/FRAMING clause of the subject-into-
+   *  scene prompt — see generatedShots.ts's buildScenePrompt doc comment
+   *  for the full prompt structure this slots into. */
+  posePrompt: z.string().optional(),
 });
 
 /** A named slot the user fills: a file (video/image/audio) or a text string. */
@@ -995,6 +1020,15 @@ export const PlateAssetSchema = z.object({
   width: z.number().int().positive(),
   height: z.number().int().positive(),
   lumaStats: PlateLumaStatsSchema.optional(),
+  /** Furniture plates only (e.g. "sofa") — where, as a fraction of the
+   *  plate's OWN cover-fit-to-canvas height, a genuinely seated subject's
+   *  bbox bottom should land: from the seat cushion's top surface down
+   *  through the front edge/floor line. Measured once by hand against the
+   *  checked-in plate image (see buildTemplateAssets.ts) — the geometric
+   *  half of shotQC.ts's "genuinely seated" check (the other half is
+   *  semantic: does the sofa visibly occlude the thighs). Absent for a
+   *  plate with no furniture to be seated on/against. */
+  seatBandFrac: z.object({ top: z.number().min(0).max(1), bottom: z.number().min(0).max(1) }).optional(),
 });
 
 /**
@@ -1050,7 +1084,7 @@ export const PlatesManifestSchema = z.object({
 export const GeneratedInsertSchema = z.object({
   slotName: z.string(),
   blockId: z.string(),
-  kind: z.enum(["cutaway", "montage", "plateStill", "detailStill", "montageReel", "triptych"]),
+  kind: z.enum(["cutaway", "montage", "plateStill", "detailStill", "montageReel", "triptych", "generatedScene"]),
   shot: z.string(),
   durationSec: z.number().positive(),
   seed: z.number().int(),
@@ -1069,6 +1103,20 @@ export const GeneratedInsertSchema = z.object({
   width: z.number().optional(),
   height: z.number().optional(),
   hasAudio: z.boolean().optional(),
+  /** generatedScene only (see generatedShots.ts's retry ladder): how this
+   *  shot shipped. "green" = cleared every hard AND soft gate. "orange" =
+   *  cleared every hard gate but shipped on aesthetic bands, needs a human
+   *  look before render. "red" = a hard gate never cleared through the
+   *  full ladder, so this shipped from the composite-v2 fallback tier
+   *  instead (loud diagnostic elsewhere) — the image is real (the user's
+   *  own pixels), just not AI-generated as requested. Absent for
+   *  non-generatedScene kinds. */
+  flag: z.enum(["green", "orange", "red"]).optional(),
+  /** Free-form QC measurements for this shot (generation/shotQC.ts +
+   *  faceCheck.ts's output) — kept loosely typed here rather than a rigid
+   *  nested schema since the measurement set is still being tuned; the
+   *  contact sheet and gates.ts read specific keys out of it by name. */
+  qc: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const InsertsSchema = z.object({

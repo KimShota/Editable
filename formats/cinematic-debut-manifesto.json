@@ -2,7 +2,7 @@
   "id": "cinematic-debut-manifesto",
   "name": "The [Profession] Debut Manifesto",
   "niche": "any person launching a personal brand / creator account in a specific field (finance, fitness, law, cooking, etc.) who wants a dramatic trailer-style intro",
-  "description": "A talking-head delivers a line-by-line self-introduction — a bold audience call-out, name reveal, credential, and outrageous ambition — with each beat punched by a single giant word overlay and intercut with moody silhouette b-roll, resolving into a dramatic music montage, a detail triptych, an optional comedic follow-CTA, and a full-screen title card.",
+  "description": "A talking-head delivers a line-by-line self-introduction — a bold audience call-out, name reveal, credential, and outrageous ambition — with each beat punched by a single giant word overlay and separated by real cinematic b-roll cuts, resolving into a dramatic music montage, a detail triptych, an optional comedic follow-CTA, and a full-screen title card.",
   "fps": 30,
   "width": 720,
   "height": 1280,
@@ -21,7 +21,7 @@
     "instructions": "A tense, building cinematic/trailer track. Should swell right as the spoken intro ends and carry the montage. Leave blank to use the format's own default score."
   },
   "musicPlacement": {
-    "mode": "montageOnset",
+    "mode": "start",
     "fadeInSec": 0.3,
     "fadeOutSec": 0.7,
     "duckVolume": 0.32
@@ -36,7 +36,7 @@
     "name": "identity-photos",
     "mediaType": "image",
     "required": true,
-    "instructions": "5+ clear, well-lit photos of your face and body — standing (arms crossed), a close-up, a side/three-quarter angle, and at least one seated pose. These are automatically composited into real studio and couch shots in Kumar's cinematic style, so you don't have to film them yourself."
+    "instructions": "5+ clear, well-lit photos of your face and body, wearing dark solid-colour clothing (avoid light-coloured trousers) — standing (arms crossed), a close-up, a side/three-quarter angle, and at least one seated pose. These are automatically turned into real studio and couch shots in Kumar's cinematic style, so you don't have to film them yourself."
   },
   "blocks": [
     {
@@ -51,20 +51,6 @@
           "mediaType": "video",
           "required": true,
           "instructions": "Sit at a desk, hands steepled, and say slowly and gravely: 'This is a message to all [your audience]' — e.g. 'to all finance pros', 'to all personal trainers'. Deliver it like a threat, not a greeting. Lighting/background are replaced automatically — just say the line."
-        },
-        {
-          "name": "bshot-hook-1",
-          "mediaType": "video",
-          "required": true,
-          "instructions": "Auto-generated — no filming needed.",
-          "generation": { "kind": "plateStill", "shot": "silhouette pensive portrait on a white studio backdrop, arms crossed", "durationSec": 0.55, "seed": 0, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "standing" }
-        },
-        {
-          "name": "bshot-hook-2",
-          "mediaType": "video",
-          "required": true,
-          "instructions": "Auto-generated — no filming needed.",
-          "generation": { "kind": "plateStill", "shot": "moody silhouette seated on a dark leather couch", "durationSec": 0.55, "seed": 0, "plate": "sofa", "treatment": "silhouette", "poseTag": "sitting" }
         }
       ],
       "captions": true,
@@ -85,22 +71,40 @@
           }
         }
       ],
-      "events": [
+      "events": [],
+      "transitionAfter": {
+        "component": "cut",
+        "params": { "durationSec": 0 }
+      }
+    },
+    {
+      "id": "beat-1",
+      "title": "Beat — arms crossed",
+      "kind": "broll",
+      "videoSlot": "beat-1-clip",
+      "brollDurationSec": 0.8,
+      "slots": [
         {
-          "id": "hook-cutaway-1",
-          "kind": "overlay",
-          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-hook-1" } },
-          "timing": { "kind": "sequence", "roleId": "hook-marker", "edge": "captureStart", "index": 0, "count": 2, "targetGapSec": 0.95, "minGapSec": 0.5 },
-          "durationSec": 0.5
-        },
-        {
-          "id": "hook-cutaway-2",
-          "kind": "overlay",
-          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-hook-2" } },
-          "timing": { "kind": "sequence", "roleId": "hook-marker", "edge": "captureStart", "index": 1, "count": 2, "targetGapSec": 0.95, "minGapSec": 0.5 },
-          "durationSec": 0.5
+          "name": "beat-1-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": {
+            "kind": "generatedScene",
+            "shot": "silhouette, arms crossed, full body, on a white studio backdrop",
+            "durationSec": 0.8,
+            "seed": 0,
+            "plate": "studio-cyc",
+            "treatment": "silhouette",
+            "poseTag": "standing",
+            "posePrompt": "Standing, arms crossed over the chest, facing the camera directly, full body visible from head to shoe. Weight centered, shoulders back, confident stance. Subject occupies approximately 80% of the frame height, centered in the frame with even margin left and right."
+          }
         }
       ],
+      "captions": false,
+      "roles": [],
+      "anchors": [],
+      "events": [],
       "transitionAfter": {
         "component": "cut",
         "params": { "durationSec": 0 }
@@ -118,20 +122,6 @@
           "mediaType": "video",
           "required": true,
           "instructions": "Same desk framing, calm and confident. Say: 'My name is [your name].' Pause on your name so the big word can hit."
-        },
-        {
-          "name": "bshot-name-1",
-          "mediaType": "video",
-          "required": true,
-          "instructions": "Auto-generated — no filming needed.",
-          "generation": { "kind": "plateStill", "shot": "dark side-profile silhouette on a white studio backdrop", "durationSec": 0.55, "seed": 0, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "profile" }
-        },
-        {
-          "name": "bshot-name-2",
-          "mediaType": "video",
-          "required": true,
-          "instructions": "Auto-generated — no filming needed.",
-          "generation": { "kind": "plateStill", "shot": "backlit close-up silhouette portrait", "durationSec": 0.5, "seed": 0, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "closeup" }
         }
       ],
       "captions": true,
@@ -154,22 +144,40 @@
           }
         }
       ],
-      "events": [
+      "events": [],
+      "transitionAfter": {
+        "component": "cut",
+        "params": { "durationSec": 0 }
+      }
+    },
+    {
+      "id": "beat-2",
+      "title": "Beat — profile",
+      "kind": "broll",
+      "videoSlot": "beat-2-clip",
+      "brollDurationSec": 0.7,
+      "slots": [
         {
-          "id": "name-cutaway-1",
-          "kind": "overlay",
-          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-name-1" } },
-          "timing": { "kind": "sequence", "roleId": "name-marker", "edge": "captureStart", "index": 0, "count": 2, "targetGapSec": 0.9, "minGapSec": 0.45 },
-          "durationSec": 0.45
-        },
-        {
-          "id": "name-cutaway-2",
-          "kind": "overlay",
-          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-name-2" } },
-          "timing": { "kind": "sequence", "roleId": "name-marker", "edge": "captureStart", "index": 1, "count": 2, "targetGapSec": 0.9, "minGapSec": 0.45 },
-          "durationSec": 0.45
+          "name": "beat-2-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": {
+            "kind": "generatedScene",
+            "shot": "dark side-profile silhouette on a white studio backdrop, hand to chin",
+            "durationSec": 0.7,
+            "seed": 0,
+            "plate": "studio-cyc",
+            "treatment": "silhouette",
+            "poseTag": "profile",
+            "posePrompt": "Standing in strict side profile to the camera, one hand raised to the chin in a thoughtful pose, full body visible from head to shoe. Subject occupies approximately 80% of the frame height, centered in the frame."
+          }
         }
       ],
+      "captions": false,
+      "roles": [],
+      "anchors": [],
+      "events": [],
       "transitionAfter": {
         "component": "cut",
         "params": { "durationSec": 0 }
@@ -187,20 +195,6 @@
           "mediaType": "video",
           "required": true,
           "instructions": "Same setup. State your background in one short phrase: 'I'm a [credential]' — e.g. 'a retired accountant', 'a former lawyer'. Land hard on the key title word."
-        },
-        {
-          "name": "bshot-cred-1",
-          "mediaType": "video",
-          "required": true,
-          "instructions": "Auto-generated — no filming needed.",
-          "generation": { "kind": "plateStill", "shot": "arms-crossed silhouette on a white studio backdrop", "durationSec": 0.5, "seed": 1, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "standing" }
-        },
-        {
-          "name": "bshot-cred-2",
-          "mediaType": "video",
-          "required": true,
-          "instructions": "Auto-generated — no filming needed.",
-          "generation": { "kind": "plateStill", "shot": "moody silhouette seated on a dark leather couch, hand near chin", "durationSec": 0.5, "seed": 1, "plate": "sofa", "treatment": "silhouette", "poseTag": "sitting" }
         }
       ],
       "captions": true,
@@ -223,22 +217,40 @@
           }
         }
       ],
-      "events": [
+      "events": [],
+      "transitionAfter": {
+        "component": "cut",
+        "params": { "durationSec": 0 }
+      }
+    },
+    {
+      "id": "beat-3",
+      "title": "Beat — seated on the sofa",
+      "kind": "broll",
+      "videoSlot": "beat-3-clip",
+      "brollDurationSec": 0.85,
+      "slots": [
         {
-          "id": "cred-cutaway-1",
-          "kind": "overlay",
-          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-cred-1" } },
-          "timing": { "kind": "sequence", "roleId": "cred-marker", "edge": "captureStart", "index": 0, "count": 2, "targetGapSec": 0.9, "minGapSec": 0.45 },
-          "durationSec": 0.45
-        },
-        {
-          "id": "cred-cutaway-2",
-          "kind": "overlay",
-          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-cred-2" } },
-          "timing": { "kind": "sequence", "roleId": "cred-marker", "edge": "captureStart", "index": 1, "count": 2, "targetGapSec": 0.9, "minGapSec": 0.45 },
-          "durationSec": 0.45
+          "name": "beat-3-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": {
+            "kind": "generatedScene",
+            "shot": "moody silhouette seated on a dark leather chesterfield sofa",
+            "durationSec": 0.85,
+            "seed": 0,
+            "plate": "sofa",
+            "treatment": "silhouette",
+            "poseTag": "sitting",
+            "posePrompt": "Seated ON the chesterfield sofa, weight visibly compressing the seat cushion; the cushion and armrest partially OCCLUDE the thighs and hip; back resting against the tufted backrest; both feet planted on the floor; hands resting on thighs. Scale anchored to the sofa — head below the top of the backrest line. Contact shadow pooled under the thighs at the cushion junction and at the feet."
+          }
         }
       ],
+      "captions": false,
+      "roles": [],
+      "anchors": [],
+      "events": [],
       "transitionAfter": {
         "component": "cut",
         "params": { "durationSec": 0 }
@@ -257,27 +269,6 @@
           "mediaType": "video",
           "required": true,
           "instructions": "Same dark desk. Deliver your grand, slightly over-the-top mission in one breath: 'And I'm gonna [take over / become the biggest X in the world]'. Escalate your intensity toward the end."
-        },
-        {
-          "name": "bshot-claim-1",
-          "mediaType": "video",
-          "required": true,
-          "instructions": "Auto-generated — no filming needed.",
-          "generation": { "kind": "plateStill", "shot": "dark side-profile silhouette on a white studio backdrop", "durationSec": 0.5, "seed": 1, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "profile" }
-        },
-        {
-          "name": "bshot-claim-2",
-          "mediaType": "video",
-          "required": true,
-          "instructions": "Auto-generated — no filming needed.",
-          "generation": { "kind": "plateStill", "shot": "backlit extreme close-up silhouette", "durationSec": 0.5, "seed": 1, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "closeup" }
-        },
-        {
-          "name": "bshot-claim-3",
-          "mediaType": "video",
-          "required": true,
-          "instructions": "Auto-generated — no filming needed.",
-          "generation": { "kind": "plateStill", "shot": "moody silhouette seated on a dark leather couch", "durationSec": 0.5, "seed": 2, "plate": "sofa", "treatment": "silhouette", "poseTag": "sitting" }
         }
       ],
       "captions": true,
@@ -301,29 +292,7 @@
           }
         }
       ],
-      "events": [
-        {
-          "id": "claim-cutaway-1",
-          "kind": "overlay",
-          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-claim-1" } },
-          "timing": { "kind": "sequence", "roleId": "claim-marker", "index": 0, "count": 3, "targetGapSec": 0.95, "minGapSec": 0.5 },
-          "durationSec": 0.5
-        },
-        {
-          "id": "claim-cutaway-2",
-          "kind": "overlay",
-          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-claim-2" } },
-          "timing": { "kind": "sequence", "roleId": "claim-marker", "index": 1, "count": 3, "targetGapSec": 0.95, "minGapSec": 0.5 },
-          "durationSec": 0.5
-        },
-        {
-          "id": "claim-cutaway-3",
-          "kind": "overlay",
-          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-claim-3" } },
-          "timing": { "kind": "sequence", "roleId": "claim-marker", "index": 2, "count": 3, "targetGapSec": 0.95, "minGapSec": 0.5 },
-          "durationSec": 0.5
-        }
-      ],
+      "events": [],
       "transitionAfter": {
         "component": "whooshZoom",
         "params": { "durationSec": 0.4 }
@@ -373,19 +342,34 @@
           "name": "montage-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Generated automatically from your identity photos in Kumar's cinematic style (backlit silhouette, moody, high contrast). Supply your own clip here instead if you'd rather film this shot yourself.",
+          "instructions": "Generated automatically from your identity photos in Kumar's cinematic style (backlit silhouette, moody, high contrast), reusing the beat shots earlier in the video plus two fresh cuts. Supply your own clip here instead if you'd rather film this shot yourself.",
           "generation": {
             "kind": "montageReel",
             "shot": "a rapid silent montage of moody silhouette poses",
             "durationSec": 5.1,
             "seed": 0,
             "subShots": [
-              { "kind": "plateStill", "shot": "arms-crossed silhouette on a white studio backdrop", "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "standing", "seed": 0 },
-              { "kind": "plateStill", "shot": "dark side-profile silhouette", "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "profile", "seed": 0 },
-              { "kind": "plateStill", "shot": "moody silhouette seated on a dark leather couch, hands clasped", "plate": "sofa", "treatment": "silhouette", "poseTag": "sitting", "seed": 0 },
-              { "kind": "plateStill", "shot": "backlit close-up silhouette portrait", "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "closeup", "seed": 0 },
-              { "kind": "plateStill", "shot": "arms-crossed silhouette, slightly different angle", "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "standing", "seed": 1 },
-              { "kind": "plateStill", "shot": "moody silhouette seated on a dark leather couch, hand on chin", "plate": "sofa", "treatment": "silhouette", "poseTag": "sitting", "seed": 1 }
+              { "kind": "reuse", "shot": "reused arms-crossed silhouette, opposite push direction", "reuseSlot": "beat-1-clip", "panDirection": "right" },
+              {
+                "kind": "generatedScene",
+                "shot": "hands-in-pockets silhouette on a white studio backdrop",
+                "plate": "studio-cyc",
+                "treatment": "silhouette",
+                "poseTag": "standing",
+                "seed": 0,
+                "posePrompt": "Standing three-quarter to camera, both hands resting in trouser pockets, relaxed but composed posture, full body visible from head to shoe. Subject occupies approximately 80% of the frame height."
+              },
+              { "kind": "reuse", "shot": "reused profile silhouette, opposite push direction", "reuseSlot": "beat-2-clip", "panDirection": "left" },
+              {
+                "kind": "generatedScene",
+                "shot": "backlit extreme close-up silhouette",
+                "plate": "studio-cyc",
+                "treatment": "silhouette",
+                "poseTag": "closeup",
+                "seed": 1,
+                "posePrompt": "Extreme close-up on the head and shoulders, facing slightly away from camera, strong rim light tracing the back of the head and shoulder line. Head and shoulders fill most of the frame."
+              },
+              { "kind": "reuse", "shot": "reused seated silhouette, opposite push direction", "reuseSlot": "beat-3-clip", "panDirection": "right" }
             ]
           }
         }
@@ -445,13 +429,22 @@
       "kind": "broll",
       "videoSlot": "endcard-clip",
       "brollDurationSec": 2.2,
-      "plateComposite": { "plate": "studio-cyc", "treatment": "lit" },
       "slots": [
         {
           "name": "endcard-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Full-body shot, standing still and confident (arms crossed), holding the pose for ~2s. Any plain background works — it's replaced automatically. Leave clear space top and bottom for the title text."
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": {
+            "kind": "generatedScene",
+            "shot": "full-body editorial portrait, lit, on a soft vignette backdrop",
+            "durationSec": 2.2,
+            "seed": 0,
+            "plate": "endcard-vignette",
+            "treatment": "lit",
+            "poseTag": "standing",
+            "posePrompt": "Standing confidently, arms crossed, facing the camera directly, full body visible from head to shoe. Natural, relaxed editorial stance, fully and evenly lit. Subject occupies approximately 52% of the frame height, centered, with clear space above the head and below the feet for title text."
+          }
         },
         {
           "name": "debut-title",

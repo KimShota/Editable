@@ -244,14 +244,23 @@ const shotLumaGates = (videoPath: string, edl: Edl): GateResult[] =>
  *  function of script length. Counts CutawayOverlay events as their own
  *  shots alongside edl.video's segments — visually, a full-frame cutaway
  *  IS a distinct shot even though it's an overlay layered over its
- *  block's video, not a separate entry in edl.video. */
+ *  block's video, not a separate entry in edl.video.
+ *
+ *  Threshold lowered from 0.5 to 0.45 (Kumar "Generated Shots v3" plan
+ *  §6): the beat-wiring rework replaced rapid CutawayOverlay intercuts
+ *  (several short overlays layered inside one voice block, each counted
+ *  separately) with real standalone beat broll BLOCKS between voice
+ *  blocks (real cuts, counted as one edl.video segment each). The new
+ *  shape measures ~0.48/sec on the reference job — a real hard cut every
+ *  ~2s, not a sluggish edit — while the old 0.5 threshold was tuned
+ *  against the overlay-heavy shape's own higher raw count. */
 const shotDensityGate = (edl: Edl): GateResult => {
   const cutaways = edl.overlays.filter((o) => o.component === "CutawayOverlay").length;
   const shots = edl.video.length + cutaways;
   const density = shots / edl.durationSec;
-  const pass = density >= 0.5;
+  const pass = density >= 0.45;
   return {
-    name: "shot density >= 0.5 shots/sec",
+    name: "shot density >= 0.45 shots/sec",
     pass,
     measured: `${edl.video.length} video segments + ${cutaways} cutaways = ${shots} shots / ${edl.durationSec.toFixed(1)}s = ${density.toFixed(2)}/sec`,
   };
@@ -278,7 +287,17 @@ const plateCompositeBrightnessGates = (videoPath: string, edl: Edl, format: Form
   return edl.video
     .map((seg): GateResult | null => {
       const block = format.blocks.find((b) => b.id === seg.blockId);
-      const composite = block?.plateComposite ?? (block?.silhouette ? { plate: "", treatment: "silhouette" as const } : undefined);
+      // A generatedScene block (beat-1/2/3, the end card) has no
+      // plateComposite/silhouette field of its own — its plate/treatment
+      // live on its slot's own generation spec instead. Resolving it here
+      // too means this gate still catches a shot that somehow rendered
+      // crushed-to-black or blown-out despite clearing generatedShots.ts's
+      // own pre-render QC ladder, not just the legacy plateComposite path.
+      const generatedSceneSpec = block?.slots.find((s) => s.generation?.kind === "generatedScene")?.generation;
+      const composite =
+        block?.plateComposite ??
+        (block?.silhouette ? { plate: "", treatment: "silhouette" as const } : undefined) ??
+        (generatedSceneSpec ? { plate: generatedSceneSpec.plate ?? "", treatment: generatedSceneSpec.treatment } : undefined);
       if (!composite) return null;
       const isLit = composite.treatment === "lit";
       const threshold = isLit ? 150 : 180;

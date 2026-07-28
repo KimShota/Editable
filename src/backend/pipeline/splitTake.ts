@@ -48,6 +48,9 @@ import {
 
 const PAD_SEC = 0.15;
 const MIN_SPAN_SEC = 0.3;
+/** How far past a block's own last spoken word its srcOutSec may still
+ *  reach — see deriveTranscriptAndTrim's clamp. */
+const LONG_PAUSE_CLAMP_SEC = 0.25;
 
 export type TakeSplit = {
   blockId: string;
@@ -171,9 +174,19 @@ export const deriveTranscriptAndTrim = (
   for (const b of split.blocks) {
     const blockWords = split.words.filter((w) => w.startSec >= b.srcInSec && w.startSec < b.srcOutSec);
     transcriptBlocks.push({ blockId: b.blockId, takeOrder: [0], takes: [blockWords] });
+    // Clamp the tail to just after the last word actually spoken in this
+    // block — otherwise a long pause before the next block's marker (or
+    // before the take's own last detected speech, for the final block)
+    // leaves dead air inside the span, and a broll beat cut right after
+    // this block lands in that dead air instead of right at the end of
+    // speech (the beat-wiring "cuts land exactly at line ends" guarantee).
+    // Skipped when no word matched inside the span at all (a confidence-0
+    // fallback start) — there's no word timing here to clamp against.
+    const lastWordEnd = blockWords.length > 0 ? blockWords[blockWords.length - 1].endSec : undefined;
+    const srcOutSec = lastWordEnd !== undefined ? Math.min(b.srcOutSec, lastWordEnd + LONG_PAUSE_CLAMP_SEC) : b.srcOutSec;
     trimBlocks.push({
       blockId: b.blockId,
-      takes: [{ srcInSec: b.srcInSec, srcOutSec: b.srcOutSec } satisfies TakeTrim],
+      takes: [{ srcInSec: b.srcInSec, srcOutSec } satisfies TakeTrim],
     });
   }
   for (const block of format.blocks) {

@@ -55,6 +55,7 @@ const requestHash = (parts: {
   treatment?: string;
   poseTag?: string;
   subShots?: unknown;
+  posePrompt?: string;
 }): string =>
   crypto
     .createHash("sha256")
@@ -128,6 +129,7 @@ export const generate = async (
       treatment: spec.treatment,
       poseTag: spec.poseTag,
       subShots: spec.subShots,
+      posePrompt: spec.posePrompt,
     });
     const cachedHash = fs.existsSync(hashFile) ? fs.readFileSync(hashFile, "utf8") : undefined;
     const cacheHit = cachedHash === hash && fs.existsSync(absOutPath);
@@ -135,6 +137,7 @@ export const generate = async (
     if (!cacheHit) {
       await provider.generate({
         formatId: format.id,
+        jobDir: filled.jobDir,
         identityImages,
         identityPoseTags,
         styleProfile,
@@ -149,6 +152,7 @@ export const generate = async (
         treatment: spec.treatment,
         poseTag: spec.poseTag,
         subShots: spec.subShots,
+        posePrompt: spec.posePrompt,
         outPath: absOutPath,
       });
       fs.writeFileSync(hashFile, hash);
@@ -165,6 +169,23 @@ export const generate = async (
       height: probed.height,
       hasAudio: probed.hasAudio,
     };
+    // A provider that ran a retry/QC ladder (generatedShots.ts, via
+    // modelShots.ts's "generatedScene" case) drops a JSON sidecar next to
+    // its own output recording how the shot shipped — read regardless of
+    // cache hit/miss, since a cached shot's sidecar from the run that
+    // produced it is still sitting right there on disk.
+    const qcSidecarPath = `${absOutPath}.qc.json`;
+    let flag: GeneratedInsert["flag"];
+    let qc: GeneratedInsert["qc"];
+    if (fs.existsSync(qcSidecarPath)) {
+      try {
+        const sidecar = JSON.parse(fs.readFileSync(qcSidecarPath, "utf8"));
+        flag = sidecar.flag;
+        qc = sidecar.qc;
+      } catch (err) {
+        console.warn(`generate: failed to read QC sidecar for "${slot.name}" — ${(err as Error).message}`);
+      }
+    }
     inserts.push({
       slotName: slot.name,
       blockId: block.id,
@@ -178,6 +199,8 @@ export const generate = async (
       width: probed.width,
       height: probed.height,
       hasAudio: probed.hasAudio,
+      flag,
+      qc,
     });
   }
 

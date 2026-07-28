@@ -13,6 +13,11 @@ export type GenerationRequest = {
   /** Which format this request is for — modelShots.ts needs this to load
    *  the format's own checked-in template plates (formats/assets/<id>/). */
   formatId: string;
+  /** Absolute path to the job directory — generatedShots.ts's "reuse"
+   *  sub-shot kind needs this to find another slot's already-generated
+   *  still (generated/stills/<slotName>.png), and shotQC.ts's contact-
+   *  sheet/QC artifacts are written under here too. */
+  jobDir: string;
   /** Absolute paths to the job's identity reference photos. */
   identityImages: string[];
   /** Same length/order as identityImages — modelShots.ts's poseTag
@@ -20,12 +25,13 @@ export type GenerationRequest = {
   identityPoseTags: PoseTag[];
   styleProfile: StyleProfile;
   /** cutaway | montage (legacy, gemini.ts/higgsfield.ts) | plateStill |
-   *  detailStill | montageReel | triptych (generation/modelShots.ts) —
-   *  see schemas.ts's GenerationSpecSchema. A provider compositing a real
-   *  subject onto a synthesized backdrop (rather than asking a model to
-   *  invent one) can use this for framing decisions, e.g. crushing a
-   *  montage toward silhouette. */
-  kind: "cutaway" | "montage" | "plateStill" | "detailStill" | "montageReel" | "triptych";
+   *  detailStill | montageReel | triptych | generatedScene
+   *  (generation/modelShots.ts + generatedShots.ts) — see schemas.ts's
+   *  GenerationSpecSchema. A provider compositing a real subject onto a
+   *  synthesized backdrop (rather than asking a model to invent one) can
+   *  use this for framing decisions, e.g. crushing a montage toward
+   *  silhouette. */
+  kind: "cutaway" | "montage" | "plateStill" | "detailStill" | "montageReel" | "triptych" | "generatedScene";
   /** Plain-language shot description from the slot's GenerationSpec. */
   shot: string;
   durationSec: number;
@@ -34,12 +40,15 @@ export type GenerationRequest = {
   width: number;
   height: number;
   fps: number;
-  /** plateStill only. */
+  /** plateStill/generatedScene only. */
   plate?: string;
   treatment?: "lit" | "silhouette";
   poseTag?: PoseTag;
   /** montageReel/triptych only. */
   subShots?: SubShotSpec[];
+  /** generatedScene only — see schemas.ts's GenerationSpecSchema doc
+   *  comment and generatedShots.ts's buildScenePrompt. */
+  posePrompt?: string;
   /** Where the provider must write the resulting MP4. */
   outPath: string;
 };

@@ -14,7 +14,14 @@ const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 // `||` (not `??`), matching this repo's other env-model overrides — an
 // empty string in .env means "not set", not "use an empty model string".
 export const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-3-pro-image";
-export const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || "gemini-3-pro-preview";
+// "gemini-3-pro-preview" (the old default), "gemini-3-pro", and
+// "gemini-2.5-pro" all 404/"no longer available to new users" on this key —
+// confirmed by direct generateContent probes, not just ListModels (which
+// still lists some of them despite being unreachable). "gemini-3.1-flash-lite"
+// is confirmed reachable and is more than enough for this file's own text
+// use (identityPrep.ts's pose classification — a small structured-JSON
+// call, not a task that needs the heaviest available model).
+export const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || "gemini-3.1-flash-lite";
 
 const readImageAsInlineData = (absPath: string): { mimeType: string; data: string } => {
   const ext = path.extname(absPath).toLowerCase();
@@ -32,11 +39,16 @@ const requireApiKey = (): string => {
   return apiKey;
 };
 
+/** Output geometry pinned into the request — see generateImage's own doc
+ *  comment for why this can't be left to the model's default. */
+export type ImageConfig = { aspectRatio?: string; imageSize?: string };
+
 const callGemini = async (
   model: string,
   prompt: string,
   refImagePaths: string[],
   responseModalities: string[] | undefined,
+  imageConfig?: ImageConfig,
 ): Promise<GeminiResponse> => {
   const apiKey = requireApiKey();
   const parts: Array<{ text: string } | { inline_data: { mime_type: string; data: string } }> = [{ text: prompt }];
@@ -45,12 +57,17 @@ const callGemini = async (
     parts.push({ inline_data: { mime_type: mimeType, data } });
   }
 
+  const generationConfig = {
+    ...(responseModalities ? { responseModalities } : {}),
+    ...(imageConfig ? { imageConfig } : {}),
+  };
+
   const response = await fetch(`${GEMINI_API_BASE}/models/${model}:generateContent?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts }],
-      ...(responseModalities ? { generationConfig: { responseModalities } } : {}),
+      ...(Object.keys(generationConfig).length > 0 ? { generationConfig } : {}),
     }),
   });
   const json = await response.json();
@@ -60,14 +77,27 @@ const callGemini = async (
   return json as GeminiResponse;
 };
 
-/** Generates one image from a prompt + up to `maxRefs` reference images,
- *  returning its raw bytes. Throws if the response has no image part. */
+/** Generates one image from a prompt + up to `maxRefs` reference images
+ *  (model cap: 14 total references, 6 at "high fidelity"), returning its
+ *  raw bytes. Throws if the response has no image part.
+ *
+ * `imageConfig` pins the output aspect ratio/resolution explicitly. Left
+ * unset, the model picks its own default geometry — and this pipeline's
+ * downstream `resizeCover` would then cover-crop whatever came back to
+ * fit the target canvas, silently re-introducing exactly the framing
+ * drift a plate-anchored generation call is meant to eliminate (the
+ * composition the model was PAID to produce gets clipped again on our
+ * side). Callers doing plate-anchored subject-into-scene generation
+ * should always pass `imageConfig: { aspectRatio: "9:16", imageSize: "2K" }`
+ * (or the target format's own aspect) so the returned frame already
+ * matches the canvas and resizeCover is a no-op scale, not a crop. */
 export const generateImage = async (
   prompt: string,
   refImagePaths: string[],
   maxRefs = 5,
+  imageConfig?: ImageConfig,
 ): Promise<Buffer> => {
-  const json = await callGemini(GEMINI_IMAGE_MODEL, prompt, refImagePaths.slice(0, maxRefs), ["IMAGE"]);
+  const json = await callGemini(GEMINI_IMAGE_MODEL, prompt, refImagePaths.slice(0, maxRefs), ["IMAGE"], imageConfig);
   const responseParts = json.candidates?.[0]?.content?.parts ?? [];
   const imagePart = responseParts.find((p) => p.inlineData?.data ?? p.inline_data?.data);
   const inline = imagePart?.inlineData ?? imagePart?.inline_data;

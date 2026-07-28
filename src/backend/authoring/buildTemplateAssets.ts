@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { PlatesManifestSchema } from "../pipeline/schemas";
 import { formatAssetsDir } from "../pipeline/paths";
+import { generateVignetteBackdrop } from "../pipeline/generation/matte";
 
 /**
  * One-time (re-)builder for a format's template-plate manifest
@@ -28,8 +29,18 @@ import { formatAssetsDir } from "../pipeline/paths";
 
 type FormatAssetConfig = {
   formatId: string;
+  width: number;
+  height: number;
   /** file (already in formatAssetsDir) → the manifest key it's stored as. */
   plates: Record<string, string>;
+  /** Format-generated plates (no source file — rendered deterministically
+   *  by an existing matte.ts helper, e.g. generateVignetteBackdrop for the
+   *  end card's own seamless backdrop) → the manifest key. */
+  generatedPlates?: Record<string, "vignette" | "gradient">;
+  /** Plates with a precomputed seat/floor band (see PlateAssetSchema's
+   *  seatBandFrac doc comment) — measured by hand once against the plate
+   *  image, cover-fit to (width, height), via a grid overlay. */
+  seatBands?: Record<string, { top: number; bottom: number }>;
   /** Which plate the desk-foreground mask is derived from. */
   deskForegroundSource: string;
   deskEdgeFrac: number;
@@ -52,10 +63,23 @@ type FormatAssetConfig = {
 const FORMATS: FormatAssetConfig[] = [
   {
     formatId: "cinematic-debut-manifesto",
+    width: 720,
+    height: 1280,
     plates: {
       "office-dark": "office-dark.png",
       "studio-cyc": "studio-cyc.png",
       sofa: "sofa.png",
+    },
+    generatedPlates: {
+      "endcard-vignette": "vignette",
+    },
+    // Measured by hand against the sofa plate cover-fit to 720x1280 (grid
+    // overlay read): backrest top ~0.43H, seat cushion top surface
+    // ~0.70-0.72H, front cushion edge/floor line ~0.80-0.82H. The band a
+    // genuinely seated subject's bbox BOTTOM should land in runs from the
+    // seat surface through just past the front edge.
+    seatBands: {
+      sofa: { top: 0.68, bottom: 0.9 },
     },
     deskForegroundSource: "office-dark.png",
     deskEdgeFrac: 0.63,
@@ -140,12 +164,24 @@ const buildOne = (cfg: FormatAssetConfig): void => {
   const dir = formatAssetsDir(cfg.formatId);
   fs.mkdirSync(dir, { recursive: true });
 
-  const plates: Record<string, { file: string; sha256: string; width: number; height: number; lumaStats: ReturnType<typeof imageLumaStats> }> = {};
+  type PlateEntry = { file: string; sha256: string; width: number; height: number; lumaStats: ReturnType<typeof imageLumaStats>; seatBandFrac?: { top: number; bottom: number } };
+  const plates: Record<string, PlateEntry> = {};
   for (const [key, file] of Object.entries(cfg.plates)) {
     const abs = path.join(dir, file);
     if (!fs.existsSync(abs)) throw new Error(`buildTemplateAssets: missing plate "${abs}" for "${cfg.formatId}"`);
     const { width, height } = pngDimensions(abs);
-    plates[key] = { file, sha256: sha256(abs), width, height, lumaStats: imageLumaStats(abs) };
+    plates[key] = { file, sha256: sha256(abs), width, height, lumaStats: imageLumaStats(abs), seatBandFrac: cfg.seatBands?.[key] };
+  }
+
+  // Generated plates have no source photo to check in — rendered fresh,
+  // deterministically, from an existing matte.ts helper (same helper the
+  // engine itself used to call for these looks before plates existed).
+  for (const [key, kind] of Object.entries(cfg.generatedPlates ?? {})) {
+    const file = `${key}.png`;
+    const abs = path.join(dir, file);
+    if (kind === "vignette") generateVignetteBackdrop(cfg.width, cfg.height, abs);
+    else execFileSync("ffmpeg", ["-y", "-v", "error", "-f", "lavfi", "-i", `color=c=0xCABEC4:s=${cfg.width}x${cfg.height}`, "-frames:v", "1", abs]);
+    plates[key] = { file, sha256: sha256(abs), width: cfg.width, height: cfg.height, lumaStats: imageLumaStats(abs), seatBandFrac: cfg.seatBands?.[key] };
   }
 
   const deskForegroundFile = "office-desk-foreground.png";

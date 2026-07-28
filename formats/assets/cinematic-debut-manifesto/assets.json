@@ -38,6 +38,23 @@
         "p50": 62,
         "p90": 168,
         "p95": 172
+      },
+      "seatBandFrac": {
+        "top": 0.68,
+        "bottom": 0.9
+      }
+    },
+    "endcard-vignette": {
+      "file": "endcard-vignette.png",
+      "sha256": "c29d63c19d2fd7c488a966625267d92743deeed394960d697c2e9207b17b82dd",
+      "width": 720,
+      "height": 1280,
+      "lumaStats": {
+        "mean": 168.196875,
+        "p5": 120,
+        "p50": 175,
+        "p90": 196,
+        "p95": 196
       }
     }
   },

@@ -65,6 +65,25 @@ export const resizeCover = (inputPath: string, width: number, height: number, ou
   ]);
 };
 
+/** Contain-fits (scale to fit within, never crops) an image onto an exact
+ *  canvas size, padding the leftover space with a flat color — the fix for
+ *  composite-v2's own "rectangles, not people" bug: cover-fitting a
+ *  1179x2556 identity photo onto a 720x1280 canvas crops ~18% of the
+ *  photo's own height, chopping the body at the photo's frame edge: Vision
+ *  segmentation then matches the mask TO that crop line, and the result is
+ *  a straight-line mask edge (a rectangle, not a body silhouette). Contain-
+ *  fitting instead guarantees the full body is present in the frame handed
+ *  to matte.swift, so the mask boundary it finds is the body's own
+ *  silhouette, never a photo-frame edge. */
+export const resizeContainPad = (inputPath: string, width: number, height: number, outPath: string, padColor = "black"): void => {
+  execFileSync("ffmpeg", [
+    "-y", "-v", "error",
+    "-i", inputPath,
+    "-vf", `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=${padColor}`,
+    outPath,
+  ]);
+};
+
 /** Same cover-fit as resizeCover, but forces an alpha plane through the
  *  filter chain explicitly — used for RGBA overlay assets (e.g. the
  *  desk-foreground mask) where a bare scale/crop's alpha handling
@@ -192,6 +211,13 @@ export const compositeOnBackdrop = (opts: {
   foregroundPath?: string;
   subjectFilter?: string;
   subjectTransform?: SubjectTransform;
+  /** false skips SHADOW_FROM_MASK's fixed (36,56)px-offset drop shadow —
+   *  on a contain-fit subject (see resizeContainPad) that offset shadow is
+   *  just a second, blurred copy of the SAME straight-line photo-frame
+   *  artifact the contain-fit itself exists to eliminate, so composite-v2's
+   *  plate stills turn it off entirely. Default true (unchanged) for any
+   *  other caller (e.g. generation/higgsfield.ts's legacy montage insert). */
+  shadow?: boolean;
   /** Invoked with mattePersonToFile's own matte-in/matte-out directories
    *  (each containing exactly one same-named file) once the subject is
    *  matted — subjectFit.ts/relight.ts's measurement functions work
@@ -215,9 +241,13 @@ export const compositeOnBackdrop = (opts: {
       .join(",");
     execFileSync("ffmpeg", ["-y", "-v", "error", "-i", opts.subjectImagePath, "-i", mask, "-filter_complex", cutoutFilter, cutout]);
 
-    const shadow = path.join(workDir, "shadow.png");
-    const shadowFilter = [SHADOW_FROM_MASK, scaleFilter].filter(Boolean).join(",");
-    execFileSync("ffmpeg", ["-y", "-v", "error", "-i", mask, "-filter_complex", shadowFilter, "-frames:v", "1", shadow]);
+    const wantShadow = opts.shadow !== false;
+    let shadow: string | undefined;
+    if (wantShadow) {
+      shadow = path.join(workDir, "shadow.png");
+      const shadowFilter = [SHADOW_FROM_MASK, scaleFilter].filter(Boolean).join(",");
+      execFileSync("ffmpeg", ["-y", "-v", "error", "-i", mask, "-filter_complex", shadowFilter, "-frames:v", "1", shadow]);
+    }
 
     let foregroundSized: string | undefined;
     if (opts.foregroundPath) {
@@ -229,14 +259,24 @@ export const compositeOnBackdrop = (opts: {
     const shadowX = Math.round(36 * scale) + transform.xOffsetPx;
     const shadowY = Math.round(56 * scale) + transform.yOffsetPx;
 
-    const inputs = ["-i", opts.backdropPath, "-i", shadow, "-i", cutout];
-    const filterParts = [`[0][1]overlay=${shadowX}:${shadowY}[bg_shadow]`];
+    const inputs = [
+      "-i", opts.backdropPath,
+      ...(shadow ? ["-i", shadow] : []),
+      "-i", cutout,
+    ];
+    // Input indices shift depending on whether the shadow input is present
+    // — cutout is input 1 without a shadow, input 2 with one.
+    const cutoutInputIdx = shadow ? 2 : 1;
+    const filterParts = shadow
+      ? [`[0][1]overlay=${shadowX}:${shadowY}[bg]`]
+      : [];
+    const bgLabel = shadow ? "[bg]" : "[0]";
     if (foregroundSized) {
       inputs.push("-i", foregroundSized);
-      filterParts.push(`[bg_shadow][2]overlay=${transform.xOffsetPx}:${transform.yOffsetPx}[bg_subject]`);
-      filterParts.push("[bg_subject][3]overlay=0:0[out]");
+      filterParts.push(`${bgLabel}[${cutoutInputIdx}]overlay=${transform.xOffsetPx}:${transform.yOffsetPx}[bg_subject]`);
+      filterParts.push(`[bg_subject][${cutoutInputIdx + 1}]overlay=0:0[out]`);
     } else {
-      filterParts.push(`[bg_shadow][2]overlay=${transform.xOffsetPx}:${transform.yOffsetPx}[out]`);
+      filterParts.push(`${bgLabel}[${cutoutInputIdx}]overlay=${transform.xOffsetPx}:${transform.yOffsetPx}[out]`);
     }
 
     execFileSync("ffmpeg", [

@@ -6,4 +6,4 @@
  * them changed", so a stale cache would otherwise silently keep serving a
  * pre-fix artifact forever. Bumping busts every existing cache entry.
  */
-export const PIPELINE_VERSION = "2026-07-28.1";
+export const PIPELINE_VERSION = "2026-07-29.1";
