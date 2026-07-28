@@ -3,11 +3,13 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { probeFile } from "./intake";
-import { loadStyleProfile } from "./generation/styleProfile";
-import { buildBackdropPrompt, generateBackdropImage } from "./generation/higgsfieldBackdrop";
 import { compositeVideoOnBackdrop, generateVignetteBackdrop } from "./generation/matte";
+import { deskForegroundPath, loadPlatesManifest, platePath } from "./generation/plates";
+import { measureSubjectBBox, computeSubjectTransform } from "./generation/subjectFit";
+import { measureSubjectLuma, solveSubjectRelight } from "./generation/relight";
 import { applyPunchInTail, extractCloseUpCutaway } from "./videoEffects";
-import { BoundAsset, FilledFormat, Format, Transcript, TrimPoints } from "./types";
+import { PIPELINE_VERSION } from "./pipelineVersion";
+import { Block, BoundAsset, FilledFormat, Format, PlatesManifest, Transcript, TrimPoints } from "./types";
 
 /**
  * Module 3.5 — Per-block video post-processing for single-take formats:
@@ -16,28 +18,41 @@ import { BoundAsset, FilledFormat, Format, Transcript, TrimPoints } from "./type
  * span within the shared take) and before resolveRoles/assemble (both
  * need the REPLACED bindings/trims, not the shared-take ones).
  *
- * backgroundReplace: one backdrop, shared across every flagged block — a
- * single-take format is one continuous take from one camera position, so
- * the set behind the subject should stay fixed too, exactly like
- * generate.ts generates one montage insert rather than a different one
- * per block. Each flagged block's own trimmed span is extracted from the
- * shared take, matted frame-by-frame, and composited onto that one
- * backdrop (matte.ts), preserving the block's original audio untouched.
+ * backgroundReplace: composites the subject onto the format's checked-in
+ * office plate (formats/assets/<formatId>/, see PlatesManifestSchema) —
+ * the SAME plate for every user of this format, not a per-job generated
+ * one, so "swap the background for the reference's own office" is a
+ * guarantee, not a prompt's best effort. A single-take format is one
+ * continuous take from one camera position, so every flagged block shares
+ * that one plate, matching generate.ts generating one montage insert
+ * rather than a different one per block. Two things happen alongside the
+ * plate swap, both measured from the subject's own matted pixels (no
+ * manual per-job tuning): subjectFit.ts scales/positions the cutout so its
+ * head lands where the reference's own head sits, and relight.ts remaps
+ * its luma distribution onto the reference's — together, the fix for a
+ * subject shot in ordinary bright daylight otherwise reading as a flat
+ * cutout pasted onto a dark plate. A desk-foreground strip (also part of
+ * the plate) composites LAST, on top of the subject, so they appear to
+ * sit BEHIND the keyboard/notebook exactly like the reference.
  *
  * punchInTailSec: independent of backgroundReplace — crops+zooms the last
  * N seconds into a tight close-up (videoEffects.ts), applied on top of
  * whichever video is otherwise this block's own (background-replaced or
  * as-filmed).
  *
- * silhouette (broll blocks only, e.g. the end card): a DIFFERENT
- * treatment from backgroundReplace, not a variant of it — no shared take
- * to slice a span out of, since a broll block owns its clip directly.
+ * plateComposite / silhouette (broll blocks only, e.g. the end card): a
+ * DIFFERENT treatment from backgroundReplace, not a variant of it — no
+ * shared take to slice a span out of, since a broll block owns its clip
+ * directly, and each broll block may composite onto a DIFFERENT plate
+ * (the end card onto "studio-cyc", a couch cutaway onto "sofa", ...).
  * Takes a brollDurationSec-long window, CENTERED in the block's own bound
  * video (not the tail — a "walk in, hold, walk out" take has its held
  * pose in the middle; tail-anchoring shipped as a real bug here once,
- * landing mid-exit instead of mid-hold), mattes+composites it onto one
- * shared vignette backdrop (matte.ts's generateVignetteBackdrop) with the
- * measured SILHOUETTE_CRUSH curve, and rebinds.
+ * landing mid-exit instead of mid-hold). "silhouette" treatment crushes
+ * the subject dark (matte.ts's SILHOUETTE_CRUSH); "lit" keeps them at
+ * relit-but-not-crushed brightness, fit to the reference's own end-card
+ * subject proportions — for shots the reference shows fully lit, where
+ * crushing to a silhouette would be wrong.
  *
  * Any of these flags REBINDS the block's binding/trim entry to a new,
  * standalone file afterward: unlike the shared take (one file, many
@@ -54,16 +69,53 @@ import { BoundAsset, FilledFormat, Format, Transcript, TrimPoints } from "./type
  */
 
 const requestHash = (parts: Record<string, unknown>): string =>
-  crypto.createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
+  crypto
+    .createHash("sha256")
+    .update(JSON.stringify({ ...parts, pipelineVersion: PIPELINE_VERSION }))
+    .digest("hex")
+    .slice(0, 16);
 
 /** Runs one ffmpeg call, only if `hashFile` doesn't already match `hash` —
- *  the same cache-by-hash-sidecar shape generate.ts uses for its inserts. */
+ *  the same cache-by-hash-sidecar shape generate.ts uses for its inserts.
+ *  Also clears any stale sibling intermediates left in `generatedDir` by a
+ *  PREVIOUS build of this same output (e.g. a punch-in's own composited
+ *  source) — otherwise a changed pipeline version leaves the old file's
+ *  intermediates on disk forever, orphaned and never referenced again. */
 const withCache = (outPath: string, hash: string, build: () => void): void => {
   const hashFile = `${outPath}.hash`;
   const cached = fs.existsSync(hashFile) ? fs.readFileSync(hashFile, "utf8") : undefined;
   if (cached === hash && fs.existsSync(outPath)) return;
   build();
   fs.writeFileSync(hashFile, hash);
+};
+
+/** `block.plateComposite`, or the legacy `silhouette: true` shorthand
+ *  normalized into the same shape — the one place either field is read,
+ *  so everything downstream sees one resolved shape. */
+const resolvePlateComposite = (block: Block): { plate: string; treatment: "lit" | "silhouette" } | undefined => {
+  if (block.plateComposite) return block.plateComposite;
+  if (block.silhouette) return { plate: "studio-cyc", treatment: "silhouette" as const };
+  return undefined;
+};
+
+/** Measures the subject's bbox/luma from just-extracted frames+masks and
+ *  derives the subjectTransform (always) and subjectFilter (only when
+ *  `lumaTarget` is given — skipped for a silhouette treatment, since
+ *  SILHOUETTE_CRUSH already does the darkening and stacking a relight
+ *  curve under it would just fight the crush). Shared by both the
+ *  talking-head office composite and the broll plate composites below. */
+const calibrateSubject = (
+  target: { topFrac: number; heightFrac: number },
+  lumaTarget: { p50: number; p95: number } | undefined,
+  width: number,
+  height: number,
+) => (framesDir: string, masksDir: string) => {
+  const bbox = measureSubjectBBox(masksDir, width, height);
+  const subjectTransform = computeSubjectTransform(bbox, target, width, height);
+  if (!lumaTarget) return { subjectTransform };
+  const measured = measureSubjectLuma(framesDir, masksDir);
+  const subjectFilter = measured ? solveSubjectRelight(measured, lumaTarget) : undefined;
+  return { subjectTransform, subjectFilter };
 };
 
 export const replaceBackgrounds = async (
@@ -73,8 +125,14 @@ export const replaceBackgrounds = async (
   transcript: Transcript,
 ): Promise<{ filled: FilledFormat; trims: TrimPoints; transcript: Transcript }> => {
   const flagged = format.blocks.filter((b) => b.backgroundReplace || b.punchInTailSec !== undefined);
-  const silhouetteFlagged = format.blocks.filter((b) => b.silhouette);
-  if (flagged.length === 0 && silhouetteFlagged.length === 0) return { filled, trims, transcript };
+  const plateFlagged = format.blocks
+    .map((b) => ({ block: b, composite: resolvePlateComposite(b) }))
+    .filter((x): x is { block: Block; composite: { plate: string; treatment: "lit" | "silhouette" } } => x.composite !== undefined);
+  if (flagged.length === 0 && plateFlagged.length === 0) return { filled, trims, transcript };
+
+  const needsBackdrop = flagged.some((b) => b.backgroundReplace);
+  const needsPlates = needsBackdrop || plateFlagged.length > 0;
+  const manifest: PlatesManifest | undefined = needsPlates ? loadPlatesManifest(format.id) : undefined;
 
   let take: { absPath: string } | undefined;
   if (flagged.length > 0) {
@@ -90,38 +148,10 @@ export const replaceBackgrounds = async (
   const generatedDir = path.join(filled.jobDir, "generated");
   fs.mkdirSync(generatedDir, { recursive: true });
 
-  const needsBackdrop = flagged.some((b) => b.backgroundReplace);
-  let backdropPath = "";
-  let backdropHash = "";
-  if (needsBackdrop) {
-    const styleProfile = loadStyleProfile(format.id);
-    // One shared backdrop for every backgroundReplace block.
-    backdropPath = path.join(generatedDir, "talkinghead-backdrop.png");
-    backdropHash = requestHash({
-      environment: styleProfile.environment,
-      lighting: styleProfile.lighting,
-      width: format.width,
-      height: format.height,
-    });
-    // withCache below is sync-only (ffmpeg calls); the backdrop generation
-    // call is async, so its cache check/write is inlined here instead.
-    const backdropHashFile = `${backdropPath}.hash`;
-    const backdropCached = fs.existsSync(backdropHashFile) ? fs.readFileSync(backdropHashFile, "utf8") : undefined;
-    if (backdropCached !== backdropHash || !fs.existsSync(backdropPath)) {
-      const prompt = buildBackdropPrompt(
-        styleProfile.environment,
-        styleProfile.lighting,
-        "talking-head shot setting, shot from a close medium-shot camera distance (as if the camera sits right where " +
-          "a seated person's face and shoulders would fill most of the frame): the front edge of a desk fills the " +
-          "lower third of frame close to camera, a chair back is barely visible just above the desk edge, and the " +
-          "wall/shelf behind fills the upper two-thirds — this is NOT a wide establishing shot of an empty room, it " +
-          "is a tight close-up as if someone is already sitting right at the desk",
-      );
-      const { bytes } = await generateBackdropImage(prompt, format.width, format.height);
-      fs.writeFileSync(backdropPath, bytes);
-      fs.writeFileSync(backdropHashFile, backdropHash);
-    }
-  }
+  const officePlatePath = needsBackdrop ? platePath(format.id, manifest!, "office-dark") : "";
+  const officeForegroundPath = needsBackdrop ? deskForegroundPath(format.id, manifest!) : "";
+  const officePlateSha = needsBackdrop ? manifest!.plates["office-dark"].sha256 : "";
+  const talkingHeadTarget = manifest?.reference.talkingHead;
 
   const newBindings: Record<string, BoundAsset> = {};
   const newTrimBlocks = trims.blocks.map((b) => ({ ...b, takes: [...b.takes] }));
@@ -143,7 +173,7 @@ export const replaceBackgrounds = async (
       srcInSec: span.srcInSec,
       srcOutSec: span.srcOutSec,
       backgroundReplace: block.backgroundReplace,
-      backdropHash: block.backgroundReplace ? backdropHash : undefined,
+      officePlateSha: block.backgroundReplace ? officePlateSha : undefined,
       punchInTailSec: block.punchInTailSec,
       fps: format.fps,
       width: format.width,
@@ -169,11 +199,18 @@ export const replaceBackgrounds = async (
         const compositedPath = path.join(generatedDir, `${block.videoSlot}-composited.mp4`);
         compositeVideoOnBackdrop({
           subjectVideoPath: current,
-          backdropPath,
+          backdropPath: officePlatePath,
+          foregroundPath: officeForegroundPath,
           outPath: compositedPath,
           width: format.width,
           height: format.height,
           fps: format.fps,
+          calibrate: calibrateSubject(
+            { topFrac: talkingHeadTarget!.headTopFrac, heightFrac: talkingHeadTarget!.headHeightFrac },
+            { p50: talkingHeadTarget!.lumaP50, p95: talkingHeadTarget!.lumaP95 },
+            format.width,
+            format.height,
+          ),
         });
         current = compositedPath;
       }
@@ -185,6 +222,7 @@ export const replaceBackgrounds = async (
           width: format.width,
           height: format.height,
         });
+        if (current !== subClipPath) fs.rmSync(current, { force: true });
         current = punchedPath;
       }
       fs.renameSync(current, absOutPath);
@@ -222,24 +260,30 @@ export const replaceBackgrounds = async (
     }
   }
 
-  // silhouette: broll blocks, their own clip (no shared take), one
-  // vignette backdrop shared across every flagged broll block.
-  if (silhouetteFlagged.length > 0) {
+  // plateComposite / silhouette: broll blocks, their own clip (no shared
+  // take), each composited onto ITS OWN named plate (possibly different
+  // plates per block, unlike the shared office backdrop above).
+  if (plateFlagged.length > 0) {
     const vignettePath = path.join(generatedDir, "silhouette-vignette-backdrop.png");
     if (!fs.existsSync(vignettePath)) generateVignetteBackdrop(format.width, format.height, vignettePath);
+    const endCardTarget = manifest!.reference.endCard;
 
-    for (const block of silhouetteFlagged) {
+    for (const { block, composite } of plateFlagged) {
       const bound = filled.bindings[block.videoSlot];
       if (bound?.type !== "file" || bound.durationSec === undefined) {
-        throw new Error(`replaceBackgrounds: silhouette block "${block.id}" videoSlot "${block.videoSlot}" is not bound to a file with a known duration`);
+        throw new Error(`replaceBackgrounds: plate-composited block "${block.id}" videoSlot "${block.videoSlot}" is not bound to a file with a known duration`);
       }
       const targetDurationSec = Math.min(block.brollDurationSec ?? bound.durationSec, bound.durationSec);
+      const plateAbsPath = platePath(format.id, manifest!, composite.plate);
+      const plateSha = manifest!.plates[composite.plate]?.sha256 ?? composite.plate;
 
-      const relPath = path.join("generated", `${block.videoSlot}-silhouette.mp4`);
+      const relPath = path.join("generated", `${block.videoSlot}-plate.mp4`);
       const absOutPath = path.join(filled.jobDir, relPath);
       const hash = requestHash({
         srcAbsPath: bound.absPath,
         targetDurationSec,
+        plateSha,
+        treatment: composite.treatment,
         width: format.width,
         height: format.height,
         fps: format.fps,
@@ -265,12 +309,18 @@ export const replaceBackgrounds = async (
         ]);
         compositeVideoOnBackdrop({
           subjectVideoPath: tailClipPath,
-          backdropPath: vignettePath,
+          backdropPath: plateAbsPath,
           outPath: absOutPath,
           width: format.width,
           height: format.height,
           fps: format.fps,
-          silhouette: true,
+          silhouette: composite.treatment === "silhouette",
+          calibrate: calibrateSubject(
+            { topFrac: endCardTarget.subjectTopFrac, heightFrac: endCardTarget.subjectHeightFrac },
+            composite.treatment === "lit" ? { p50: endCardTarget.lumaP50, p95: endCardTarget.lumaP95 } : undefined,
+            format.width,
+            format.height,
+          ),
         });
         fs.rmSync(tailClipPath, { force: true });
       });

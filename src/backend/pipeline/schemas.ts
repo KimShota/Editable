@@ -129,8 +129,29 @@ export const MediaTypeSchema = z.enum(["video", "image", "audio", "text"]);
  * slot anyway, intake honors it as-is and generation is skipped for that
  * slot (a natural opt-out, no separate flag needed).
  */
+/** Which of an identity photo's own poses a plateStill/detailStill draws
+ *  on — see generation/identityPrep.ts's classifyPoses doc comment for how
+ *  a job's uploaded photos get tagged. "other" is the catch-all a photo
+ *  gets when it doesn't clearly match one of the rest. */
+export const PoseTagSchema = z.enum(["standing", "closeup", "profile", "sitting", "other"]);
+
+/** One sub-shot inside a montageReel/triptych — the same plateStill/
+ *  detailStill shape GenerationSpecSchema itself uses, minus the fields
+ *  (durationSec, subShots) that only make sense at the top level. */
+export const SubShotSpecSchema = z.object({
+  kind: z.enum(["plateStill", "detailStill"]),
+  shot: z.string(),
+  /** plateStill only: which formats/assets/<formatId>/ plate to composite
+   *  the chosen photo onto. */
+  plate: z.string().optional(),
+  treatment: z.enum(["lit", "silhouette"]).default("silhouette"),
+  /** plateStill only: which pose tag's photo to use. */
+  poseTag: PoseTagSchema.optional(),
+  seed: z.number().int().default(0),
+});
+
 export const GenerationSpecSchema = z.object({
-  kind: z.enum(["cutaway", "montage"]),
+  kind: z.enum(["cutaway", "montage", "plateStill", "detailStill", "montageReel", "triptych"]),
   /** Plain-language description of the shot to generate — environment,
    *  framing, action — combined with the format's StyleProfile to build
    *  the generation request. Not consumed by any renderer component. */
@@ -139,6 +160,19 @@ export const GenerationSpecSchema = z.object({
   /** Pinned so re-running the stage reproduces the exact same clip
    *  (see generation/provider.ts's caching, keyed in part on this). */
   seed: z.number().int().default(0),
+  /** plateStill only: which formats/assets/<formatId>/ plate to composite
+   *  the chosen identity photo onto (see PlatesManifestSchema). */
+  plate: z.string().optional(),
+  /** plateStill/detailStill: "silhouette" crushes dark (matte.ts's
+   *  SILHOUETTE_CRUSH); "lit" keeps relit-but-not-crushed brightness. */
+  treatment: z.enum(["lit", "silhouette"]).default("silhouette"),
+  /** plateStill only: which of the job's identity photos to use, by pose
+   *  (see identityPrep.ts). Omitted lets the provider pick by seed, same
+   *  as the legacy cutaway/montage kinds did. */
+  poseTag: PoseTagSchema.optional(),
+  /** montageReel (concatenated into one clip) / triptych (stacked into
+   *  one composite frame) only: the sub-shots that make it up. */
+  subShots: z.array(SubShotSpecSchema).optional(),
 });
 
 /** A named slot the user fills: a file (video/image/audio) or a text string. */
@@ -218,14 +252,37 @@ export const BlockSchema = z.object({
   /** Whether to burn word captions for this block (voice blocks only). */
   captions: z.boolean().default(false),
   /** Only meaningful alongside captions:true. "lowerThird" (default): the
-   *  ordinary multi-word caption line. "bigTitle": one word at a time,
-   *  full-screen, in the format's kumarTitle style — word-level karaoke
-   *  reproducing the reference reel's own title mechanic (a NEW word,
-   *  changing roughly every 0.2s, tracking the transcript verbatim — not
-   *  a hand-picked phrase held for seconds, which is what the format used
-   *  before this: a single captured phrase pinned up for its whole
-   *  anchor). Drives Captions.tsx's per-group render branch. */
+   *  ordinary multi-word caption line, always built for every captioned
+   *  block regardless of this field. "bigTitle": ALSO build full-screen
+   *  keyword-title cards (see `keywordTitle`) that render concurrently
+   *  with the lowerThird line — the reference reel shows both layers at
+   *  once, not one word-karaoke line replacing the other. Drives
+   *  Captions.tsx's per-group render branch. */
   captionVariant: z.enum(["lowerThird", "bigTitle"]).default("lowerThird"),
+  /** Only meaningful alongside captionVariant:"bigTitle". Which word(s) of
+   *  the block get their own full-screen title card, instead of every
+   *  word (the reference punches ONE chosen word per beat, not a karaoke
+   *  line through the whole sentence). "capture": pick from a literal
+   *  anchor's own captured span (see LiteralAnchorSchema) — free, already
+   *  computed by resolveRoles. "llm" (name is aspirational; the current
+   *  implementation is a deterministic salience heuristic — longest
+   *  non-stopword words — not an actual model call, kept behind this name
+   *  so a real LLM pick can slot in later without a template change):
+   *  picks from the block's own words after its anchor's marker phrase
+   *  ends, for a block whose anchor doesn't capture (e.g. `capture:
+   *  false`, nothing to draw from directly). */
+  keywordTitle: z
+    .object({
+      source: z.enum(["capture", "llm"]).default("capture"),
+      maxWords: z.number().int().positive().default(1),
+    })
+    .optional(),
+  /** Which Captions.tsx theme this block's captions render in — "kumar"
+   *  (red, default, inherited from the format's captionStyle) or
+   *  "outroYellow" (casual yellow lower-third, no bigTitle look, for a
+   *  block that deliberately breaks the cinematic tone). Omitted = the
+   *  format's own captionStyle theme. */
+  captionTheme: z.string().optional(),
   /** Broll blocks: how long to show the clip (min'd with actual length). */
   brollDurationSec: z.number().positive().optional(),
   /** Voice blocks only, and only meaningful alongside speakingTakeSlot:
@@ -248,8 +305,28 @@ export const BlockSchema = z.object({
    *  reference reel's light-backdrop pose shots (see
    *  backgroundReplace.ts's doc comment). Distinct from
    *  backgroundReplace: a broll block owns its clip directly, there's no
-   *  shared take to slice a span out of. */
+   *  shared take to slice a span out of. Legacy shorthand for
+   *  `plateComposite: { plate: "studio-cyc", treatment: "silhouette" }` —
+   *  parses to exactly that in loader.ts, kept only so older format JSON
+   *  keeps working unchanged. */
   silhouette: z.boolean().default(false),
+  /** Broll blocks only: composites the last brollDurationSec of this
+   *  block's own bound clip onto one of the format's checked-in template
+   *  plates (formats/assets/<formatId>/, see PlatesManifestSchema) instead
+   *  of a generated backdrop. "silhouette" crushes the subject dark
+   *  (matte.ts's SILHOUETTE_CRUSH), matching today's `silhouette: true`;
+   *  "lit" keeps the subject's own relit-but-not-crushed brightness — for
+   *  shots the reference shows fully lit (e.g. the end card), where
+   *  crushing to a silhouette would be wrong. Takes precedence over
+   *  `silhouette` when both are set; backgroundReplace.ts's
+   *  resolvePlateComposite() is the one place that reads either field, so
+   *  the rest of the pipeline only ever sees the resolved shape. */
+  plateComposite: z
+    .object({
+      plate: z.string(),
+      treatment: z.enum(["lit", "silhouette"]).default("silhouette"),
+    })
+    .optional(),
   /** Voice blocks only: an ECU (extreme close-up) cutaway — crops+zooms a
    *  short, silent window of THIS block's own already-processed footage
    *  (after backgroundReplace, if flagged) and shows it as a
@@ -269,6 +346,18 @@ export const BlockSchema = z.object({
     .optional(),
   /** Optional hard cap on the block's duration after trim. */
   maxDurationSec: z.number().positive().optional(),
+  /** Voice blocks only, single-take mode: this block is filmed as its OWN
+   *  standalone clip (a bonus/CTA beat — different footage, sometimes a
+   *  different person on camera — not another span of the shared take)
+   *  AND is allowed to simply not exist in the final video if the user
+   *  never filmed it. Excludes the block from speakingTakeSlot's clone-in
+   *  (see FormatSchema's doc comment) so its own upload slot isn't
+   *  overwritten by the shared take, and from splitTake's marker search.
+   *  When bound, splitTake.deriveTranscriptAndTrimWithStandalone runs the
+   *  ordinary transcribe/trim on it like any multi-clip-format block; when
+   *  unbound, assemble.ts skips the block entirely (diagnostic, not an
+   *  error) instead of throwing on a missing trim entry. */
+  optional: z.boolean().default(false),
   /** Legacy field: semantic anchors only. New formats use `anchors`. */
   roles: z.array(SemanticAnchorSchema).default([]),
   anchors: z.array(AnchorSchema).default([]),
@@ -288,9 +377,32 @@ export const FormatSchema = z
     height: z.number().int().positive(),
     /** Caption look, shared by all captioned blocks. */
     captionStyle: ComponentRefSchema.optional(),
-    /** Optional user-supplied music bed for the whole video. */
+    /** Optional user-supplied music bed for the whole video. When unbound,
+     *  assemble.ts falls back to the format's own checked-in template
+     *  music bed (formats/assets/<id>/, PlatesManifestSchema's musicBed),
+     *  when one exists — a format ships with a default score the same way
+     *  it ships with default background plates, rather than shipping
+     *  silent whenever a job skips this optional upload. */
     musicSlot: SlotSchema.optional(),
     musicVolume: z.number().min(0).max(1).default(0.5),
+    /** How assemble.ts places the music bed on the timeline — omitted
+     *  means "start" (today's implicit behavior: the bed starts at 0). */
+    musicPlacement: z
+      .object({
+        /** "start": tlInSec 0. "montageOnset": tlInSec = the block whose
+         *  own generated slot is a montageReel (see GenerationSpecSchema)
+         *  — falls back to "start" if the format has no such block.
+         *  "endAlign": same tlInSec as "montageOnset", but srcInSec is
+         *  computed so the track's OWN tail lands exactly at the video's
+         *  end, skipping however much of its head doesn't fit — for a
+         *  bed whose climax/outro is near the end of the source file. */
+        mode: z.enum(["start", "montageOnset", "endAlign"]).default("start"),
+        fadeInSec: z.number().min(0).default(0.3),
+        fadeOutSec: z.number().min(0).default(0.6),
+        /** Volume multiplier under a voice block's own segment. */
+        duckVolume: z.number().min(0).max(1).default(0.35),
+      })
+      .optional(),
     /** Slots used by events across many blocks (shared SFX, recurring memes). */
     sharedSlots: z.array(SlotSchema).default([]),
     /**
@@ -433,10 +545,28 @@ export const FormatSchema = z
           message: `block "${block.id}": silhouette only applies to broll blocks`,
         });
       }
+      if (block.plateComposite && block.kind !== "broll") {
+        ctx.addIssue({
+          code: "custom",
+          message: `block "${block.id}": plateComposite only applies to broll blocks`,
+        });
+      }
       if (block.ecuCutaway && block.kind !== "voice") {
         ctx.addIssue({
           code: "custom",
           message: `block "${block.id}": ecuCutaway only applies to voice blocks`,
+        });
+      }
+      if (block.optional && block.kind !== "voice") {
+        ctx.addIssue({
+          code: "custom",
+          message: `block "${block.id}": optional only applies to voice blocks`,
+        });
+      }
+      if (block.optional && !format.speakingTakeSlot) {
+        ctx.addIssue({
+          code: "custom",
+          message: `block "${block.id}": optional only makes sense in single-take mode (speakingTakeSlot)`,
         });
       }
 
@@ -737,9 +867,14 @@ export const EdlCaptionGroupSchema = z.object({
   /** Carried straight from the owning block's own captionVariant (see
    *  BlockSchema doc comment) — Captions.tsx renders each group according
    *  to its own tag, not one global style, since a format like this one
-   *  wants BOTH a lower-third opening caption AND full-screen karaoke
-   *  titles over different blocks in the same video. */
+   *  wants BOTH a lower-third opening caption AND full-screen keyword
+   *  titles over the same block, at the same time (two groups with
+   *  overlapping tlIn/tlOut, one of each variant). */
   variant: z.enum(["lowerThird", "bigTitle"]).default("lowerThird"),
+  /** The owning block's own `captionTheme`, or the format's captionStyle
+   *  theme when the block doesn't override it — see BlockSchema's doc
+   *  comment. Captions.tsx picks its color/weight/casing from this. */
+  theme: z.string().optional(),
 });
 
 export const EdlTransitionSchema = z.object({
@@ -785,6 +920,19 @@ export const EdlSchema = z.object({
       tlInSec: z.number().min(0).default(0),
       /** Omitted = plays to the end of the timeline. */
       durationSec: z.number().positive().optional(),
+      /** Where playback starts within the source file — an end-aligned
+       *  placement (see FormatSchema's musicPlacement) skips however much
+       *  of the track's own head doesn't fit before the timeline ends. */
+      srcInSec: z.number().min(0).default(0),
+      fadeInSec: z.number().min(0).default(0),
+      fadeOutSec: z.number().min(0).default(0),
+      /** Volume multiplier applied while ANY duckWindow is active — 1
+       *  means no ducking. Ramped, not stepped (see EdlVideo.tsx). */
+      duckVolume: z.number().min(0).max(1).default(1),
+      /** Absolute-timeline spans (typically every voice block's own
+       *  segment) the music should duck under — spoken dialogue winning
+       *  over the bed, ramped in/out rather than cut. */
+      duckWindows: z.array(z.object({ tlInSec: z.number().min(0), tlOutSec: z.number().positive() })).default([]),
     })
     .optional(),
   /**
@@ -827,13 +975,82 @@ export const StyleProfileSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Plates — a format's checked-in template backdrops (formats/assets/<id>/),
+// used by backgroundReplace.ts in place of per-job generated backdrops so
+// every user gets the SAME set (see PlatesManifestSchema doc comment below).
+// ---------------------------------------------------------------------------
+
+export const PlateLumaStatsSchema = z.object({
+  mean: z.number(),
+  p5: z.number(),
+  p50: z.number(),
+  p90: z.number(),
+  p95: z.number(),
+});
+
+export const PlateAssetSchema = z.object({
+  /** formatAssetsDir(formatId)-relative filename, e.g. "office-dark.png". */
+  file: z.string(),
+  sha256: z.string(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  lumaStats: PlateLumaStatsSchema.optional(),
+});
+
+/**
+ * A format's checked-in template plates (formats/assets/<formatId>/) plus
+ * the reference reel's own measured framing constants — built once by
+ * authoring/buildTemplateAssets.ts and committed, not generated per job.
+ * backgroundReplace.ts (Phase 2) and generation/modelShots.ts (Phase 3)
+ * composite the user's own matted footage/photos onto these; gates.ts
+ * (Phase 7) checks a composited export's luma distribution against
+ * `talkingHead`/`endCard` here instead of hand-picked constants.
+ */
+export const PlatesManifestSchema = z.object({
+  formatId: z.string(),
+  plates: z.record(z.string(), PlateAssetSchema),
+  /** RGBA overlay — everything below the desk's near edge in `office-dark`,
+   *  composited LAST (over the subject) so the subject appears to sit
+   *  behind the keyboard/notebook, exactly like the reference. */
+  deskForeground: z.string(),
+  /** Fraction of `office-dark`'s own height where the desk's near edge
+   *  sits — the same line `deskForeground`'s alpha ramps up across. */
+  deskEdgeFrac: z.number().min(0).max(1),
+  /** Measured once from the reference reel itself (see
+   *  authoring/buildTemplateAssets.ts) — targets for subjectFit.ts's
+   *  auto-framing and gates.ts's luma-distribution gate. */
+  reference: z.object({
+    talkingHead: z.object({
+      headTopFrac: z.number().min(0).max(1),
+      headHeightFrac: z.number().min(0).max(1),
+      lumaP50: z.number(),
+      lumaP95: z.number(),
+    }),
+    endCard: z.object({
+      subjectTopFrac: z.number().min(0).max(1),
+      subjectHeightFrac: z.number().min(0).max(1),
+      lumaP50: z.number(),
+      lumaP95: z.number(),
+    }),
+  }),
+  /** Where a clean instrumental excerpt of the reference's own music sits
+   *  within the checked-in music bed file — see musicBed doc comment. */
+  musicBed: z
+    .object({
+      file: z.string(),
+      durationSec: z.number().positive(),
+    })
+    .optional(),
+});
+
+// ---------------------------------------------------------------------------
 // Inserts — the `generate` stage's own artifact (artifacts/<job>/inserts.json)
 // ---------------------------------------------------------------------------
 
 export const GeneratedInsertSchema = z.object({
   slotName: z.string(),
   blockId: z.string(),
-  kind: z.enum(["cutaway", "montage"]),
+  kind: z.enum(["cutaway", "montage", "plateStill", "detailStill", "montageReel", "triptych"]),
   shot: z.string(),
   durationSec: z.number().positive(),
   seed: z.number().int(),

@@ -2,7 +2,7 @@
   "id": "cinematic-debut-manifesto",
   "name": "The [Profession] Debut Manifesto",
   "niche": "any person launching a personal brand / creator account in a specific field (finance, fitness, law, cooking, etc.) who wants a dramatic trailer-style intro",
-  "description": "A talking-head delivers a line-by-line self-introduction — a bold audience call-out, name reveal, credential, and outrageous ambition — with each beat punched by a single giant word overlay and intercut with moody silhouette b-roll, resolving into a dramatic music montage and a full-screen title card.",
+  "description": "A talking-head delivers a line-by-line self-introduction — a bold audience call-out, name reveal, credential, and outrageous ambition — with each beat punched by a single giant word overlay and intercut with moody silhouette b-roll, resolving into a dramatic music montage, a detail triptych, an optional comedic follow-CTA, and a full-screen title card.",
   "fps": 30,
   "width": 720,
   "height": 1280,
@@ -13,27 +13,31 @@
       "theme": "kumar"
     }
   },
-  "musicVolume": 0.5,
+  "musicVolume": 0.55,
+  "musicSlot": {
+    "name": "dramatic-music",
+    "mediaType": "audio",
+    "required": false,
+    "instructions": "A tense, building cinematic/trailer track. Should swell right as the spoken intro ends and carry the montage. Leave blank to use the format's own default score."
+  },
+  "musicPlacement": {
+    "mode": "montageOnset",
+    "fadeInSec": 0.3,
+    "fadeOutSec": 0.7,
+    "duckVolume": 0.32
+  },
   "speakingTakeSlot": {
     "name": "speaking-take",
     "mediaType": "video",
     "required": true,
-    "instructions": "One continuous take of all your lines, straight to camera. Say each line clearly with a brief pause between them — cutaways and the montage are added for you separately."
+    "instructions": "One continuous take of all your lines, straight to camera. Say each line clearly with a brief pause between them — the office background, cutaways, and montage are added for you automatically."
   },
   "identitySlot": {
     "name": "identity-photos",
     "mediaType": "image",
     "required": true,
-    "instructions": "3+ clear, well-lit photos of your face and body: one front-on, one side profile, one close-up. These are used to automatically generate the silent montage shot in Kumar's cinematic style, so you don't have to film it yourself."
+    "instructions": "5+ clear, well-lit photos of your face and body — standing (arms crossed), a close-up, a side/three-quarter angle, and at least one seated pose. These are automatically composited into real studio and couch shots in Kumar's cinematic style, so you don't have to film them yourself."
   },
-  "sharedSlots": [
-    {
-      "name": "dramatic-music",
-      "mediaType": "audio",
-      "required": false,
-      "instructions": "A tense, building cinematic/trailer track. Should swell right as the spoken intro ends and carry the silent montage."
-    }
-  ],
   "blocks": [
     {
       "id": "hook",
@@ -41,29 +45,26 @@
       "kind": "voice",
       "videoSlot": "hook-clip",
       "backgroundReplace": true,
-      "ecuCutaway": {
-        "atSec": 0.2,
-        "durationSec": 0.4,
-        "overlayAtSec": 0.9
-      },
       "slots": [
         {
           "name": "hook-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Sit at a desk framed like an office/authority setting (e.g. a wall map or shelf behind you), lit dark and moody. Look straight into the lens, hands steepled, and say slowly and gravely: 'This is a message to all [your audience]' — e.g. 'to all finance pros', 'to all personal trainers'. Deliver it like a threat, not a greeting."
+          "instructions": "Sit at a desk, hands steepled, and say slowly and gravely: 'This is a message to all [your audience]' — e.g. 'to all finance pros', 'to all personal trainers'. Deliver it like a threat, not a greeting. Lighting/background are replaced automatically — just say the line."
         },
         {
-          "name": "hook-cutaway-clip",
+          "name": "bshot-hook-1",
           "mediaType": "video",
           "required": true,
           "instructions": "Auto-generated — no filming needed.",
-          "generation": {
-            "kind": "montage",
-            "shot": "backlit silhouette portrait, high contrast, still pose, plain light backdrop",
-            "durationSec": 0.8,
-            "seed": 2
-          }
+          "generation": { "kind": "plateStill", "shot": "silhouette pensive portrait on a white studio backdrop, arms crossed", "durationSec": 0.55, "seed": 0, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "standing" }
+        },
+        {
+          "name": "bshot-hook-2",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": { "kind": "plateStill", "shot": "moody silhouette seated on a dark leather couch", "durationSec": 0.55, "seed": 0, "plate": "sofa", "treatment": "silhouette", "poseTag": "sitting" }
         }
       ],
       "captions": true,
@@ -86,28 +87,23 @@
       ],
       "events": [
         {
-          "id": "hook-cutaway",
+          "id": "hook-cutaway-1",
           "kind": "overlay",
-          "component": {
-            "component": "CutawayOverlay",
-            "params": {
-              "videoSlot": "hook-cutaway-clip"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "hook-marker",
-            "edge": "captureStart",
-            "offsetSec": 0.05
-          },
-          "durationSec": 0.8
+          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-hook-1" } },
+          "timing": { "kind": "sequence", "roleId": "hook-marker", "edge": "captureStart", "index": 0, "count": 2, "targetGapSec": 0.95, "minGapSec": 0.5 },
+          "durationSec": 0.5
+        },
+        {
+          "id": "hook-cutaway-2",
+          "kind": "overlay",
+          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-hook-2" } },
+          "timing": { "kind": "sequence", "roleId": "hook-marker", "edge": "captureStart", "index": 1, "count": 2, "targetGapSec": 0.95, "minGapSec": 0.5 },
+          "durationSec": 0.5
         }
       ],
       "transitionAfter": {
         "component": "cut",
-        "params": {
-          "durationSec": 0
-        }
+        "params": { "durationSec": 0 }
       }
     },
     {
@@ -121,19 +117,21 @@
           "name": "name-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Same dark desk framing, calm and confident. Say: 'My name is [your name].' Pause on your name so the big word can hit."
+          "instructions": "Same desk framing, calm and confident. Say: 'My name is [your name].' Pause on your name so the big word can hit."
         },
         {
-          "name": "name-cutaway-clip",
+          "name": "bshot-name-1",
           "mediaType": "video",
           "required": true,
           "instructions": "Auto-generated — no filming needed.",
-          "generation": {
-            "kind": "montage",
-            "shot": "backlit silhouette portrait, high contrast, still pose, plain light backdrop",
-            "durationSec": 0.6,
-            "seed": 3
-          }
+          "generation": { "kind": "plateStill", "shot": "dark side-profile silhouette on a white studio backdrop", "durationSec": 0.55, "seed": 0, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "profile" }
+        },
+        {
+          "name": "bshot-name-2",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": { "kind": "plateStill", "shot": "backlit close-up silhouette portrait", "durationSec": 0.5, "seed": 0, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "closeup" }
         }
       ],
       "captions": true,
@@ -158,28 +156,23 @@
       ],
       "events": [
         {
-          "id": "name-cutaway",
+          "id": "name-cutaway-1",
           "kind": "overlay",
-          "component": {
-            "component": "CutawayOverlay",
-            "params": {
-              "videoSlot": "name-cutaway-clip"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "name-marker",
-            "edge": "captureStart",
-            "offsetSec": 0.1
-          },
-          "durationSec": 0.6
+          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-name-1" } },
+          "timing": { "kind": "sequence", "roleId": "name-marker", "edge": "captureStart", "index": 0, "count": 2, "targetGapSec": 0.9, "minGapSec": 0.45 },
+          "durationSec": 0.45
+        },
+        {
+          "id": "name-cutaway-2",
+          "kind": "overlay",
+          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-name-2" } },
+          "timing": { "kind": "sequence", "roleId": "name-marker", "edge": "captureStart", "index": 1, "count": 2, "targetGapSec": 0.9, "minGapSec": 0.45 },
+          "durationSec": 0.45
         }
       ],
       "transitionAfter": {
         "component": "cut",
-        "params": {
-          "durationSec": 0
-        }
+        "params": { "durationSec": 0 }
       }
     },
     {
@@ -194,6 +187,20 @@
           "mediaType": "video",
           "required": true,
           "instructions": "Same setup. State your background in one short phrase: 'I'm a [credential]' — e.g. 'a retired accountant', 'a former lawyer'. Land hard on the key title word."
+        },
+        {
+          "name": "bshot-cred-1",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": { "kind": "plateStill", "shot": "arms-crossed silhouette on a white studio backdrop", "durationSec": 0.5, "seed": 1, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "standing" }
+        },
+        {
+          "name": "bshot-cred-2",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": { "kind": "plateStill", "shot": "moody silhouette seated on a dark leather couch, hand near chin", "durationSec": 0.5, "seed": 1, "plate": "sofa", "treatment": "silhouette", "poseTag": "sitting" }
         }
       ],
       "captions": true,
@@ -216,12 +223,25 @@
           }
         }
       ],
-      "events": [],
+      "events": [
+        {
+          "id": "cred-cutaway-1",
+          "kind": "overlay",
+          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-cred-1" } },
+          "timing": { "kind": "sequence", "roleId": "cred-marker", "edge": "captureStart", "index": 0, "count": 2, "targetGapSec": 0.9, "minGapSec": 0.45 },
+          "durationSec": 0.45
+        },
+        {
+          "id": "cred-cutaway-2",
+          "kind": "overlay",
+          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-cred-2" } },
+          "timing": { "kind": "sequence", "roleId": "cred-marker", "edge": "captureStart", "index": 1, "count": 2, "targetGapSec": 0.9, "minGapSec": 0.45 },
+          "durationSec": 0.45
+        }
+      ],
       "transitionAfter": {
         "component": "cut",
-        "params": {
-          "durationSec": 0
-        }
+        "params": { "durationSec": 0 }
       }
     },
     {
@@ -239,20 +259,30 @@
           "instructions": "Same dark desk. Deliver your grand, slightly over-the-top mission in one breath: 'And I'm gonna [take over / become the biggest X in the world]'. Escalate your intensity toward the end."
         },
         {
-          "name": "claim-cutaway-clip",
+          "name": "bshot-claim-1",
           "mediaType": "video",
           "required": true,
           "instructions": "Auto-generated — no filming needed.",
-          "generation": {
-            "kind": "montage",
-            "shot": "backlit silhouette portrait, high contrast, still pose, plain light backdrop",
-            "durationSec": 0.7,
-            "seed": 4
-          }
+          "generation": { "kind": "plateStill", "shot": "dark side-profile silhouette on a white studio backdrop", "durationSec": 0.5, "seed": 1, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "profile" }
+        },
+        {
+          "name": "bshot-claim-2",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": { "kind": "plateStill", "shot": "backlit extreme close-up silhouette", "durationSec": 0.5, "seed": 1, "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "closeup" }
+        },
+        {
+          "name": "bshot-claim-3",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": { "kind": "plateStill", "shot": "moody silhouette seated on a dark leather couch", "durationSec": 0.5, "seed": 2, "plate": "sofa", "treatment": "silhouette", "poseTag": "sitting" }
         }
       ],
       "captions": true,
       "captionVariant": "bigTitle",
+      "keywordTitle": { "source": "llm", "maxWords": 3 },
       "roles": [],
       "anchors": [
         {
@@ -273,28 +303,64 @@
       ],
       "events": [
         {
-          "id": "claim-cutaway",
+          "id": "claim-cutaway-1",
           "kind": "overlay",
-          "component": {
-            "component": "CutawayOverlay",
-            "params": {
-              "videoSlot": "claim-cutaway-clip"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "claim-marker",
-            "edge": "end",
-            "offsetSec": 1.3
-          },
-          "durationSec": 0.7
+          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-claim-1" } },
+          "timing": { "kind": "sequence", "roleId": "claim-marker", "index": 0, "count": 3, "targetGapSec": 0.95, "minGapSec": 0.5 },
+          "durationSec": 0.5
+        },
+        {
+          "id": "claim-cutaway-2",
+          "kind": "overlay",
+          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-claim-2" } },
+          "timing": { "kind": "sequence", "roleId": "claim-marker", "index": 1, "count": 3, "targetGapSec": 0.95, "minGapSec": 0.5 },
+          "durationSec": 0.5
+        },
+        {
+          "id": "claim-cutaway-3",
+          "kind": "overlay",
+          "component": { "component": "CutawayOverlay", "params": { "videoSlot": "bshot-claim-3" } },
+          "timing": { "kind": "sequence", "roleId": "claim-marker", "index": 2, "count": 3, "targetGapSec": 0.95, "minGapSec": 0.5 },
+          "durationSec": 0.5
         }
       ],
       "transitionAfter": {
         "component": "whooshZoom",
-        "params": {
-          "durationSec": 0.4
+        "params": { "durationSec": 0.4 }
+      }
+    },
+    {
+      "id": "detail-triptych",
+      "title": "Detail triptych",
+      "kind": "broll",
+      "videoSlot": "triptych-clip",
+      "brollDurationSec": 1.8,
+      "slots": [
+        {
+          "name": "triptych-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Auto-generated — no filming needed.",
+          "generation": {
+            "kind": "triptych",
+            "shot": "three stacked detail panels: eyeglasses close-up, hands with cash, dress shoes",
+            "durationSec": 1.8,
+            "seed": 0,
+            "subShots": [
+              { "kind": "detailStill", "shot": "extreme close-up of eyeglasses and eyes, dramatic hard-key lighting, deep shadow", "treatment": "silhouette", "seed": 0 },
+              { "kind": "detailStill", "shot": "close-up of hands counting a stack of hundred dollar bills, dramatic lighting", "treatment": "silhouette", "seed": 1 },
+              { "kind": "detailStill", "shot": "close-up of polished dress shoes on a dark wood floor, dramatic lighting", "treatment": "silhouette", "seed": 2 }
+            ]
+          }
         }
+      ],
+      "captions": false,
+      "roles": [],
+      "anchors": [],
+      "events": [],
+      "transitionAfter": {
+        "component": "cut",
+        "params": { "durationSec": 0 }
       }
     },
     {
@@ -309,39 +375,68 @@
           "required": true,
           "instructions": "Generated automatically from your identity photos in Kumar's cinematic style (backlit silhouette, moody, high contrast). Supply your own clip here instead if you'd rather film this shot yourself.",
           "generation": {
-            "kind": "montage",
-            "shot": "backlit silhouette portrait, high contrast, subject slowly turns toward camera in a moody thinking pose, arms crossed, plain dark backdrop",
-            "durationSec": 5,
-            "seed": 1
+            "kind": "montageReel",
+            "shot": "a rapid silent montage of moody silhouette poses",
+            "durationSec": 5.1,
+            "seed": 0,
+            "subShots": [
+              { "kind": "plateStill", "shot": "arms-crossed silhouette on a white studio backdrop", "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "standing", "seed": 0 },
+              { "kind": "plateStill", "shot": "dark side-profile silhouette", "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "profile", "seed": 0 },
+              { "kind": "plateStill", "shot": "moody silhouette seated on a dark leather couch, hands clasped", "plate": "sofa", "treatment": "silhouette", "poseTag": "sitting", "seed": 0 },
+              { "kind": "plateStill", "shot": "backlit close-up silhouette portrait", "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "closeup", "seed": 0 },
+              { "kind": "plateStill", "shot": "arms-crossed silhouette, slightly different angle", "plate": "studio-cyc", "treatment": "silhouette", "poseTag": "standing", "seed": 1 },
+              { "kind": "plateStill", "shot": "moody silhouette seated on a dark leather couch, hand on chin", "plate": "sofa", "treatment": "silhouette", "poseTag": "sitting", "seed": 1 }
+            ]
           }
         }
       ],
       "captions": false,
       "roles": [],
       "anchors": [],
-      "events": [
+      "events": [],
+      "transitionAfter": {
+        "component": "cut",
+        "params": { "durationSec": 0 }
+      }
+    },
+    {
+      "id": "outro-cta",
+      "title": "Follow CTA (optional)",
+      "kind": "voice",
+      "videoSlot": "cta-clip",
+      "optional": true,
+      "slots": [
         {
-          "id": "montage-music",
-          "kind": "sfx",
-          "component": {
-            "component": "Sfx",
-            "params": {
-              "audioSlot": "dramatic-music",
-              "volume": 0.9
-            }
-          },
-          "timing": {
-            "kind": "fixed",
-            "anchor": "blockStart",
-            "offsetSec": 0
+          "name": "cta-clip",
+          "mediaType": "video",
+          "required": false,
+          "instructions": "Optional bonus beat. Break the serious tone completely: bright, normal lighting, a partner/friend/family member appears with you and says the ask warmly and a little jokingly: '[This person] wants to be famous, so please follow him/her.' End on a candid laugh or playful beat. Leave blank to skip this beat."
+        }
+      ],
+      "captions": true,
+      "captionTheme": "outroYellow",
+      "roles": [],
+      "anchors": [
+        {
+          "id": "cta-marker",
+          "kind": "literal",
+          "phrases": [
+            "so please follow",
+            "please follow him",
+            "please follow her",
+            "make sure to follow"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockEnd",
+            "offsetSec": -1.5
           }
         }
       ],
+      "events": [],
       "transitionAfter": {
         "component": "cut",
-        "params": {
-          "durationSec": 0
-        }
+        "params": { "durationSec": 0 }
       }
     },
     {
@@ -350,13 +445,13 @@
       "kind": "broll",
       "videoSlot": "endcard-clip",
       "brollDurationSec": 2.2,
-      "silhouette": true,
+      "plateComposite": { "plate": "studio-cyc", "treatment": "lit" },
       "slots": [
         {
           "name": "endcard-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Full-body shot against a plain seamless backdrop, standing still and confident (arms crossed), holding the pose for ~2s. Leave clear space at the top and bottom of frame for the title text."
+          "instructions": "Full-body shot, standing still and confident (arms crossed), holding the pose for ~2s. Any plain background works — it's replaced automatically. Leave clear space top and bottom for the title text."
         },
         {
           "name": "debut-title",
@@ -376,8 +471,7 @@
             "component": "TextOverlay",
             "params": {
               "textSlot": "debut-title",
-              "variant": "kumarTitle",
-              "fontSize": 100
+              "variant": "kumarSplitTitle"
             }
           },
           "timing": {

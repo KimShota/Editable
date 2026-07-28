@@ -15,7 +15,7 @@ import { loadFormat } from "./loader";
 import { applyInserts, generate } from "./generate";
 import { GeneratorChoice } from "./generation";
 import { transcribe } from "./transcribe";
-import { deriveTranscriptAndTrim } from "./splitTake";
+import { deriveTranscriptAndTrimWithStandalone } from "./splitTake";
 import { readSplit, runSplit } from "./orchestrate";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
@@ -24,6 +24,7 @@ import { resolveRoles } from "./resolveRoles";
 import { ResolverChoice } from "./resolvers";
 import { assemble } from "./assemble";
 import { render } from "./render";
+import { runGates } from "./gates";
 import { artifactsDir } from "./paths";
 
 /**
@@ -77,8 +78,8 @@ const parseArgs = (argv: string[]) => {
       }
       case "--generator": {
         const generator = argv[++i];
-        if (!["fallback", "gemini", "auto"].includes(generator)) {
-          throw new Error("--generator must be fallback | gemini | auto");
+        if (!["fallback", "gemini", "higgsfield", "model-shots", "auto"].includes(generator)) {
+          throw new Error("--generator must be fallback | gemini | higgsfield | model-shots | auto");
         }
         args.generator = generator as GeneratorChoice;
         break;
@@ -162,18 +163,18 @@ const main = async () => {
   // splitTake.ts) instead of the ordinary per-block transcribe()/trim().
   // Memoized so a full run computes it once even though both the
   // "transcribe" and "trim" stages below consult it.
-  let singleTakeDerived: ReturnType<typeof deriveTranscriptAndTrim> | null = null;
-  const getSingleTakeDerived = () => {
+  let singleTakeDerived: Awaited<ReturnType<typeof deriveTranscriptAndTrimWithStandalone>> | null = null;
+  const getSingleTakeDerived = async () => {
     if (!singleTakeDerived) {
       const split = readSplit(jobId) ?? runSplit(format, filled, jobId);
-      singleTakeDerived = deriveTranscriptAndTrim(format, filled, split);
+      singleTakeDerived = await deriveTranscriptAndTrimWithStandalone(format, filled, split, args.resolver);
     }
     return singleTakeDerived;
   };
 
   let transcript = wants("transcribe")
     ? format.speakingTakeSlot
-      ? getSingleTakeDerived().transcript
+      ? (await getSingleTakeDerived()).transcript
       : transcribe(format, filled)
     : read("transcript", TranscriptSchema);
   if (wants("transcribe")) {
@@ -199,7 +200,7 @@ const main = async () => {
 
   let trims = wants("trim")
     ? format.speakingTakeSlot
-      ? getSingleTakeDerived().trim
+      ? (await getSingleTakeDerived()).trim
       : await trim(format, filled, transcript, args.resolver)
     : read("trim", TrimPointsSchema);
   if (wants("trim")) {
@@ -238,6 +239,15 @@ const main = async () => {
 
   const outPath = render(edl, dir);
   console.log(`\n✔ rendered ${path.relative(process.cwd(), outPath)} (${edl.durationSec.toFixed(2)}s, ${edl.width}x${edl.height}@${edl.fps}fps)`);
+
+  const gateResults = runGates(outPath, edl);
+  write("gates", gateResults);
+  const failed = gateResults.filter((r) => r.pass === false);
+  console.log(`\nacceptance gates: ${gateResults.length - failed.length - gateResults.filter((r) => r.pass === null).length} passed, ${failed.length} failed`);
+  for (const r of failed) console.log(`  ✖ ${r.name} — ${r.measured}`);
+  if (failed.length > 0) {
+    throw new Error(`${failed.length} acceptance gate(s) failed (see artifacts/${jobId}/gates.json) — ${failed.map((r) => r.name).join("; ")}`);
+  }
 };
 
 main().catch((err) => {

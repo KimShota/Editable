@@ -1,8 +1,9 @@
 import { GenerationProvider, fallbackGenerationProvider } from "./provider";
 import { geminiGenerationProvider } from "./gemini";
 import { higgsfieldGenerationProvider } from "./higgsfield";
+import { modelShotsGenerationProvider } from "./modelShots";
 
-export type GeneratorChoice = "fallback" | "gemini" | "higgsfield" | "auto";
+export type GeneratorChoice = "fallback" | "gemini" | "higgsfield" | "model-shots" | "auto";
 
 /**
  * Pick the insert-generation provider. Same precedence shape as
@@ -10,14 +11,24 @@ export type GeneratorChoice = "fallback" | "gemini" | "higgsfield" | "auto";
  * keys are present, falling back to the zero-spend stub with a warning
  * otherwise — so the pipeline stays runnable with no external dependency,
  * but upgrades itself automatically the moment credentials exist.
- * Higgsfield takes precedence over Gemini in "auto" since it's the
- * project's primary generation backend; Gemini remains available as an
- * explicit choice (generator: "gemini") or fallback if only its key is set.
+ *
+ * "auto" now prefers modelShots (generation/modelShots.ts) over the old
+ * higgsfield/gemini providers: its plateStill tier needs no API key at all
+ * (a deterministic composite onto the format's own checked-in plates), and
+ * its detailStill/montageReel/triptych tiers call Gemini, not Higgsfield —
+ * cheaper per the project's own preference (Higgsfield credits are
+ * limited, Gemini is not) and the only provider that actually understands
+ * the new plateStill/detailStill/montageReel/triptych generation kinds
+ * (see schemas.ts's GenerationSpecSchema). "gemini"/"higgsfield" remain
+ * available as explicit choices for a format still using the legacy
+ * cutaway/montage kinds.
  */
 export const pickGenerationProvider = (choice: GeneratorChoice = "auto"): GenerationProvider => {
   switch (choice) {
     case "fallback":
       return fallbackGenerationProvider;
+    case "model-shots":
+      return modelShotsGenerationProvider;
     case "gemini":
       if (!process.env.GEMINI_API_KEY) {
         throw new Error("generator 'gemini' requires GEMINI_API_KEY (put it in .env)");
@@ -31,12 +42,7 @@ export const pickGenerationProvider = (choice: GeneratorChoice = "auto"): Genera
       }
       return higgsfieldGenerationProvider;
     case "auto":
-      if (process.env.HIGGSFIELD_API_KEY && process.env.HIGGSFIELD_API_SECRET) return higgsfieldGenerationProvider;
-      if (process.env.GEMINI_API_KEY) return geminiGenerationProvider;
-      console.warn(
-        "generate: no HIGGSFIELD_API_KEY/HIGGSFIELD_API_SECRET or GEMINI_API_KEY — using fallback (Ken-Burns over an identity photo, no real scene recreation)",
-      );
-      return fallbackGenerationProvider;
+      return modelShotsGenerationProvider;
   }
 };
 

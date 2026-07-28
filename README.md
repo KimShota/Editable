@@ -39,15 +39,25 @@ writes an inspectable JSON artifact:
 ```
 format + user assets
   → intake      (bind assets to named slots, validate)   artifacts/<job>/filled.json
-  → transcribe  (whisper.cpp word timestamps)            artifacts/<job>/transcript.json
-  → trim        (cut dead air; trim first, then time)    artifacts/<job>/trim.json
+  → generate    (fill AI-generated slots — inserts, model shots)   artifacts/<job>/inserts.json
+  → transcribe  (whisper.cpp word timestamps; single-take
+                 formats use split instead — one whisper pass
+                 over the shared take, sliced per block)   artifacts/<job>/transcript.json
+  → trim        (cut dead air; trim first, then time;
+                 alignToScript + optional LLM lexicon pass
+                 correct the transcript against script.json)  artifacts/<job>/trim.json
+  → backgroundReplace  (single-take formats only: composite
+                 flagged blocks onto the format's own
+                 checked-in plates — formats/assets/<id>/)  rewrites transcript.json/trim.json
   → roles       (LLM finds format-defined moments)       artifacts/<job>/roles.json
   → assemble    (master timeline: the EDL)               artifacts/<job>/edl.json
-  → render      (Remotion → MP4)                         out/<job>.mp4
+  → render      (Remotion → MP4, then acceptance gates
+                 run against the actual export)           out/<job>.mp4, artifacts/<job>/gates.json
 ```
 
 When a video comes out wrong, don't stare at the video — look at which
-artifact first went wrong.
+artifact first went wrong. A failed acceptance gate (`gates.json`) fails
+the build — see `src/backend/pipeline/gates.ts`.
 
 ### One-time setup
 
@@ -67,7 +77,17 @@ npm run pipeline -- --job jobs/demo
 Flags:
 
 - `--only <stage>` — re-run a single stage against the artifacts on disk
-  (`intake | transcribe | trim | roles | assemble | render`)
+  (`intake | generate | transcribe | trim | roles | assemble | render`).
+  Note: `--only assemble`/`--only roles`/etc. read `filled.json` (pure
+  intake output) from disk rather than re-deriving it, so a single-take
+  format's backgroundReplace-composited clips only carry through within
+  ONE full (no `--only`) invocation — re-run the whole pipeline, not a
+  later stage alone, after changing anything upstream of `trim`.
+- `--generator <name>` — insert/model-shot generation provider:
+  `model-shots` (default in `auto`) — deterministic photo-on-plate
+  composites plus Gemini for shots no photo can cover, `gemini`,
+  `higgsfield`, or `fallback` (Ken-Burns over a raw identity photo, no
+  compositing)
 - `--resolver <name>` — role-resolution provider:
   - `anthropic` — Anthropic API (`ANTHROPIC_API_KEY` in `.env`)
   - `claude-cli` — your local `claude` login, no key needed

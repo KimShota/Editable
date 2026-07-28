@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { GenerationProvider, GenerationRequest, animateStillToClip } from "./provider";
+import { generateImage } from "./geminiImage";
 
 /**
  * Real generation provider (vs. provider.ts's zero-spend fallback): calls
@@ -12,12 +13,13 @@ import { GenerationProvider, GenerationRequest, animateStillToClip } from "./pro
  * Ken-Burns+grade helper the fallback stub uses, so the two providers
  * differ only in WHERE the still comes from (an unmodified photo vs. a
  * generated composite), not in how it becomes a clip.
+ *
+ * Legacy path (kind "cutaway"/"montage") — cinematic-debut-manifesto now
+ * uses generation/modelShots.ts's plateStill/detailStill/montageReel/
+ * triptych kinds instead, but this stays as the "gemini" explicit
+ * --generator choice and geminiImage.ts's shared HTTP plumbing for any
+ * format that still wants a plain identity-recreation still.
  */
-
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-// `||` (not `??`), matching this repo's other env-model overrides — an
-// empty string in .env means "not set", not "use an empty model string".
-const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-3-pro-image";
 
 const buildPrompt = (req: GenerationRequest): string => {
   const { environment, lighting, grade } = req.styleProfile;
@@ -34,67 +36,20 @@ const buildPrompt = (req: GenerationRequest): string => {
   );
 };
 
-const readImageAsInlineData = (absPath: string): { mimeType: string; data: string } => {
-  const ext = path.extname(absPath).toLowerCase();
-  const mimeType = ext === ".png" ? "image/png" : "image/jpeg";
-  return { mimeType, data: fs.readFileSync(absPath).toString("base64") };
-};
-
-type GeminiInlineData = { mimeType?: string; mime_type?: string; data: string };
-type GeminiPart = { text?: string; inlineData?: GeminiInlineData; inline_data?: GeminiInlineData };
-type GeminiResponse = { candidates?: Array<{ content?: { parts?: GeminiPart[] } }> };
-
 export const geminiGenerationProvider: GenerationProvider = {
   name: "gemini",
   generate: async (req) => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("generation provider 'gemini' requires GEMINI_API_KEY (put it in .env)");
-    }
     if (req.identityImages.length === 0) {
       throw new Error("gemini generation provider: no identity images to draw from");
     }
 
     // Up to 3 reference angles — enough for identity, cheap enough on tokens.
-    const parts: Array<{ text: string } | { inline_data: { mime_type: string; data: string } }> = [
-      { text: buildPrompt(req) },
-    ];
-    for (const imagePath of req.identityImages.slice(0, 3)) {
-      const { mimeType, data } = readImageAsInlineData(imagePath);
-      parts.push({ inline_data: { mime_type: mimeType, data } });
-    }
-
-    const response = await fetch(
-      `${GEMINI_API_BASE}/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: { responseModalities: ["IMAGE"] },
-        }),
-      },
-    );
-    const json = await response.json();
-    if (!response.ok) {
-      throw new Error(
-        `gemini generation provider: API error ${response.status}: ${JSON.stringify(json).slice(0, 2000)}`,
-      );
-    }
-
-    const responseParts = (json as GeminiResponse).candidates?.[0]?.content?.parts ?? [];
-    const imagePart = responseParts.find((p) => p.inlineData?.data ?? p.inline_data?.data);
-    const inline = imagePart?.inlineData ?? imagePart?.inline_data;
-    if (!inline?.data) {
-      throw new Error(
-        `gemini generation provider: no image in response: ${JSON.stringify(json).slice(0, 2000)}`,
-      );
-    }
+    const bytes = await generateImage(buildPrompt(req), req.identityImages, 3);
 
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-gemini-"));
     try {
       const stillPath = path.join(workDir, "still.png");
-      fs.writeFileSync(stillPath, Buffer.from(inline.data, "base64"));
+      fs.writeFileSync(stillPath, bytes);
       animateStillToClip(stillPath, {
         durationSec: req.durationSec,
         width: req.width,

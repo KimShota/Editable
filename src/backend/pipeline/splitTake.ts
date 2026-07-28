@@ -2,7 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { matchLiteralAnchor } from "./literal";
-import { detectSilenceIntervals, trimBrollBlock } from "./trim";
+import { detectSilenceIntervals, trim, trimBrollBlock } from "./trim";
+import { transcribe } from "./transcribe";
+import { ResolverChoice } from "./resolvers";
 import { requireWhisperModel, transcribeFile } from "./whisper";
 import {
   Block,
@@ -102,7 +104,12 @@ export const splitTake = (format: Format, absPath: string, durationSec: number):
   const regions = speechRegions(silences, durationSec);
   const lastSpeechEnd = regions.length > 0 ? regions[regions.length - 1].endSec : durationSec;
 
-  const voiceBlocks = format.blocks.filter((b) => b.kind === "voice");
+  // `optional` voice blocks (a bonus/CTA beat filmed as its OWN separate
+  // clip, not part of this continuous take — see BlockSchema's doc
+  // comment) are never in the shared take at all; searching it for their
+  // marker would at best waste a scan and at worst false-positive match.
+  // deriveTranscriptAndTrimWithStandalone handles them separately.
+  const voiceBlocks = format.blocks.filter((b) => b.kind === "voice" && !b.optional);
   const starts: Array<{ blockId: string; startSec: number; confidence: number; quote?: string }> = [];
 
   let searchFloor = 0;
@@ -174,4 +181,41 @@ export const deriveTranscriptAndTrim = (
     trimBlocks.push(trimBrollBlock(block, filled));
   }
   return { transcript: { blocks: transcriptBlocks }, trim: { blocks: trimBlocks, diagnostics: [] } };
+};
+
+/**
+ * deriveTranscriptAndTrim, plus per-block transcribe()/trim() for any
+ * `optional` voice block that IS bound (see BlockSchema's doc comment) —
+ * a block filmed as its own standalone clip rather than a span of the
+ * shared take, so it needs the ordinary multi-clip-format machinery
+ * (transcribe.ts/trim.ts), not another split-take span. An optional block
+ * left UNBOUND (never filmed) gets no transcript/trim entry at all —
+ * assemble.ts skips a block with no trim entry when it's optional, the
+ * same "not filmed, not an error" treatment a generated slot's absence
+ * already gets elsewhere in this pipeline.
+ */
+export const deriveTranscriptAndTrimWithStandalone = async (
+  format: Format,
+  filled: FilledFormat,
+  split: SplitTakeResult,
+  resolver: ResolverChoice,
+): Promise<{ transcript: Transcript; trim: TrimPoints }> => {
+  const base = deriveTranscriptAndTrim(format, filled, split);
+
+  const standaloneBlocks = format.blocks.filter(
+    (b) => b.kind === "voice" && b.optional && filled.bindings[b.videoSlot],
+  );
+  if (standaloneBlocks.length === 0) return base;
+
+  const standaloneFormat: Format = { ...format, blocks: standaloneBlocks };
+  const standaloneTranscript = transcribe(standaloneFormat, filled);
+  const standaloneTrim = await trim(standaloneFormat, filled, standaloneTranscript, resolver);
+
+  return {
+    transcript: { blocks: [...base.transcript.blocks, ...standaloneTranscript.blocks] },
+    trim: {
+      blocks: [...base.trim.blocks, ...standaloneTrim.blocks],
+      diagnostics: [...base.trim.diagnostics, ...standaloneTrim.diagnostics],
+    },
+  };
 };

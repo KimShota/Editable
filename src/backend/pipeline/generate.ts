@@ -5,6 +5,8 @@ import { z } from "zod";
 import { probeFile } from "./intake";
 import { GeneratorChoice, pickGenerationProvider } from "./generation";
 import { loadStyleProfile } from "./generation/styleProfile";
+import { classifyPoses, prepIdentityImages } from "./generation/identityPrep";
+import { PIPELINE_VERSION } from "./pipelineVersion";
 import { FilledFormatSchema, InsertsSchema } from "./schemas";
 import { BoundAsset, FilledFormat, Format, GeneratedInsert, Inserts, StyleProfile } from "./types";
 
@@ -49,10 +51,14 @@ const requestHash = (parts: {
   height: number;
   fps: number;
   provider: string;
+  plate?: string;
+  treatment?: string;
+  poseTag?: string;
+  subShots?: unknown;
 }): string =>
   crypto
     .createHash("sha256")
-    .update(JSON.stringify({ ...parts, identityImages: [...parts.identityImages].sort() }))
+    .update(JSON.stringify({ ...parts, identityImages: [...parts.identityImages].sort(), pipelineVersion: PIPELINE_VERSION }))
     .digest("hex")
     .slice(0, 16);
 
@@ -70,10 +76,18 @@ export const generate = async (
 
   const provider = pickGenerationProvider(generatorChoice);
   const styleProfile = loadStyleProfile(format.id);
-  const identityImages = identityImagePaths(format, filled);
+  const rawIdentityImages = identityImagePaths(format, filled);
 
   const generatedDir = path.join(filled.jobDir, "generated");
   fs.mkdirSync(generatedDir, { recursive: true });
+
+  // Letterbox-cropped once, shared by every generated slot below — an
+  // iPhone-screenshot identity photo's own black bars would otherwise get
+  // fed as reference pixels into every Gemini call. Pose tags likewise
+  // computed once (one Gemini call, not one per slot) since they describe
+  // the photos themselves, not any particular shot.
+  const identityImages = prepIdentityImages(rawIdentityImages, filled.jobDir);
+  const identityPoseTags = await classifyPoses(identityImages);
 
   const newBindings: Record<string, BoundAsset> = {};
   const inserts: GeneratedInsert[] = [];
@@ -110,13 +124,19 @@ export const generate = async (
       height: format.height,
       fps: format.fps,
       provider: provider.name,
+      plate: spec.plate,
+      treatment: spec.treatment,
+      poseTag: spec.poseTag,
+      subShots: spec.subShots,
     });
     const cachedHash = fs.existsSync(hashFile) ? fs.readFileSync(hashFile, "utf8") : undefined;
     const cacheHit = cachedHash === hash && fs.existsSync(absOutPath);
 
     if (!cacheHit) {
       await provider.generate({
+        formatId: format.id,
         identityImages,
+        identityPoseTags,
         styleProfile,
         kind: spec.kind,
         shot: spec.shot,
@@ -125,6 +145,10 @@ export const generate = async (
         width: format.width,
         height: format.height,
         fps: format.fps,
+        plate: spec.plate,
+        treatment: spec.treatment,
+        poseTag: spec.poseTag,
+        subShots: spec.subShots,
         outPath: absOutPath,
       });
       fs.writeFileSync(hashFile, hash);

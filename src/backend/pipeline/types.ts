@@ -26,11 +26,16 @@ import {
   LiteralAnchorSchema,
   MediaTypeSchema,
   OverridesSchema,
+  PlateAssetSchema,
+  PlateLumaStatsSchema,
+  PlatesManifestSchema,
+  PoseTagSchema,
   ResolvedRoleSchema,
   ResolvedRolesSchema,
   SemanticAnchorSchema,
   SlotSchema,
   StyleProfileSchema,
+  SubShotSpecSchema,
   TakeTrimSchema,
   TranscriptSchema,
   TrimPointsSchema,
@@ -50,6 +55,8 @@ export type LiteralAnchor = z.infer<typeof LiteralAnchorSchema>;
 export type SemanticAnchor = z.infer<typeof SemanticAnchorSchema>;
 export type Anchor = z.infer<typeof AnchorSchema>;
 export type MediaType = z.infer<typeof MediaTypeSchema>;
+export type PoseTag = z.infer<typeof PoseTagSchema>;
+export type SubShotSpec = z.infer<typeof SubShotSpecSchema>;
 export type GenerationSpec = z.infer<typeof GenerationSpecSchema>;
 export type Slot = z.infer<typeof SlotSchema>;
 export type FormatEvent = z.infer<typeof FormatEventSchema>;
@@ -82,6 +89,10 @@ export type EdlTransition = z.infer<typeof EdlTransitionSchema>;
 export type Edl = z.infer<typeof EdlSchema>;
 
 export type StyleProfile = z.infer<typeof StyleProfileSchema>;
+
+export type PlateLumaStats = z.infer<typeof PlateLumaStatsSchema>;
+export type PlateAsset = z.infer<typeof PlateAssetSchema>;
+export type PlatesManifest = z.infer<typeof PlatesManifestSchema>;
 
 export type GeneratedInsert = z.infer<typeof GeneratedInsertSchema>;
 export type Inserts = z.infer<typeof InsertsSchema>;

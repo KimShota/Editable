@@ -27,3 +27,17 @@ export const PLAYFAIR_DISPLAY_STACK = `"${PLAYFAIR_DISPLAY_FONT}", Georgia, "Tim
 
 /** The red used by the reference reel's titles and captions. */
 export const KUMAR_RED = "#E31E24";
+
+/** Rough width-fit for a Didone-serif uppercase title (Captions.tsx's
+ *  bigTitle cards, TextOverlay's kumarSplitTitle) — no canvas text
+ *  measurement available inline in a Remotion render, so this
+ *  approximates a bold serif uppercase glyph's average width as a
+ *  fraction of its own font size. Good enough to keep a short word and a
+ *  long word both spanning roughly the same fraction of frame width,
+ *  which a single fixed fontSize can't do. */
+export const fitDidoneFontSize = (text: string, frameWidth: number, maxPx = 150, minPx = 56): number => {
+  const CHAR_WIDTH_FACTOR = 0.62;
+  const targetWidthPx = frameWidth * 0.86;
+  const raw = targetWidthPx / (Math.max(1, text.length) * CHAR_WIDTH_FACTOR);
+  return Math.min(maxPx, Math.max(minPx, raw));
+};

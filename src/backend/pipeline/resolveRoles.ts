@@ -69,7 +69,13 @@ export const resolveRoles = async (
     if (block.kind !== "voice" || anchors.length === 0) continue;
 
     const trim = trims.blocks.find((b) => b.blockId === block.id);
-    if (!trim) throw new Error(`resolveRoles: no trim points for block "${block.id}"`);
+    if (!trim) {
+      // An `optional` voice block that was never filmed has no trim entry
+      // at all (see BlockSchema's doc comment / assemble.ts's matching
+      // skip) — nothing to resolve anchors against, and nothing wrong.
+      if (block.optional) continue;
+      throw new Error(`resolveRoles: no trim points for block "${block.id}"`);
+    }
 
     const rawTakes = transcript.blocks.find((b) => b.blockId === block.id)?.takes ?? [[]];
     // Matching, not the filtered/trimmed word list captions use: a phrase
@@ -88,6 +94,18 @@ export const resolveRoles = async (
           startSec: clamp(match.startSec, 0, blockDurationSec),
           endSec: clamp(match.endSec, 0, blockDurationSec),
         };
+        // A greedy capture (literal.ts's MAX_CAPTURE_WORDS) has no notion
+        // of "this is the next block's line" — on a continuous take with no
+        // clean pause after the anchor, it can run most of the way through
+        // a short block. Not fatal (captions/edges just look off for that
+        // anchor), but easy to miss without a flag.
+        const capturedWords = match.capturedText ? match.capturedText.split(/\s+/).filter(Boolean).length : 0;
+        if (words.length > 0 && capturedWords / words.length > 0.6) {
+          console.warn(
+            `resolveRoles: anchor "${anchor.id}" in block "${block.id}" captured ${capturedWords}/${words.length} ` +
+              `words of the block (${match.quote ?? ""} → ${match.capturedText ?? ""}) — likely ran past the block's own line`,
+          );
+        }
         literalSpans.set(anchor.id, span);
         roles.push({
           blockId: block.id,

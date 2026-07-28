@@ -11,6 +11,43 @@ import {
   useVideoConfig,
 } from "remotion";
 import { Edl, EdlTransition, EdlVideoSegment } from "../pipeline/types";
+
+const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+
+/** Frame-aware volume envelope for the music bed — fade-in/out at the
+ *  bed's own head/tail, plus a ramped (not stepped) duck under every
+ *  voice-block window in `duckWindows` (see schemas.ts's EdlSchema.music
+ *  doc comment). `frame` is LOCAL to the bed's own Sequence (0 at
+ *  edl.music.tlInSec), matching what Remotion's Audio `volume` callback
+ *  receives. Windows are assumed non-overlapping (voice blocks don't
+ *  overlap each other); only the first match applies. */
+const DUCK_RAMP_SEC = 0.25;
+const musicVolumeAt = (music: NonNullable<Edl["music"]>, fps: number) => (frame: number): number => {
+  const tSec = music.tlInSec + frame / fps;
+  const endSec = music.durationSec !== undefined ? music.tlInSec + music.durationSec : undefined;
+
+  let mult = 1;
+  if (music.fadeInSec > 0) {
+    mult *= clamp01((tSec - music.tlInSec) / music.fadeInSec);
+  }
+  if (music.fadeOutSec > 0 && endSec !== undefined) {
+    mult *= clamp01((endSec - tSec) / music.fadeOutSec);
+  }
+
+  for (const w of music.duckWindows) {
+    if (tSec < w.tlInSec - DUCK_RAMP_SEC || tSec > w.tlOutSec + DUCK_RAMP_SEC) continue;
+    if (tSec < w.tlInSec) {
+      mult *= 1 - (1 - music.duckVolume) * clamp01((tSec - (w.tlInSec - DUCK_RAMP_SEC)) / DUCK_RAMP_SEC);
+    } else if (tSec > w.tlOutSec) {
+      mult *= music.duckVolume + (1 - music.duckVolume) * clamp01((tSec - w.tlOutSec) / DUCK_RAMP_SEC);
+    } else {
+      mult *= music.duckVolume;
+    }
+    break;
+  }
+
+  return clamp01(music.volume * mult);
+};
 import { TextOverlay } from "./components/TextOverlay";
 import { ImageOverlay } from "./components/ImageOverlay";
 import { VideoOverlay } from "./components/VideoOverlay";
@@ -207,7 +244,16 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
           }
           name="music"
         >
-          <Audio src={staticFile(edl.music.src)} volume={() => edl.music!.volume} />
+          <Audio
+            src={staticFile(edl.music.src)}
+            volume={musicVolumeAt(edl.music, fps)}
+            trimBefore={toFrames(edl.music.srcInSec)}
+            // The bed's own natural length may be shorter than
+            // edl.music.durationSec (see assemble.ts's buildMusic) —
+            // looping fills the remainder with a repeat instead of
+            // leaving true silence for however much is left over.
+            loop
+          />
         </Sequence>
       )}
     </AbsoluteFill>

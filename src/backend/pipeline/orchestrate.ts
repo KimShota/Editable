@@ -5,7 +5,7 @@ import { loadFormat } from "./loader";
 import { generate } from "./generate";
 import { GeneratorChoice } from "./generation";
 import { transcribe } from "./transcribe";
-import { deriveTranscriptAndTrim, splitTake, SplitTakeResult } from "./splitTake";
+import { deriveTranscriptAndTrimWithStandalone, splitTake, SplitTakeResult } from "./splitTake";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
 import { replaceBackgrounds } from "./backgroundReplace";
@@ -13,6 +13,7 @@ import { resolveRoles } from "./resolveRoles";
 import { ResolverChoice } from "./resolvers";
 import { assemble } from "./assemble";
 import { render, stageAssets } from "./render";
+import { runGates } from "./gates";
 import { artifactsDir } from "./paths";
 import { Edl, FilledFormat, Format, Transcript, TrimPoints } from "./types";
 import { EdlSchema } from "./schemas";
@@ -115,7 +116,7 @@ export const buildJob = async (
   let trims: TrimPoints | undefined;
   if (format.speakingTakeSlot) {
     const split = readSplit(jobId) ?? runSplit(format, filled, jobId);
-    const derived = deriveTranscriptAndTrim(format, filled, split);
+    const derived = await deriveTranscriptAndTrimWithStandalone(format, filled, split, resolver);
     rawTranscript = derived.transcript;
     trims = derived.trim;
   } else {
@@ -178,11 +179,22 @@ export const reassembleJob = async (jobDir: string, jobId: string): Promise<Edl>
   return edl;
 };
 
-/** Renders the job's already-assembled EDL to out/<jobId>.mp4. */
+/** Renders the job's already-assembled EDL to out/<jobId>.mp4, then runs
+ *  the acceptance gates against the actual export (see gates.ts) — same
+ *  "fail loudly rather than ship a broken render silently" contract as
+ *  run.ts's CLI render stage. */
 export const renderJob = (jobId: string): string => {
   const dir = artifactsDir(jobId);
   const edl: Edl = JSON.parse(fs.readFileSync(path.join(dir, "edl.json"), "utf8"));
-  return render(edl, dir);
+  const outPath = render(edl, dir);
+
+  const gateResults = runGates(outPath, edl);
+  writeArtifact(jobId, "gates", gateResults);
+  const failed = gateResults.filter((r) => r.pass === false);
+  if (failed.length > 0) {
+    throw new Error(`${failed.length} acceptance gate(s) failed (see artifacts/${jobId}/gates.json) — ${failed.map((r) => r.name).join("; ")}`);
+  }
+  return outPath;
 };
 
 /**

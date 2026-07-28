@@ -6,10 +6,11 @@ dist
 # Ignore the output video from Git but not videos you import into src/.
 out
 
-# Pipeline: downloaded whisper models, per-job artifacts, staged job assets
+# Pipeline: downloaded whisper models, per-job artifacts, staged job/template assets
 models
 artifacts
 public/jobs
+public/formats
 
 # Format-authoring: downloaded reference clips, sampled frames, drafts
 # (root-anchored — src/backend/authoring/ and src/app/authoring/ are source code)

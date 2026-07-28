@@ -4,6 +4,17 @@
 
 Last updated: 2026-07-24
 
+> **2026-07-28 update:** the `cinematic-debut-manifesto` ("Kumar") format got a full
+> pipeline-parity pass — checked-in template plates (`formats/assets/<id>/`) replace per-job
+> generated backdrops, a tiered `generate/modelShots.ts` provider composites real identity
+> photos onto those plates (Gemini only for shots no photo can cover), `backgroundReplace.ts`
+> gained subject auto-framing + relight calibration, captions got a deterministic
+> `alignToScript` pass plus a real keyword-title system, music got fades/ducking/a default
+> template bed, and `gates.ts` is now wired into every render (`--only render` too) instead of
+> being dead code. The "6-stage pipeline" description below is out of date — see the README's
+> own stage diagram for the current shape (`intake → generate → transcribe/split →
+> trim → backgroundReplace → roles → assemble → render → gates`).
+
 ---
 
 ## The one-paragraph thesis

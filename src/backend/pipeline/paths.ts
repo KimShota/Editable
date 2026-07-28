@@ -13,6 +13,11 @@ export const formatsDir = path.join(repoRoot, "formats");
  *  loader.ts's listFormats() treats every *.json directly in formatsDir as
  *  a Format to enumerate on the templates page. */
 export const formatStylesDir = path.join(formatsDir, "styles");
+/** Where a format's checked-in template plates (backdrop images, desk
+ *  foreground mask, music bed) live — one subdirectory per format id,
+ *  same "subdirectory, not formatsDir itself" reasoning as formatStylesDir. */
+export const formatAssetsDir = (formatId: string): string =>
+  path.join(formatsDir, "assets", formatId);
 export const publicDir = path.join(repoRoot, "public");
 export const outDir = path.join(repoRoot, "out");
 export const modelsDir = path.join(repoRoot, "models");

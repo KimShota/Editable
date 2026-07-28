@@ -1,33 +1,45 @@
 import { FilledFormat, Transcript } from "./types";
 import { pickCorrector, ResolverChoice } from "./resolvers";
+import { alignToScript } from "./alignToScript";
 
 /**
- * Module 3b — Transcript correction (optional, runs right after transcribe).
+ * Module 3b — Transcript correction (runs right after transcribe).
  *
- * whisper.cpp's base.en model reliably mishears proper nouns and domain
- * terms it has no reason to expect ("Claude" → "clot"/"cloud", "5 secret
- * codes" → "5 secret cloak coats"). Since the hook title, every code's
- * captured name, and every burned-in caption all derive from this one
- * transcript, one bad word here fans out across the whole video.
+ * Two passes, in order:
  *
- * A lightweight LLM pass fixes this cheaply: each block's words go to the
- * model indexed, alongside the job's `lexicon` (the vocabulary this
- * specific video's creator knows it will use — the format itself is
- * reused across niches/tools, so this is job content, not format
- * structure), and the model returns ONLY the indices it's confident were
- * mistranscribed. Corrections are strict 1:1 word swaps — never
- * merges/splits/reorders — so every timestamp downstream stays exactly as
- * whisper produced it; only `text` changes.
+ * 1. alignToScript.ts — deterministic, no LLM, always runs when the job
+ *    has a script.json (the resources wizard's "Write your lines" step):
+ *    aligns whisper's words against the user's own typed line and swaps
+ *    in the script's spelling wherever the two clearly refer to the same
+ *    word (e.g. a mistranscribed name). Ground truth the pipeline already
+ *    has, at zero marginal cost.
  *
- * Jobs without a `lexicon`, or a run with no resolver available, skip
- * this pass entirely and return the transcript unchanged — it's pure
- * upside when configured, never a hard dependency.
+ * 2. The LLM lexicon pass below (optional, needs `lexicon` + a resolver):
+ *    whisper.cpp's base.en model reliably mishears proper nouns and
+ *    domain terms it has no reason to expect ("Claude" → "clot"/"cloud",
+ *    "5 secret codes" → "5 secret cloak coats"). Since the hook title,
+ *    every code's captured name, and every burned-in caption all derive
+ *    from this one transcript, one bad word here fans out across the
+ *    whole video.
+ *
+ *    Each block's words go to the model indexed, alongside the job's
+ *    `lexicon` (the vocabulary this specific video's creator knows it
+ *    will use — the format itself is reused across niches/tools, so this
+ *    is job content, not format structure), and the model returns ONLY
+ *    the indices it's confident were mistranscribed. Corrections are
+ *    strict 1:1 word swaps — never merges/splits/reorders — so every
+ *    timestamp downstream stays exactly as whisper produced it; only
+ *    `text` changes. Jobs without a `lexicon`, or a run with no resolver
+ *    available, skip this pass — it's pure upside when configured, never
+ *    a hard dependency.
  */
 export const correctTranscript = async (
   filled: FilledFormat,
-  transcript: Transcript,
+  rawTranscript: Transcript,
   choice: ResolverChoice = "auto",
 ): Promise<Transcript> => {
+  const transcript = alignToScript(filled.jobDir, rawTranscript);
+
   const lexicon = filled.lexicon ?? [];
   if (lexicon.length === 0) return transcript;
 

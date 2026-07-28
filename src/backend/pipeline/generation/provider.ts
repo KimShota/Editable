@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { StyleProfile } from "../types";
+import { PoseTag, StyleProfile, SubShotSpec } from "../types";
 
 /**
  * The `generate` stage's provider contract — one generated insert in, one
@@ -10,14 +10,22 @@ import { StyleProfile } from "../types";
  * schemas.ts's GenerationSpecSchema doc comment).
  */
 export type GenerationRequest = {
+  /** Which format this request is for — modelShots.ts needs this to load
+   *  the format's own checked-in template plates (formats/assets/<id>/). */
+  formatId: string;
   /** Absolute paths to the job's identity reference photos. */
   identityImages: string[];
+  /** Same length/order as identityImages — modelShots.ts's poseTag
+   *  selection reads this; providers that don't use pose tags ignore it. */
+  identityPoseTags: PoseTag[];
   styleProfile: StyleProfile;
-  /** cutaway | montage — see schemas.ts's GenerationSpecSchema. A provider
-   *  compositing a real subject onto a synthesized backdrop (rather than
-   *  asking a model to invent one) can use this for framing decisions,
-   *  e.g. crushing a montage toward silhouette. */
-  kind: "cutaway" | "montage";
+  /** cutaway | montage (legacy, gemini.ts/higgsfield.ts) | plateStill |
+   *  detailStill | montageReel | triptych (generation/modelShots.ts) —
+   *  see schemas.ts's GenerationSpecSchema. A provider compositing a real
+   *  subject onto a synthesized backdrop (rather than asking a model to
+   *  invent one) can use this for framing decisions, e.g. crushing a
+   *  montage toward silhouette. */
+  kind: "cutaway" | "montage" | "plateStill" | "detailStill" | "montageReel" | "triptych";
   /** Plain-language shot description from the slot's GenerationSpec. */
   shot: string;
   durationSec: number;
@@ -26,6 +34,12 @@ export type GenerationRequest = {
   width: number;
   height: number;
   fps: number;
+  /** plateStill only. */
+  plate?: string;
+  treatment?: "lit" | "silhouette";
+  poseTag?: PoseTag;
+  /** montageReel/triptych only. */
+  subShots?: SubShotSpec[];
   /** Where the provider must write the resulting MP4. */
   outPath: string;
 };

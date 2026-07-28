@@ -141,10 +141,13 @@ export const intake = (jobDir: string): FilledFormat => {
   // In single-take mode, a voice block's own clip slot is DERIVED from
   // speakingTakeSlot (see the derivation below) rather than filled
   // directly — same "not a manifest error to be absent" treatment as a
-  // generated slot, just for a different reason.
+  // generated slot, just for a different reason. `optional` blocks are
+  // excluded: they're filmed as their own standalone clip (see
+  // BlockSchema's doc comment), so their slot is filled the ordinary way
+  // (or left unbound) rather than overwritten with the shared take.
   const derivedFromTake = new Set(
     format.speakingTakeSlot
-      ? format.blocks.filter((b) => b.kind === "voice").map((b) => b.videoSlot)
+      ? format.blocks.filter((b) => b.kind === "voice" && !b.optional).map((b) => b.videoSlot)
       : [],
   );
 

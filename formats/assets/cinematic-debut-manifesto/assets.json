@@ -1,0 +1,64 @@
+{
+  "formatId": "cinematic-debut-manifesto",
+  "plates": {
+    "office-dark": {
+      "file": "office-dark.png",
+      "sha256": "e8d66cd12eb48e3fac6fa503d2fa6b7b3da5d81cd50fc4cc65a5c330ae0a09e5",
+      "width": 768,
+      "height": 1376,
+      "lumaStats": {
+        "mean": 27.727135416666666,
+        "p5": 0,
+        "p50": 18,
+        "p90": 62,
+        "p95": 81
+      }
+    },
+    "studio-cyc": {
+      "file": "studio-cyc.png",
+      "sha256": "cc47a87b5daf986d98f155c19f9731c7e7c1a83adeac2a9edf6240064d7035ef",
+      "width": 704,
+      "height": 1527,
+      "lumaStats": {
+        "mean": 219.34019097222222,
+        "p5": 213,
+        "p50": 220,
+        "p90": 223,
+        "p95": 223
+      }
+    },
+    "sofa": {
+      "file": "sofa.png",
+      "sha256": "eb9cf32b8436455084d414e76844657b40403eb2774396a636bc91631e2b4e7c",
+      "width": 704,
+      "height": 1527,
+      "lumaStats": {
+        "mean": 81.80463541666667,
+        "p5": 1,
+        "p50": 62,
+        "p90": 168,
+        "p95": 172
+      }
+    }
+  },
+  "deskForeground": "office-desk-foreground.png",
+  "deskEdgeFrac": 0.63,
+  "reference": {
+    "talkingHead": {
+      "headTopFrac": 0.29,
+      "headHeightFrac": 0.145,
+      "lumaP50": 14,
+      "lumaP95": 76
+    },
+    "endCard": {
+      "subjectTopFrac": 0.245,
+      "subjectHeightFrac": 0.52,
+      "lumaP50": 18,
+      "lumaP95": 130
+    }
+  },
+  "musicBed": {
+    "file": "music-bed.mp3",
+    "durationSec": 8.12
+  }
+}

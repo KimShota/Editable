@@ -65,6 +65,19 @@ export const resizeCover = (inputPath: string, width: number, height: number, ou
   ]);
 };
 
+/** Same cover-fit as resizeCover, but forces an alpha plane through the
+ *  filter chain explicitly — used for RGBA overlay assets (e.g. the
+ *  desk-foreground mask) where a bare scale/crop's alpha handling
+ *  shouldn't be left to chance. */
+export const resizeCoverRGBA = (inputPath: string, width: number, height: number, outPath: string): void => {
+  execFileSync("ffmpeg", [
+    "-y", "-v", "error",
+    "-i", inputPath,
+    "-vf", `format=rgba,scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`,
+    outPath,
+  ]);
+};
+
 /**
  * The silhouette crush curve, solved against the reference reel's own
  * measured pixel values (authoring/draft-baf87683's LIGHT-BG shots):
@@ -173,38 +186,63 @@ export const compositeOnBackdrop = (opts: {
   outPath: string;
   silhouette?: boolean;
   darken?: number;
+  /** RGBA image composited LAST, on top of the subject — same
+   *  desk-foreground idea as compositeVideoOnBackdrop, sized separately
+   *  since a still's own backdrop may not be the format's canvas size. */
+  foregroundPath?: string;
+  subjectFilter?: string;
+  subjectTransform?: SubjectTransform;
+  /** Invoked with mattePersonToFile's own matte-in/matte-out directories
+   *  (each containing exactly one same-named file) once the subject is
+   *  matted — subjectFit.ts/relight.ts's measurement functions work
+   *  unmodified against a single-file directory, so this is the same
+   *  `calibrate` shape compositeVideoOnBackdrop uses, just handed a
+   *  one-frame "sequence". */
+  calibrate?: (matteInDir: string, matteOutDir: string) => { subjectFilter?: string; subjectTransform?: SubjectTransform };
 }): void => {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-matte-"));
   try {
     const mask = mattePersonToFile(opts.subjectImagePath, workDir);
+    const calibrated = opts.calibrate?.(path.join(workDir, "matte-in"), path.join(workDir, "matte-out"));
+    const subjectFilter = calibrated?.subjectFilter ?? opts.subjectFilter;
+    const transform = calibrated?.subjectTransform ?? opts.subjectTransform ?? IDENTITY_TRANSFORM;
+    const scale = transform.scale;
+    const scaleFilter = scale !== 1 ? `scale=iw*${scale}:ih*${scale}` : undefined;
 
     const cutout = path.join(workDir, "cutout.png");
-    execFileSync("ffmpeg", [
-      "-y", "-v", "error",
-      "-i", opts.subjectImagePath,
-      "-i", mask,
-      "-filter_complex", "[0][1]alphamerge",
-      cutout,
-    ]);
+    const cutoutFilter = ["[0][1]alphamerge", crushSubjectFilter(opts, subjectFilter), scaleFilter]
+      .filter(Boolean)
+      .join(",");
+    execFileSync("ffmpeg", ["-y", "-v", "error", "-i", opts.subjectImagePath, "-i", mask, "-filter_complex", cutoutFilter, cutout]);
 
     const shadow = path.join(workDir, "shadow.png");
-    execFileSync("ffmpeg", ["-y", "-v", "error", "-i", mask, "-filter_complex", SHADOW_FROM_MASK, "-frames:v", "1", shadow]);
+    const shadowFilter = [SHADOW_FROM_MASK, scaleFilter].filter(Boolean).join(",");
+    execFileSync("ffmpeg", ["-y", "-v", "error", "-i", mask, "-filter_complex", shadowFilter, "-frames:v", "1", shadow]);
 
-    const crushFilter = opts.silhouette ? SILHOUETTE_CRUSH : opts.darken ? darkenFilter(opts.darken) : undefined;
-    const subjectLayer = crushFilter
-      ? (() => {
-          const darkened = path.join(workDir, "cutout-dark.png");
-          execFileSync("ffmpeg", ["-y", "-v", "error", "-i", cutout, "-vf", crushFilter, darkened]);
-          return darkened;
-        })()
-      : cutout;
+    let foregroundSized: string | undefined;
+    if (opts.foregroundPath) {
+      const { width, height } = probeImageSize(opts.backdropPath);
+      foregroundSized = path.join(workDir, "foreground.png");
+      resizeCoverRGBA(opts.foregroundPath, width, height, foregroundSized);
+    }
+
+    const shadowX = Math.round(36 * scale) + transform.xOffsetPx;
+    const shadowY = Math.round(56 * scale) + transform.yOffsetPx;
+
+    const inputs = ["-i", opts.backdropPath, "-i", shadow, "-i", cutout];
+    const filterParts = [`[0][1]overlay=${shadowX}:${shadowY}[bg_shadow]`];
+    if (foregroundSized) {
+      inputs.push("-i", foregroundSized);
+      filterParts.push(`[bg_shadow][2]overlay=${transform.xOffsetPx}:${transform.yOffsetPx}[bg_subject]`);
+      filterParts.push("[bg_subject][3]overlay=0:0[out]");
+    } else {
+      filterParts.push(`[bg_shadow][2]overlay=${transform.xOffsetPx}:${transform.yOffsetPx}[out]`);
+    }
 
     execFileSync("ffmpeg", [
       "-y", "-v", "error",
-      "-i", opts.backdropPath,
-      "-i", shadow,
-      "-i", subjectLayer,
-      "-filter_complex", "[0][1]overlay=36:56[bg_shadow];[bg_shadow][2]overlay=0:0[out]",
+      ...inputs,
+      "-filter_complex", filterParts.join(";"),
       "-map", "[out]",
       "-frames:v", "1",
       opts.outPath,
@@ -212,6 +250,26 @@ export const compositeOnBackdrop = (opts: {
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
+};
+
+const crushSubjectFilter = (
+  opts: { silhouette?: boolean; darken?: number },
+  subjectFilter: string | undefined,
+): string | undefined => {
+  const crushFilter = opts.silhouette ? SILHOUETTE_CRUSH : opts.darken ? darkenFilter(opts.darken) : undefined;
+  return [crushFilter, subjectFilter].filter(Boolean).join(",") || undefined;
+};
+
+const probeImageSize = (imagePath: string): { width: number; height: number } => {
+  const out = execFileSync("ffprobe", [
+    "-v", "error",
+    "-select_streams", "v:0",
+    "-show_entries", "stream=width,height",
+    "-of", "csv=p=0:s=x",
+    imagePath,
+  ]).toString().trim();
+  const [width, height] = out.split("x").map(Number);
+  return { width, height };
 };
 
 /**
@@ -223,6 +281,10 @@ export const compositeOnBackdrop = (opts: {
  * ffmpeg applies filters per-frame natively, so there's no need for (and
  * no per-frame cost from) invoking it once per frame.
  */
+export type SubjectTransform = { scale: number; xOffsetPx: number; yOffsetPx: number };
+
+const IDENTITY_TRANSFORM: SubjectTransform = { scale: 1, xOffsetPx: 0, yOffsetPx: 0 };
+
 export const compositeVideoOnBackdrop = (opts: {
   subjectVideoPath: string;
   backdropPath: string;
@@ -232,6 +294,22 @@ export const compositeVideoOnBackdrop = (opts: {
   fps: number;
   silhouette?: boolean;
   darken?: number;
+  /** RGBA image, composited LAST (on top of the subject) after being
+   *  cover-fit to (width, height) — e.g. a desk-foreground strip the
+   *  subject should appear to sit behind. */
+  foregroundPath?: string;
+  /** Extra ffmpeg filter applied to the cutout only, right after
+   *  alphamerge (e.g. relight.ts's calibrated tone curve). */
+  subjectFilter?: string;
+  /** Uniform scale + pixel offset applied to both the cutout and its
+   *  shadow (e.g. subjectFit.ts's auto-framing). Identity if omitted. */
+  subjectTransform?: SubjectTransform;
+  /** Invoked once frames/masks are extracted (still temp-dir-scoped) and
+   *  before the final composite runs, so a caller can measure the subject
+   *  (bbox, luma) and derive subjectFilter/subjectTransform without a
+   *  separate extraction pass of its own. Overrides the two options above
+   *  when it returns a value for either. */
+  calibrate?: (framesDir: string, masksDir: string) => { subjectFilter?: string; subjectTransform?: SubjectTransform };
 }): void => {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-matte-video-"));
   try {
@@ -250,28 +328,77 @@ export const compositeVideoOnBackdrop = (opts: {
     const masksDir = path.join(workDir, "masks");
     matteFramesBatch(framesDir, masksDir);
 
+    const calibrated = opts.calibrate?.(framesDir, masksDir);
+    const subjectFilter = calibrated?.subjectFilter ?? opts.subjectFilter;
+    const transform = calibrated?.subjectTransform ?? opts.subjectTransform ?? IDENTITY_TRANSFORM;
+
     const backdropSized = path.join(workDir, "backdrop.png");
     resizeCover(opts.backdropPath, opts.width, opts.height, backdropSized);
 
-    const crushFilter = opts.silhouette ? SILHOUETTE_CRUSH : opts.darken ? darkenFilter(opts.darken) : undefined;
-    const cutoutFilter = crushFilter ? `[1][2]alphamerge,${crushFilter}[cutout]` : "[1][2]alphamerge[cutout]";
-    const filterComplex = [
-      cutoutFilter,
-      `[2]${SHADOW_FROM_MASK}[shadow]`,
-      "[0][shadow]overlay=36:56[bg_shadow]",
-      "[bg_shadow][cutout]overlay=0:0[out]",
-    ].join(";");
+    let foregroundSized: string | undefined;
+    if (opts.foregroundPath) {
+      foregroundSized = path.join(workDir, "foreground.png");
+      resizeCoverRGBA(opts.foregroundPath, opts.width, opts.height, foregroundSized);
+    }
 
-    execFileSync("ffmpeg", [
-      "-y", "-v", "error",
-      "-loop", "1", "-i", backdropSized,
+    // Scaling the cutout+shadow uniformly keeps their existing cover-crop
+    // framing intact, just resized — so scaling to fit the reference's own
+    // head size doesn't distort or re-crop the subject. Even dimensions:
+    // libx264 (and several ffmpeg scale paths) reject odd width/height.
+    const scale = transform.scale;
+    const scaledW = Math.max(2, Math.round((opts.width * scale) / 2) * 2);
+    const scaledH = Math.max(2, Math.round((opts.height * scale) / 2) * 2);
+    const scaleFilter = scale !== 1 ? `,scale=${scaledW}:${scaledH}` : "";
+    // The shadow's own displacement (36,56 at scale 1 — see SHADOW_FROM_MASK
+    // callers) scales with the subject so it stays proportionally offset
+    // rather than drifting away from a shrunk/grown subject.
+    const shadowX = Math.round(36 * scale) + transform.xOffsetPx;
+    const shadowY = Math.round(56 * scale) + transform.yOffsetPx;
+
+    const crushFilter = opts.silhouette ? SILHOUETTE_CRUSH : opts.darken ? darkenFilter(opts.darken) : undefined;
+    const postAlphaFilter = [crushFilter, subjectFilter].filter(Boolean).join(",");
+    const cutoutFilter = postAlphaFilter
+      ? `[1][2]alphamerge,${postAlphaFilter}${scaleFilter}[cutout]`
+      : `[1][2]alphamerge${scaleFilter}[cutout]`;
+
+    const inputArgs = [
+      "-framerate", String(opts.fps), "-loop", "1", "-i", backdropSized,
       "-framerate", String(opts.fps), "-i", path.join(framesDir, "f%05d.png"),
       "-framerate", String(opts.fps), "-i", path.join(masksDir, "f%05d.png"),
       "-i", opts.subjectVideoPath,
+    ];
+    const filterParts = [
+      cutoutFilter,
+      `[2]${SHADOW_FROM_MASK}${scaleFilter}[shadow]`,
+      `[0][shadow]overlay=${shadowX}:${shadowY}[bg_shadow]`,
+    ];
+    if (foregroundSized) {
+      // Input 4, appended after subjectVideoPath (input 3) so "-map 3:a?"
+      // below keeps addressing the subject's own audio regardless.
+      inputArgs.push("-framerate", String(opts.fps), "-loop", "1", "-i", foregroundSized);
+      filterParts.push(`[bg_shadow][cutout]overlay=${transform.xOffsetPx}:${transform.yOffsetPx}[bg_subject]`);
+      filterParts.push(`[bg_subject][4]overlay=0:0,fps=${opts.fps}[out]`);
+    } else {
+      filterParts.push(`[bg_shadow][cutout]overlay=${transform.xOffsetPx}:${transform.yOffsetPx},fps=${opts.fps}[out]`);
+    }
+    const filterComplex = filterParts.join(";");
+
+    // `-loop 1 -i backdropSized` is input 0 and (via the first `overlay`)
+    // the timebase donor for the whole filtergraph. Without an explicit
+    // `-framerate` here ffmpeg defaults a looped still to 25fps — silently
+    // resampling every 30fps subject frame onto a 25fps grid and back up
+    // to 30fps at output, which shows up as duplicate frames (measured:
+    // 17% of frames on a 30fps take). `fps=` at the end of the filtergraph
+    // and `-r` on the output are belt-and-braces against the same failure
+    // mode recurring if the graph is ever reordered.
+    execFileSync("ffmpeg", [
+      "-y", "-v", "error",
+      ...inputArgs,
       "-filter_complex", filterComplex,
       "-map", "[out]",
       "-map", "3:a?",
       "-c:v", "libx264", "-pix_fmt", "yuv420p",
+      "-r", String(opts.fps),
       "-c:a", "aac",
       "-shortest",
       opts.outPath,
