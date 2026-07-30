@@ -210,18 +210,94 @@ export const generateVignetteBackdrop = (width: number, height: number, outPath:
  * own subject isn't necessarily centered the same way, e.g. the sofa
  * shot) don't call this.
  */
+/** The falloff multiplier expression itself, shared between
+ *  applyLateralFalloff (the flattened bg composite, RGB-only, opaque
+ *  frame) and compositeSubjectAlphaVideo's fg layer (RGBA, alpha
+ *  untouched) — factored out so the two layers apply IDENTICAL darkening
+ *  rather than each computing their own copy of the same formula, which
+ *  is exactly the kind of drift that left the fg layer's own desk strip
+ *  ~1.7x brighter than the bg layer's (see compositeSubjectAlphaVideo's
+ *  own doc comment). */
+export const lateralFalloffExpr = (opts: { minFactor: number; power: number }): string =>
+  `(1-(1-${opts.minFactor})*pow(abs(X/W-0.5)*2\\,${opts.power}))`;
+
 export const applyLateralFalloff = (
   inputPath: string,
   outputPath: string,
   opts: { minFactor: number; power: number },
 ): void => {
-  const factorExpr = `(1-(1-${opts.minFactor})*pow(abs(X/W-0.5)*2\\,${opts.power}))`;
+  const factorExpr = lateralFalloffExpr(opts);
   execFileSync("ffmpeg", [
     "-y", "-v", "error",
     "-i", inputPath,
     "-vf", `geq=r='r(X\\,Y)*${factorExpr}':g='g(X\\,Y)*${factorExpr}':b='b(X\\,Y)*${factorExpr}'`,
     "-c:a", "copy",
     outputPath,
+  ]);
+};
+
+/** Extracts every frame of `videoPath` at (width, height, fps), cover-fit
+ *  to canvas — the shared chain compositeVideoOnBackdrop,
+ *  compositeSubjectAlphaVideo, and pipeline/matte.ts's own stage all use
+ *  identically, factored into one place so mask/frame alignment can't
+ *  silently drift between call sites (previously duplicated verbatim at
+ *  two call sites in this file). */
+export const extractCanvasFrames = (
+  videoPath: string,
+  framesDir: string,
+  opts: { width: number; height: number; fps: number },
+): void => {
+  execFileSync("ffmpeg", [
+    "-y", "-v", "error",
+    "-i", videoPath,
+    "-vf", `fps=${opts.fps},scale=${opts.width}:${opts.height}:force_original_aspect_ratio=increase,crop=${opts.width}:${opts.height}`,
+    path.join(framesDir, "f%05d.png"),
+  ]);
+};
+
+const CHECKERBOARD_TILE_PX = 40;
+
+/** A flat gray checkerboard still, canvas-sized — the neutral backdrop for
+ *  inspecting a matte's own quality in isolation (pipeline/matte.ts's
+ *  preview, and the Phase 1 proof CLI before it), independent of any real
+ *  plate/relight/grain so matte quality alone is what's on screen. */
+export const generateCheckerboard = (width: number, height: number, outPath: string): void => {
+  const pattern = `if(mod(floor(X/${CHECKERBOARD_TILE_PX})+floor(Y/${CHECKERBOARD_TILE_PX})\\,2)\\,220\\,60)`;
+  execFileSync("ffmpeg", [
+    "-y", "-v", "error",
+    "-f", "lavfi", "-i", `color=c=gray:s=${width}x${height}`,
+    "-vf", `geq=r='${pattern}':g='${pattern}':b='${pattern}'`,
+    "-frames:v", "1",
+    outPath,
+  ]);
+};
+
+/** Overlays a matted frame/mask sequence over a checkerboard — the "is
+ *  this matte any good" visual, with no backdrop/relight/desk-fg to
+ *  confuse what's being inspected. `frameCount` bounds the encode (see
+ *  compositeSubjectAlphaVideo's own doc comment on why `-loop 1` inputs
+ *  need an explicit frame count). */
+export const buildCutoutPreview = (
+  framesDir: string,
+  masksDir: string,
+  frameCount: number,
+  width: number,
+  height: number,
+  fps: number,
+  outPath: string,
+): void => {
+  const checkerPath = path.join(path.dirname(outPath), "checkerboard.png");
+  generateCheckerboard(width, height, checkerPath);
+  execFileSync("ffmpeg", [
+    "-y", "-v", "error",
+    "-framerate", String(fps), "-loop", "1", "-i", checkerPath,
+    "-framerate", String(fps), "-i", path.join(framesDir, "f%05d.png"),
+    "-framerate", String(fps), "-i", path.join(masksDir, "f%05d.png"),
+    "-filter_complex", `[1][2]alphamerge[cutout];[0][cutout]overlay=0:0,fps=${fps}[out]`,
+    "-map", "[out]",
+    "-frames:v", String(frameCount),
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", String(fps),
+    outPath,
   ]);
 };
 
@@ -400,6 +476,16 @@ export const compositeVideoOnBackdrop = (opts: {
    *  post-falloff grain step, solved against the actual final encode via
    *  officeCompositeQC.ts's solveGrainStrengthOnVideo.) */
   calibrate?: (framesDir: string, masksDir: string) => { subjectFilter?: string; subjectTransform?: SubjectTransform; backdropFilter?: string };
+  /** Pre-matted masks (e.g. pipeline/matte.ts's own RVM/Vision-fallback
+   *  run, persisted per block) — when given, frames are still
+   *  re-extracted from `subjectVideoPath` (same canvas chain, so
+   *  alignment is deterministic) but matteFramesBatch is skipped
+   *  entirely, and this masksDir is used as-is. Extracted frame count is
+   *  asserted against the precomputed masks' own count — a mismatch
+   *  means the persisted subclip changed out from under the matte stage's
+   *  masks, which should never happen but is checked rather than silently
+   *  misaligning frames and masks. */
+  precomputedMasksDir?: string;
 }): void => {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-matte-video-"));
   try {
@@ -408,15 +494,22 @@ export const compositeVideoOnBackdrop = (opts: {
     // Scale+crop baked into the SAME extraction pass — every frame lands
     // pre-sized to the backdrop's canvas, so nothing downstream needs to
     // resize per-frame.
-    execFileSync("ffmpeg", [
-      "-y", "-v", "error",
-      "-i", opts.subjectVideoPath,
-      "-vf", `fps=${opts.fps},scale=${opts.width}:${opts.height}:force_original_aspect_ratio=increase,crop=${opts.width}:${opts.height}`,
-      path.join(framesDir, "f%05d.png"),
-    ]);
+    extractCanvasFrames(opts.subjectVideoPath, framesDir, { width: opts.width, height: opts.height, fps: opts.fps });
 
-    const masksDir = path.join(workDir, "masks");
-    matteFramesBatch(framesDir, masksDir);
+    let masksDir: string;
+    if (opts.precomputedMasksDir) {
+      masksDir = opts.precomputedMasksDir;
+      const frameCount = fs.readdirSync(framesDir).filter((f) => f.endsWith(".png")).length;
+      const maskCount = fs.readdirSync(masksDir).filter((f) => f.endsWith(".png")).length;
+      if (frameCount !== maskCount) {
+        throw new Error(
+          `compositeVideoOnBackdrop: extracted ${frameCount} frames but precomputedMasksDir has ${maskCount} masks — matte stage output is out of sync with "${opts.subjectVideoPath}"`,
+        );
+      }
+    } else {
+      masksDir = path.join(workDir, "masks");
+      matteFramesBatch(framesDir, masksDir);
+    }
 
     const calibrated = opts.calibrate?.(framesDir, masksDir);
     const subjectFilter = calibrated?.subjectFilter ?? opts.subjectFilter;
@@ -486,6 +579,22 @@ export const compositeVideoOnBackdrop = (opts: {
     // 17% of frames on a 30fps take). `fps=` at the end of the filtergraph
     // and `-r` on the output are belt-and-braces against the same failure
     // mode recurring if the graph is ever reordered.
+    // `-frames:v`, not just `-shortest`: `-shortest` stops at whichever
+    // mapped stream ends first, but the subject's own audio track can run
+    // fractionally longer/shorter than the frame sequence after
+    // resampling — measured drift between this and the fg-alpha layer's
+    // own `-frames:v`-bounded encode (compositeSubjectAlphaVideo) was
+    // exactly this: 44 frames here vs 45 there for the same block.
+    // `-shortest` ALONGSIDE `-frames:v` still lets a fractionally-shorter
+    // audio track truncate the video below the intended count — measured
+    // directly: adding `-frames:v` without removing `-shortest` first
+    // still produced the SAME 44-vs-45 mismatch, since `-shortest` won
+    // the race. Dropped entirely: video length is now solely `-frames:v`,
+    // matching the fg-alpha layer's own encode exactly; audio simply ends
+    // wherever the source audio naturally does (typically within a frame
+    // or two of the video either way, since both come from the same
+    // subclip).
+    const videoFrameCount = fs.readdirSync(framesDir).filter((f) => f.endsWith(".png")).length;
     execFileSync("ffmpeg", [
       "-y", "-v", "error",
       ...inputArgs,
@@ -494,8 +603,8 @@ export const compositeVideoOnBackdrop = (opts: {
       "-map", "3:a?",
       "-c:v", "libx264", "-pix_fmt", "yuv420p",
       "-r", String(opts.fps),
+      "-frames:v", String(videoFrameCount),
       "-c:a", "aac",
-      "-shortest",
       opts.outPath,
     ]);
   } finally {
@@ -560,20 +669,47 @@ export const compositeSubjectAlphaVideo = (opts: {
   subjectFilter?: string;
   subjectTransform?: SubjectTransform;
   calibrate?: (framesDir: string, masksDir: string) => { subjectFilter?: string; subjectTransform?: SubjectTransform };
+  /** Same precomputed-masks contract as compositeVideoOnBackdrop — see
+   *  its own doc comment. Passing the SAME masksDir the flattened
+   *  composite used is what makes the two layers matte-consistent by
+   *  construction rather than by hoping two separate Vision/RVM runs
+   *  agree. */
+  precomputedMasksDir?: string;
+  /** Applies the flattened composite's own lateral-darkening formula to
+   *  this layer's cutout AND foreground — RGB only, alpha passed through
+   *  unchanged — so the desk strip/subject read the same brightness in
+   *  both layers. Without this, the fg layer (which skipped
+   *  applyLateralFalloff entirely) measured its own desk strip ~1.7x
+   *  brighter than the bg layer's at the same pixel coordinates. */
+  edgeFalloff?: { minFactor: number; power: number };
+  /** Matches the bg layer's own post-composite grain pass — see
+   *  backgroundReplace.ts's solveGrainStrengthOnVideo call. Applied to
+   *  the LUMA plane only (format=yuva444p's y-plane) via `noise=c0s=..`,
+   *  never touching the alpha plane (c1-c3 left at strength 0) — verified
+   *  by extracting the alpha plane before/after and comparing byte-for-
+   *  byte (see this rework's own Phase 3 verification). */
+  grainStrength?: number;
 }): void => {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-matte-alpha-"));
   try {
     const framesDir = path.join(workDir, "frames");
     fs.mkdirSync(framesDir);
-    execFileSync("ffmpeg", [
-      "-y", "-v", "error",
-      "-i", opts.subjectVideoPath,
-      "-vf", `fps=${opts.fps},scale=${opts.width}:${opts.height}:force_original_aspect_ratio=increase,crop=${opts.width}:${opts.height}`,
-      path.join(framesDir, "f%05d.png"),
-    ]);
+    extractCanvasFrames(opts.subjectVideoPath, framesDir, { width: opts.width, height: opts.height, fps: opts.fps });
 
-    const masksDir = path.join(workDir, "masks");
-    matteFramesBatch(framesDir, masksDir);
+    let masksDir: string;
+    if (opts.precomputedMasksDir) {
+      masksDir = opts.precomputedMasksDir;
+      const frameCount = fs.readdirSync(framesDir).filter((f) => f.endsWith(".png")).length;
+      const maskCount = fs.readdirSync(masksDir).filter((f) => f.endsWith(".png")).length;
+      if (frameCount !== maskCount) {
+        throw new Error(
+          `compositeSubjectAlphaVideo: extracted ${frameCount} frames but precomputedMasksDir has ${maskCount} masks — matte stage output is out of sync with "${opts.subjectVideoPath}"`,
+        );
+      }
+    } else {
+      masksDir = path.join(workDir, "masks");
+      matteFramesBatch(framesDir, masksDir);
+    }
 
     const calibrated = opts.calibrate?.(framesDir, masksDir);
     const subjectFilter = calibrated?.subjectFilter ?? opts.subjectFilter;
@@ -583,6 +719,17 @@ export const compositeSubjectAlphaVideo = (opts: {
     if (opts.foregroundPath) {
       foregroundSized = path.join(workDir, "foreground.png");
       resizeCoverRGBA(opts.foregroundPath, opts.width, opts.height, foregroundSized);
+      if (opts.edgeFalloff) {
+        const falloffExpr = lateralFalloffExpr(opts.edgeFalloff);
+        const foregroundFalloff = path.join(workDir, "foreground-falloff.png");
+        execFileSync("ffmpeg", [
+          "-y", "-v", "error",
+          "-i", foregroundSized,
+          "-vf", `format=rgba,geq=r='r(X\\,Y)*${falloffExpr}':g='g(X\\,Y)*${falloffExpr}':b='b(X\\,Y)*${falloffExpr}':a='alpha(X\\,Y)'`,
+          foregroundFalloff,
+        ]);
+        foregroundSized = foregroundFalloff;
+      }
     }
 
     const transparentPath = path.join(workDir, "transparent.png");
@@ -594,7 +741,17 @@ export const compositeSubjectAlphaVideo = (opts: {
     const scaleFilter = scale !== 1 ? `,scale=${scaledW}:${scaledH}` : "";
 
     const crushFilter = opts.silhouette ? SILHOUETTE_CRUSH : opts.darken ? darkenFilter(opts.darken) : undefined;
-    const postAlphaFilter = [crushFilter, subjectFilter].filter(Boolean).join(",");
+    // edgeFalloff applies to the cutout's RGB with alpha passed through —
+    // same formula as applyLateralFalloff, just alpha-aware since this
+    // layer (unlike the flattened bg composite) is RGBA all the way
+    // through.
+    const falloffFilter = opts.edgeFalloff
+      ? (() => {
+          const e = lateralFalloffExpr(opts.edgeFalloff!);
+          return `format=rgba,geq=r='r(X\\,Y)*${e}':g='g(X\\,Y)*${e}':b='b(X\\,Y)*${e}':a='alpha(X\\,Y)'`;
+        })()
+      : undefined;
+    const postAlphaFilter = [crushFilter, subjectFilter, falloffFilter].filter(Boolean).join(",");
     const cutoutFilter = postAlphaFilter
       ? `[1][2]alphamerge,${postAlphaFilter}${scaleFilter}[cutout]`
       : `[1][2]alphamerge${scaleFilter}[cutout]`;
@@ -627,16 +784,43 @@ export const compositeSubjectAlphaVideo = (opts: {
     // enforces — the same technique provider.ts's animateStillToClip
     // already uses for its own single-video-stream output.
     const frameCount = fs.readdirSync(framesDir).filter((f) => f.endsWith(".png")).length;
-    execFileSync("ffmpeg", [
-      "-y", "-v", "error",
-      ...inputArgs,
-      "-filter_complex", filterParts.join(";"),
-      "-map", "[out]",
-      "-frames:v", String(frameCount),
-      "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le",
-      "-r", String(opts.fps),
-      opts.outPath,
-    ]);
+
+    // Grain: applied as a SEPARATE pass after the main composite (not
+    // folded into the filter_complex above) so it can run in yuva444p
+    // (needed for c0-only luma noise) without also having to re-derive
+    // the overlay/transform graph in that pixel format.
+    if (opts.grainStrength && opts.grainStrength > 0) {
+      const rawPath = path.join(workDir, "raw.mov");
+      execFileSync("ffmpeg", [
+        "-y", "-v", "error",
+        ...inputArgs,
+        "-filter_complex", filterParts.join(";"),
+        "-map", "[out]",
+        "-frames:v", String(frameCount),
+        "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le",
+        "-r", String(opts.fps),
+        rawPath,
+      ]);
+      execFileSync("ffmpeg", [
+        "-y", "-v", "error",
+        "-i", rawPath,
+        "-vf", `format=yuva444p,noise=c0s=${opts.grainStrength}:c0f=t+u,format=yuva444p10le`,
+        "-c:v", "prores_ks", "-profile:v", "4444",
+        "-frames:v", String(frameCount),
+        opts.outPath,
+      ]);
+    } else {
+      execFileSync("ffmpeg", [
+        "-y", "-v", "error",
+        ...inputArgs,
+        "-filter_complex", filterParts.join(";"),
+        "-map", "[out]",
+        "-frames:v", String(frameCount),
+        "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le",
+        "-r", String(opts.fps),
+        opts.outPath,
+      ]);
+    }
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }

@@ -8,6 +8,7 @@ import { transcribe } from "./transcribe";
 import { deriveTranscriptAndTrimWithStandalone, splitTake, SplitTakeResult } from "./splitTake";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
+import { runMatte } from "./matte";
 import { replaceBackgrounds } from "./backgroundReplace";
 import { resolveRoles } from "./resolveRoles";
 import { ResolverChoice } from "./resolvers";
@@ -15,7 +16,7 @@ import { assemble } from "./assemble";
 import { render, stageAssets } from "./render";
 import { runGates } from "./gates";
 import { artifactsDir } from "./paths";
-import { Edl, FilledFormat, Format, Transcript, TrimPoints } from "./types";
+import { Edl, FilledFormat, Format, MatteArtifact, Transcript, TrimPoints } from "./types";
 import { EdlSchema } from "./schemas";
 
 /**
@@ -129,6 +130,13 @@ export const buildJob = async (
     trims = await trim(format, filled, transcript, resolver);
   }
 
+  // Matte (video-native RVM, or Vision+temporal-median fallback — see
+  // matte.ts) runs against trims' PURE, take-relative spans, before
+  // backgroundReplace rebases anything — see matte.ts's own doc comment
+  // for why the two are separate stages.
+  const matteArtifact = await runMatte(format, filled, trims);
+  writeArtifact(jobId, "matte", matteArtifact);
+
   // Blocks flagged backgroundReplace/punchInTailSec (see schemas.ts's
   // BlockSchema doc comment) get their video processed here — after
   // trim/split settles each flagged block's own span, before
@@ -136,7 +144,7 @@ export const buildJob = async (
   // bindings/trims/transcript (a new standalone file per block starting
   // at 0, not a sub-span of the shared take — see backgroundReplace.ts's
   // doc comment on why the transcript has to be rebased too).
-  const replaced = await replaceBackgrounds(format, filled, trims, transcript);
+  const replaced = await replaceBackgrounds(format, filled, trims, transcript, matteArtifact);
   const finalFilled = replaced.filled;
   trims = replaced.trims;
   transcript = replaced.transcript;
@@ -188,7 +196,9 @@ export const renderJob = (jobId: string): string => {
   const edl: Edl = JSON.parse(fs.readFileSync(path.join(dir, "edl.json"), "utf8"));
   const outPath = render(edl, dir);
 
-  const gateResults = runGates(outPath, edl);
+  const matteFile = path.join(dir, "matte.json");
+  const matte: MatteArtifact | undefined = fs.existsSync(matteFile) ? JSON.parse(fs.readFileSync(matteFile, "utf8")) : undefined;
+  const gateResults = runGates(outPath, edl, matte);
   writeArtifact(jobId, "gates", gateResults);
   const failed = gateResults.filter((r) => r.pass === false);
   if (failed.length > 0) {

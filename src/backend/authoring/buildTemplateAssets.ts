@@ -53,6 +53,7 @@ type FormatAssetConfig = {
       faceLumaMean: number;
       edgeFalloff: { minFactor: number; power: number };
       faceP97Target: number;
+      faceEdgeRatioTarget: number;
       plateSharpnessRatioMid: number;
       grainStdTarget: number;
       roomWarmthTarget: number;
@@ -128,6 +129,13 @@ const FORMATS: FormatAssetConfig[] = [
         // per job/plate (never baked in) — see solvePlateBlurSigma/
         // solveGrainStrength/solveWarmthShift.
         faceP97Target: 116,
+        // Re-measured directly against the reference reel itself
+        // (generation/officeCompositeQC.ts's measureFrameEdgeLuma, MEDIAN
+        // over the same t=1.0-2.0s window as the framing measurements
+        // above — stable at edge luma 20 throughout): 116/20 = 5.8, close
+        // to office-composite rework's own independently-reported figure
+        // (6.0-6.2, likely eyeballed against a slightly different patch).
+        faceEdgeRatioTarget: 5.8,
         plateSharpnessRatioMid: 0.65,
         grainStdTarget: 3.4,
         roomWarmthTarget: 2.3,

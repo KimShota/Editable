@@ -38,17 +38,26 @@ writes an inspectable JSON artifact:
 
 ```
 format + user assets
-  → intake      (bind assets to named slots, validate)   artifacts/<job>/filled.json
+  → intake      (bind assets to named slots, validate —
+                 including a talking-head framing pre-check
+                 for backgroundReplace formats)          artifacts/<job>/filled.json
   → generate    (fill AI-generated slots — inserts, model shots)   artifacts/<job>/inserts.json
   → transcribe  (whisper.cpp word timestamps; single-take
                  formats use split instead — one whisper pass
                  over the shared take, sliced per block)   artifacts/<job>/transcript.json
   → trim        (cut dead air; trim first, then time;
                  alignToScript + optional LLM lexicon pass
-                 correct the transcript against script.json)  artifacts/<job>/trim.json
-  → backgroundReplace  (single-take formats only: composite
-                 flagged blocks onto the format's own
-                 checked-in plates — formats/assets/<id>/)  rewrites transcript.json/trim.json
+                 correct the transcript against script.json —
+                 writes PURE, take-relative spans)         artifacts/<job>/trim.json
+  → matte       (single-take formats only: mattes each
+                 backgroundReplace block — RVM if available,
+                 else Vision + temporal median — as its own
+                 isolated, inspectable stage; persists masks
+                 + an alpha-over-checkerboard preview)      artifacts/<job>/matte.json
+  → composite   (single-take formats only: composites flagged
+                 blocks onto the format's own checked-in
+                 plates — formats/assets/<id>/ — consuming
+                 matte's masks, never re-matting)           rewrites transcript.json/trim.json
   → roles       (LLM finds format-defined moments)       artifacts/<job>/roles.json
   → assemble    (master timeline: the EDL)               artifacts/<job>/edl.json
   → render      (Remotion → MP4, then acceptance gates
@@ -66,6 +75,13 @@ npm install
 brew install ffmpeg whisper-cpp
 curl -L -o models/ggml-base.en.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+
+# RVM (video-native matting for backgroundReplace formats) — optional:
+# falls back to Apple Vision + temporal median if the model file is
+# missing, so this step can be skipped, at a real cost to hair-edge
+# stability (see src/backend/pipeline/generation/rvm.ts).
+curl -L -o models/rvm_mobilenetv3_fp32.onnx \
+  https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx
 ```
 
 ### Run it
@@ -74,15 +90,29 @@ curl -L -o models/ggml-base.en.bin \
 npm run pipeline -- --job jobs/demo
 ```
 
+To inspect a matte on its own before running the full pipeline (useful
+when tuning a new format's own plates/framing target):
+
+```bash
+npm run matte:proof -- --video <take.mov> [--in <sec>] [--out <sec>] \
+  [--engine rvm|vision|both] [--downsample <ratio>]
+```
+
 Flags:
 
 - `--only <stage>` — re-run a single stage against the artifacts on disk
-  (`intake | generate | transcribe | trim | roles | assemble | render`).
+  (`intake | generate | transcribe | trim | matte | composite | roles |
+  assemble | render`).
   Note: `--only assemble`/`--only roles`/etc. read `filled.json` (pure
   intake output) from disk rather than re-deriving it, so a single-take
   format's backgroundReplace-composited clips only carry through within
   ONE full (no `--only`) invocation — re-run the whole pipeline, not a
-  later stage alone, after changing anything upstream of `trim`.
+  later stage alone, after changing anything upstream of `trim`. Likewise,
+  `--only composite` reads `trim.json` as pure/take-relative and rebases
+  it in place — running `--only composite` a SECOND time without an
+  intervening `--only trim` re-rebases an already-rebased `trim.json`;
+  always re-run from `--only trim` forward rather than repeating
+  `--only composite` alone.
 - `--generator <name>` — insert/model-shot generation provider:
   `model-shots` (default in `auto`) — deterministic photo-on-plate
   composites plus Gemini for shots no photo can cover, `gemini`,

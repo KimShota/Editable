@@ -6,7 +6,7 @@ import path from "node:path";
 import { probeFile } from "./intake";
 import { applyLateralFalloff, compositeSubjectAlphaVideo, compositeVideoOnBackdrop, generateVignetteBackdrop, resizeCover, SubjectTransform } from "./generation/matte";
 import { deskForegroundPath, loadPlatesManifest, platePath } from "./generation/plates";
-import { measureSubjectBBox, measureHeadBBox, computeSubjectTransform } from "./generation/subjectFit";
+import { measureSubjectBBox, measureHeadBBox, computeSubjectTransform, SubjectBBoxFrac } from "./generation/subjectFit";
 import { measureSubjectLuma, solveSubjectRelight } from "./generation/relight";
 import {
   applyFilterToImage,
@@ -14,11 +14,12 @@ import {
   solveDirectionalKey,
   solveGrainStrengthOnVideo,
   solvePlateBlurSigma,
+  solveRoomLevelGain,
   solveWarmthFilter,
 } from "./generation/officeCompositeQC";
 import { applyPunchInTail, extractCloseUpCutaway } from "./videoEffects";
 import { PIPELINE_VERSION } from "./pipelineVersion";
-import { Block, BoundAsset, FilledFormat, Format, PlatesManifest, Transcript, TrimPoints } from "./types";
+import { Block, BoundAsset, FilledFormat, Format, MatteArtifact, MatteBlock, PlatesManifest, Transcript, TrimPoints } from "./types";
 
 /**
  * Module 3.5 — Per-block video post-processing for single-take formats:
@@ -149,6 +150,118 @@ const calibrateSubject = (
   return { subjectTransform, subjectFilter };
 };
 
+/** Overlap margin beyond the desk foreground's own alpha midpoint
+ *  (`deskEdgeFrac`) — the subject should visibly continue a little past
+ *  the desk edge so the desk reads as OCCLUDING the body, not just
+ *  touching it at a coincidental seam. */
+const DESK_OVERLAP_MARGIN_FRAC = 0.02;
+
+/** How far the framing solve may scale UP beyond the head target before
+ *  giving up and shifting the whole framing down instead. Scaling up
+ *  keeps the head TOP anchored (computeSubjectTransform's own yOffset
+ *  formula, recomputed at the larger scale) — zero impact on the
+ *  karaoke-title baseline — so it's tried first; a subject who's
+ *  otherwise well-framed but just short of the desk shouldn't have their
+ *  whole composition shifted for the sake of a few extra percent scale. */
+const DESK_OVERLAP_MAX_SCALE_BOOST = 0.10;
+
+/** Floor for how far down the framing may shift to reach the desk — the
+ *  karaoke title (schemas.ts's captionVariant doc) needs the head to stay
+ *  above roughly this line to have room to read behind it. */
+const MIN_HEAD_TOP_FRAC = 0.20;
+
+type DeskOverlapResult = {
+  subjectTransform: SubjectTransform;
+  /** Set only when the solve shifted the framing down from the manifest's
+   *  own headTopFrac target — the karaoke-title baseline (assemble.ts)
+   *  must follow the head, or the title registers against where the head
+   *  WOULD have been rather than where it actually landed. */
+  actualHeadTopFrac?: number;
+};
+
+/**
+ * Fits the subject's head to the manifest's target (headTopFrac/
+ * headHeightFrac, computeSubjectTransform's own job), then checks whether
+ * the WHOLE PERSON'S bottom edge — after that same uniform transform —
+ * reaches past the desk foreground's own edge. A source take that's tight
+ * head-and-shoulders (or where Vision/RVM's own mask clips the body early)
+ * leaves the subject's torso ending in mid-air above the desk with nothing
+ * constraining it; this is the fix (see this rework's own investigation:
+ * `computeSubjectTransform` only ever fit head-top/height, never checked
+ * where the rest of the body landed).
+ *
+ * Bounded escalation, in order: (1) scale up to DESK_OVERLAP_MAX_SCALE_BOOST
+ * over the head target, head top re-anchored at the SAME target (no title
+ * impact); (2) shift the whole framing down, head top allowed to drop as
+ * far as MIN_HEAD_TOP_FRAC; (3) throw — a source take that still can't
+ * reach the desk after both has too little visible body below the crown
+ * for this template's framing, full stop, and shipping the void anyway
+ * would be strictly worse than failing the build with an actionable
+ * message.
+ */
+const solveDeskOverlap = (
+  headBBox: SubjectBBoxFrac | undefined,
+  subjectBBox: SubjectBBoxFrac | undefined,
+  target: PlatesManifest["reference"]["talkingHead"],
+  deskEdgeFrac: number,
+  width: number,
+  height: number,
+  blockId: string,
+): DeskOverlapResult => {
+  const baseTransform = computeSubjectTransform(headBBox, { topFrac: target.headTopFrac, heightFrac: target.headHeightFrac }, width, height);
+  if (!headBBox || !subjectBBox) return { subjectTransform: baseTransform };
+
+  const requiredBottomPx = (deskEdgeFrac + DESK_OVERLAP_MARGIN_FRAC) * height;
+  const transformedBottomPx = (scale: number, yOffsetPx: number): number => subjectBBox.bottomFrac * height * scale + yOffsetPx;
+
+  const baseBottomPx = transformedBottomPx(baseTransform.scale, baseTransform.yOffsetPx);
+  if (baseBottomPx >= requiredBottomPx) return { subjectTransform: baseTransform };
+
+  // Diagnostic only — which measurement is actually limiting this block,
+  // logged so a real failure points at the right cause rather than
+  // leaving "why" to be reverse-engineered from pixels later.
+  const sourceLooksCropped = subjectBBox.bottomFrac > 0.97;
+  console.log(
+    `    desk-overlap: ${blockId} short by ${(requiredBottomPx - baseBottomPx).toFixed(1)}px at base framing` +
+      (sourceLooksCropped ? " (source take's own bottom edge is already at the frame edge — likely a tight crop, not a matte defect)" : ""),
+  );
+
+  // (1) Scale up, head top re-anchored at the SAME target.
+  const boostedScale = Math.min(baseTransform.scale * (1 + DESK_OVERLAP_MAX_SCALE_BOOST), 2.5);
+  const boostedYOffset = target.headTopFrac * height - headBBox.topFrac * height * boostedScale;
+  const boostedBottomPx = transformedBottomPx(boostedScale, boostedYOffset);
+  if (boostedBottomPx >= requiredBottomPx) {
+    console.log(`    desk-overlap: ${blockId} scaled ${baseTransform.scale.toFixed(3)} -> ${boostedScale.toFixed(3)} to reach the desk (head top unchanged)`);
+    return { subjectTransform: { scale: boostedScale, xOffsetPx: baseTransform.xOffsetPx, yOffsetPx: Math.round(boostedYOffset) } };
+  }
+
+  // (2) Shift down, head top allowed to drop to MIN_HEAD_TOP_FRAC.
+  const maxShiftPx = Math.max(0, (target.headTopFrac - MIN_HEAD_TOP_FRAC) * height);
+  const shortfallPx = requiredBottomPx - boostedBottomPx;
+  const shiftPx = Math.min(shortfallPx, maxShiftPx);
+  const shiftedYOffset = boostedYOffset + shiftPx;
+  const shiftedBottomPx = transformedBottomPx(boostedScale, shiftedYOffset);
+  const actualHeadTopFrac = (shiftedYOffset + headBBox.topFrac * height * boostedScale) / height;
+
+  if (shiftedBottomPx >= requiredBottomPx - 0.5) {
+    console.log(
+      `    desk-overlap: ${blockId} shifted down ${shiftPx.toFixed(1)}px (head top ${target.headTopFrac.toFixed(3)} -> ${actualHeadTopFrac.toFixed(3)}) to reach the desk`,
+    );
+    return {
+      subjectTransform: { scale: boostedScale, xOffsetPx: baseTransform.xOffsetPx, yOffsetPx: Math.round(shiftedYOffset) },
+      actualHeadTopFrac,
+    };
+  }
+
+  // (3) Give up — the source take doesn't show enough body below the
+  // crown for this template's framing, regardless of scale/shift.
+  const requiredHeadHeights = (deskEdgeFrac + DESK_OVERLAP_MARGIN_FRAC - target.headTopFrac) / target.headHeightFrac;
+  throw new Error(
+    `replaceBackgrounds: block "${blockId}" — subject framing can't reach the desk edge even after scale-up and shift-down. ` +
+      `Film from the top of your head down to at least your elbows/mid-torso (about ${requiredHeadHeights.toFixed(1)} head-heights below the crown).`,
+  );
+};
+
 /**
  * The talking-head office composite's own calibrate callback (plan v6 §2):
  * on top of calibrateSubject's framing + whole-subject relight curve, this
@@ -164,13 +277,16 @@ const calibrateSubject = (
  */
 const buildOfficeCompositeCalibrate = (
   target: PlatesManifest["reference"]["talkingHead"],
+  deskEdgeFrac: number,
   officePlatePath: string,
   width: number,
   height: number,
   fps: number,
+  blockId: string,
 ) => (framesDir: string, masksDir: string) => {
   const bbox = measureHeadBBox(masksDir, width, height);
-  const subjectTransform = computeSubjectTransform(bbox, { topFrac: target.headTopFrac, heightFrac: target.headHeightFrac }, width, height);
+  const subjectBBox = measureSubjectBBox(masksDir, width, height);
+  const { subjectTransform, actualHeadTopFrac } = solveDeskOverlap(bbox, subjectBBox, target, deskEdgeFrac, width, height, blockId);
 
   const measured = measureSubjectLuma(framesDir, masksDir);
   let subjectFilter = measured ? solveSubjectRelight(measured, { p50: target.lumaP50, p95: target.lumaP95 }) : undefined;
@@ -207,28 +323,54 @@ const buildOfficeCompositeCalibrate = (
     }
   }
 
-  // 2a/2c — plate-side fixes (blur, then color); both solve against a
-  // canvas-sized copy of the raw plate (the same resolution the composite
-  // actually uses). 2b (grain) is NOT solved here — see replaceBackgrounds'
-  // own grain step, applied after this composite AND applyLateralFalloff
-  // are both done, against the ACTUAL final encode rather than a plate-only
-  // probe (a probe-solved strength measured ~2x too weak once it went
-  // through the real pipeline's own encode passes — see
-  // officeCompositeQC.ts's solveGrainStrengthOnVideo doc comment).
+  // 2a/2c/room-level — plate-side fixes (blur, then room-level gain, then
+  // color); all solve against a canvas-sized copy of the raw plate (the
+  // same resolution the composite actually uses). 2b (grain) is NOT
+  // solved here — see replaceBackgrounds' own grain step, applied after
+  // this composite AND applyLateralFalloff are both done, against the
+  // ACTUAL final encode rather than a plate-only probe (a probe-solved
+  // strength measured ~2x too weak once it went through the real
+  // pipeline's own encode passes — see officeCompositeQC.ts's
+  // solveGrainStrengthOnVideo doc comment).
   let backdropFilter: string | undefined;
-  const subjectVariance = measureSubjectSharpness(framesDir, masksDir, width, height);
+  // Measured at the subject's ACTUAL on-canvas scale (subjectTransform's
+  // own solved factor), not the pre-scale extracted frame — see
+  // measureSubjectSharpness's own doc comment for why anchoring to the
+  // wrong scale is exactly what made the sharpness ratio measure 1.05
+  // against a 0.65 target despite solvePlateBlurSigma "succeeding".
+  const subjectVariance = measureSubjectSharpness(framesDir, masksDir, width, height, 5, subjectTransform.scale);
   if (subjectVariance !== undefined && subjectVariance > 0) {
     const plateProbeDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-plate-solve-"));
     try {
       const sizedPlate = path.join(plateProbeDir, "plate.png");
       resizeCover(officePlatePath, width, height, sizedPlate);
 
-      const sigma = solvePlateBlurSigma(sizedPlate, width, height, subjectVariance, target.plateSharpnessRatioMid);
+      // maxSigma 4.0, not 2.0: re-anchoring the subject side (above)
+      // raised the target variance the plate needs to soften BELOW,
+      // since a properly-scaled subject reads sharper than the old
+      // pre-scale measurement did — the old 2.0 cap was clipping the
+      // solve short of the now-correct target on this job's own footage.
+      const sigma = solvePlateBlurSigma(sizedPlate, width, height, subjectVariance, target.plateSharpnessRatioMid, 4.0);
       const blurredPlate = path.join(plateProbeDir, "plate-blur.png");
       if (sigma > 0.01) {
         applyFilterToImage(sizedPlate, `gblur=sigma=${sigma.toFixed(3)}`, blurredPlate);
       } else {
         fs.copyFileSync(sizedPlate, blurredPlate);
+      }
+
+      // Room-level gain: solved so the room reads faceEdgeRatioTarget-x
+      // darker than THIS job's own measured face p97 (see
+      // solveRoomLevelGain's own doc comment for why ratio-first, not an
+      // absolute room-luma constant, is what generalizes across skin
+      // tones). Runs on the BLURRED plate (after 2a), before warmth (2c) —
+      // warmth is measured on the gained patch below so its own solve sees
+      // the same brightness the final composite will.
+      const gain = solveRoomLevelGain(blurredPlate, width, height, target.edgeFalloff, target.faceP97Target, target.faceEdgeRatioTarget);
+      const gainedPlate = path.join(plateProbeDir, "plate-gain.png");
+      if (Math.abs(gain - 1) > 0.01) {
+        applyFilterToImage(blurredPlate, `format=yuv420p,lutyuv=y='clip(val*${gain.toFixed(4)}\\,0\\,255)',format=rgb24`, gainedPlate);
+      } else {
+        fs.copyFileSync(blurredPlate, gainedPlate);
       }
 
       const region = target.flatBackdropRegion;
@@ -237,10 +379,11 @@ const buildOfficeCompositeCalibrate = (
       const cropX = Math.round(width * region.leftFrac);
       const cropY = Math.round(height * region.topFrac);
       const flatPatch = path.join(plateProbeDir, "flat-patch.png");
-      applyFilterToImage(blurredPlate, `crop=${cropW}:${cropH}:${cropX}:${cropY}`, flatPatch);
+      applyFilterToImage(gainedPlate, `crop=${cropW}:${cropH}:${cropX}:${cropY}`, flatPatch);
 
       const filterStages: string[] = [];
       if (sigma > 0.01) filterStages.push(`gblur=sigma=${sigma.toFixed(3)}`);
+      if (Math.abs(gain - 1) > 0.01) filterStages.push(`format=yuv420p,lutyuv=y='clip(val*${gain.toFixed(4)}\\,0\\,255)',format=rgba`);
       const { rs, bs } = solveWarmthFilter(flatPatch, cropW, cropH, target.roomWarmthTarget);
       if (Math.abs(rs) > 0.005 || Math.abs(bs) > 0.005) {
         filterStages.push(`colorbalance=rs=${rs.toFixed(4)}:rm=${rs.toFixed(4)}:rh=${rs.toFixed(4)}:bs=${bs.toFixed(4)}:bm=${bs.toFixed(4)}:bh=${bs.toFixed(4)}`);
@@ -251,7 +394,7 @@ const buildOfficeCompositeCalibrate = (
     }
   }
 
-  return { subjectTransform, subjectFilter, backdropFilter };
+  return { subjectTransform, subjectFilter, backdropFilter, actualHeadTopFrac };
 };
 
 /** Middle frame of a sampled sequence — a representative pose (not the
@@ -268,7 +411,15 @@ export const replaceBackgrounds = async (
   filled: FilledFormat,
   trims: TrimPoints,
   transcript: Transcript,
+  matte: MatteArtifact,
 ): Promise<{ filled: FilledFormat; trims: TrimPoints; transcript: Transcript }> => {
+  // Every `backgroundReplace` block MUST have a matte artifact entry — the
+  // matte stage (pipeline/matte.ts) runs before this one specifically to
+  // provide it. A punchInTailSec-only block (no backgroundReplace) has no
+  // entry and doesn't need one — it cuts and processes its own subclip
+  // exactly as before, matting never having anything to do with it.
+  const matteByBlockId = new Map(matte.blocks.map((b) => [b.blockId, b]));
+
   const flagged = format.blocks.filter((b) => b.backgroundReplace || b.punchInTailSec !== undefined);
   const plateFlagged = format.blocks
     .map((b) => ({ block: b, composite: resolvePlateComposite(b) }))
@@ -301,6 +452,11 @@ export const replaceBackgrounds = async (
   const newBindings: Record<string, BoundAsset> = {};
   const newTrimBlocks = trims.blocks.map((b) => ({ ...b, takes: [...b.takes] }));
   const newTranscriptBlocks = transcript.blocks.map((b) => ({ ...b, takes: b.takes.map((take) => [...take]) }));
+  // Only populated when solveDeskOverlap shifted a block's framing down
+  // from the manifest's own headTopFrac target — assemble.ts's karaoke
+  // title baseline must follow the head, or the title registers against
+  // where the head WOULD have been rather than where it actually landed.
+  const newKaraokeTitleBaselines: Record<string, number> = {};
 
   // `take` is guaranteed set here — this loop only runs when flagged.length
   // > 0, which is exactly the condition that assigned it above.
@@ -311,6 +467,11 @@ export const replaceBackgrounds = async (
     if (!trimEntry) throw new Error(`replaceBackgrounds: no trim entry for block "${block.id}"`);
     const [span] = trimEntry.takes;
 
+    const matteBlock: MatteBlock | undefined = block.backgroundReplace ? matteByBlockId.get(block.id) : undefined;
+    if (block.backgroundReplace && !matteBlock) {
+      throw new Error(`replaceBackgrounds: no matte artifact for backgroundReplace block "${block.id}" — run the matte stage first`);
+    }
+
     const relPath = path.join("generated", `${block.videoSlot}-bg.mp4`);
     const absOutPath = path.join(filled.jobDir, relPath);
     const hash = requestHash({
@@ -319,6 +480,12 @@ export const replaceBackgrounds = async (
       srcOutSec: span.srcOutSec,
       backgroundReplace: block.backgroundReplace,
       officePlateSha: block.backgroundReplace ? officePlateSha : undefined,
+      // Stamped in so a changed matte (different engine, footage, or
+      // downsample ratio — anything that changes the masks themselves)
+      // invalidates this cache even when takeAbsPath/span are unchanged,
+      // and so the flattened composite and the fg-alpha layer built from
+      // it are invalidated TOGETHER, never independently.
+      masksHash: matteBlock?.masksHash,
       punchInTailSec: block.punchInTailSec,
       fps: format.fps,
       width: format.width,
@@ -326,15 +493,25 @@ export const replaceBackgrounds = async (
     });
 
     withCache(absOutPath, hash, () => {
-      const subClipPath = path.join(generatedDir, `${block.videoSlot}-subclip.mp4`);
-      execFileSync("ffmpeg", [
-        "-y", "-v", "error",
-        "-ss", String(span.srcInSec),
-        "-i", sharedTake.absPath,
-        "-t", String(span.srcOutSec - span.srcInSec),
-        "-c:v", "libx264", "-c:a", "aac",
-        subClipPath,
-      ]);
+      // A backgroundReplace block's subclip/masks come from the matte
+      // stage (already cut and matted, RVM or Vision+temporal-median —
+      // see pipeline/matte.ts), persisted and reused rather than cut
+      // again here. A punchInTailSec-only block (no backgroundReplace)
+      // has no matte entry and cuts its own subclip exactly as before.
+      const subClipPath = matteBlock
+        ? path.join(filled.jobDir, matteBlock.subclipPath)
+        : path.join(generatedDir, `${block.videoSlot}-subclip.mp4`);
+      if (!matteBlock) {
+        execFileSync("ffmpeg", [
+          "-y", "-v", "error",
+          "-ss", String(span.srcInSec),
+          "-i", sharedTake.absPath,
+          "-t", String(span.srcOutSec - span.srcInSec),
+          "-c:v", "libx264", "-c:a", "aac",
+          subClipPath,
+        ]);
+      }
+      const precomputedMasksDir = matteBlock ? path.join(filled.jobDir, matteBlock.masksDir) : undefined;
 
       // backgroundReplace, punchInTailSec, or both — either way `current`
       // ends up pointing at whatever the block's video should be before
@@ -355,6 +532,7 @@ export const replaceBackgrounds = async (
         // on top of it.
         let capturedTransform: SubjectTransform | undefined;
         let capturedFilter: string | undefined;
+        let capturedActualHeadTopFrac: number | undefined;
         compositeVideoOnBackdrop({
           subjectVideoPath: current,
           backdropPath: officePlatePath,
@@ -363,19 +541,26 @@ export const replaceBackgrounds = async (
           width: format.width,
           height: format.height,
           fps: format.fps,
+          precomputedMasksDir,
           calibrate: (framesDir, masksDir) => {
             const result = buildOfficeCompositeCalibrate(
               talkingHeadTarget!,
+              manifest!.deskEdgeFrac,
               officePlatePath,
               format.width,
               format.height,
               format.fps,
+              block.id,
             )(framesDir, masksDir);
             capturedTransform = result.subjectTransform;
             capturedFilter = result.subjectFilter;
+            capturedActualHeadTopFrac = result.actualHeadTopFrac;
             return result;
           },
         });
+        if (capturedActualHeadTopFrac !== undefined) {
+          newKaraokeTitleBaselines[block.id] = capturedActualHeadTopFrac;
+        }
         // Runs on the flattened composite (subject + desk foreground both
         // already baked in) — see matte.ts's applyLateralFalloff doc
         // comment for why this is a separate pass rather than folded into
@@ -392,8 +577,27 @@ export const replaceBackgrounds = async (
         // measurably undershoots once real encoder rate-control and a
         // second recompression pass are both in play). Applied whole-
         // frame, not backdrop-only: real camera grain isn't selective
-        // either, and this IS the last processing step, so there's no
-        // later re-encode left to attenuate it further.
+        // either. This clip is NOT the last encode in the chain — Remotion
+        // takes it as a source asset and re-encodes it again into the
+        // final render (remotion.config.ts sets no explicit codec/crf, so
+        // that's h264/CRF 18/yuv420p) — renderReencode mirrors a second
+        // libx264 pass in the probe itself, which measurably barely
+        // attenuates grain on its own (tested directly: 3.04 -> 3.03).
+        // GRAIN_RENDER_LOSS_CORRECTION is the REMAINING gap: a full real
+        // render of this job measured grain 1.7-2.4 against a 3.4 target
+        // solved via the double-libx264-only probe — Remotion's actual
+        // frame pipeline (jpeg-format frames, per remotion.config.ts's
+        // own setVideoImageFormat("jpeg")) evidently attenuates grain
+        // further than a plain second h264 pass alone reproduces, and a
+        // direct jpeg-round-trip simulation (mjpeg encode/decode at a
+        // reasonable quality) ALSO didn't reproduce a comparable drop in
+        // isolated testing — so whatever the exact mechanism, this is an
+        // empirical correction against the measured real-render gap
+        // (≈3.4/2.1), not a modeled one; per this rework's own plan, "at
+        // most one corrective re-solve iteration using the measured
+        // final render" — this IS that one iteration, verified against a
+        // full pipeline run after applying it (see Phase 6 verification).
+        const GRAIN_RENDER_LOSS_CORRECTION = 1.6;
         const grainStrength = solveGrainStrengthOnVideo(
           falloffPath,
           Math.min(0.3, (span.srcOutSec - span.srcInSec) / 3),
@@ -401,7 +605,10 @@ export const replaceBackgrounds = async (
           format.width,
           format.height,
           format.fps,
-          talkingHeadTarget!.grainStdTarget,
+          talkingHeadTarget!.grainStdTarget * GRAIN_RENDER_LOSS_CORRECTION,
+          60,
+          8,
+          { crf: 18 },
         );
         if (grainStrength > 0) {
           const grainedPath = path.join(generatedDir, `${block.videoSlot}-grained.mp4`);
@@ -434,6 +641,14 @@ export const replaceBackgrounds = async (
             fps: format.fps,
             subjectTransform: capturedTransform,
             subjectFilter: capturedFilter,
+            precomputedMasksDir,
+            // Same falloff/grain the flattened bg layer got (edgeFalloff
+            // applied above via applyLateralFalloff; grainStrength solved
+            // just above) — this fg layer previously skipped both, which
+            // is why its own desk strip measured ~1.7x brighter than the
+            // bg layer's at the same coordinates.
+            edgeFalloff: talkingHeadTarget!.edgeFalloff,
+            grainStrength,
           });
           currentFg = fgPath;
         }
@@ -466,7 +681,11 @@ export const replaceBackgrounds = async (
         }
       }
       fs.renameSync(current, absOutPath);
-      fs.rmSync(subClipPath, { force: true });
+      // Only delete a subclip THIS function cut itself (punchInTailSec-
+      // only blocks) — a backgroundReplace block's subclip is owned and
+      // persisted by the matte stage (pipeline/matte.ts), reused across
+      // runs, and must survive this function returning.
+      if (!matteBlock) fs.rmSync(subClipPath, { force: true });
       if (currentFg) {
         const fgOutPath = path.join(generatedDir, `${block.videoSlot}-fg.mov`);
         if (currentFg !== fgOutPath) fs.renameSync(currentFg, fgOutPath);
@@ -644,7 +863,14 @@ export const replaceBackgrounds = async (
   }
 
   return {
-    filled: { ...filled, bindings: { ...filled.bindings, ...newBindings } },
+    filled: {
+      ...filled,
+      bindings: { ...filled.bindings, ...newBindings },
+      karaokeTitleBaselines:
+        Object.keys(newKaraokeTitleBaselines).length > 0
+          ? { ...filled.karaokeTitleBaselines, ...newKaraokeTitleBaselines }
+          : filled.karaokeTitleBaselines,
+    },
     trims: { ...trims, blocks: newTrimBlocks },
     transcript: { ...transcript, blocks: newTranscriptBlocks },
   };

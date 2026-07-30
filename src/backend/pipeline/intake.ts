@@ -1,10 +1,14 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { JobManifestSchema } from "./schemas";
 import { BoundAsset, BoundFile, FilledFormat, Format, Slot } from "./types";
 import { loadFormat } from "./loader";
+import { matteFramesBatch } from "./generation/matte";
+import { loadPlatesManifest } from "./generation/plates";
+import { measureHeadBBox, measureSubjectBBox } from "./generation/subjectFit";
 
 /**
  * Module 2 — Intake and slot binding.
@@ -72,6 +76,86 @@ export const probeFile = (absPath: string): ProbedMedia => {
     return { mediaType: "audio", durationSec };
   }
   throw new Error(`no decodable audio or video stream in ${absPath}`);
+};
+
+const FRAMING_SAMPLE_COUNT = 9;
+/** Same tolerance shape as backgroundReplace.ts's own DESK_OVERLAP_MARGIN_FRAC
+ *  (kept as a separate local constant rather than a shared import — this
+ *  check and the composite-time solve are two different concerns that
+ *  happen to use the same margin, not one relying on the other). */
+const DESK_OVERLAP_MARGIN_FRAC = 0.02;
+/** How far under the required ratio a take is still allowed to pass here
+ *  — this is a cheap 9-frame Vision estimate, coarser than the matte
+ *  stage's own per-block measurement (which runs on the actual chosen
+ *  matting engine, sampling every frame of the block's real span), so a
+ *  take right at the boundary shouldn't be rejected at upload only to
+ *  turn out fine once actually composited. The matte/composite stages are
+ *  still the final, authoritative check — this is a cheap early warning,
+ *  not a replacement for them. */
+const FRAMING_TOLERANCE_HEAD_HEIGHTS = 0.15;
+
+/**
+ * Cheap pre-check for the office talking-head desk-overlap requirement
+ * (see backgroundReplace.ts's solveDeskOverlap doc comment for the full
+ * story): samples ~9 frames of the speaking take, mattes them with Vision
+ * (not RVM — 9 stills have no temporal dimension for RVM's recurrence to
+ * help with, and Vision's fixed ~0.3-0.4s process-start cost is
+ * negligible for a handful of frames), and estimates how many head-
+ * heights of body show below the crown. Runs before any generate-stage
+ * spend, so a take that can never reach the desk fails at upload with an
+ * actionable message instead of after a full (possibly paid) render.
+ *
+ * The required ratio is DERIVED from the format's own manifest
+ * (deskEdgeFrac, headTopFrac, headHeightFrac) — never a hardcoded
+ * constant — so this generalizes to any office-composite format's own
+ * framing target, not just this one template's numbers.
+ */
+const checkTalkingHeadFraming = (format: Format, take: BoundFile, errors: string[]): void => {
+  if (!format.blocks.some((b) => b.backgroundReplace)) return;
+  if (take.durationSec === undefined || take.durationSec <= 0) return;
+
+  let manifest;
+  try {
+    manifest = loadPlatesManifest(format.id);
+  } catch {
+    // A format that flags backgroundReplace but ships no plates is a
+    // packaging bug (see loadPlatesManifest's own doc comment) — it'll
+    // surface loudly at the composite stage; intake shouldn't crash on it.
+    return;
+  }
+  const target = manifest.reference.talkingHead;
+  const requiredHeadHeights = (manifest.deskEdgeFrac + DESK_OVERLAP_MARGIN_FRAC - target.headTopFrac) / target.headHeightFrac;
+
+  const sampleDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-framing-check-"));
+  try {
+    const framesDir = path.join(sampleDir, "frames");
+    fs.mkdirSync(framesDir, { recursive: true });
+    const sampleFps = FRAMING_SAMPLE_COUNT / take.durationSec;
+    execFileSync("ffmpeg", [
+      "-y", "-v", "error",
+      "-i", take.absPath,
+      "-vf", `fps=${sampleFps},scale=${format.width}:${format.height}:force_original_aspect_ratio=increase,crop=${format.width}:${format.height}`,
+      path.join(framesDir, "f%05d.png"),
+    ]);
+    const masksDir = path.join(sampleDir, "masks");
+    matteFramesBatch(framesDir, masksDir);
+
+    const headBBox = measureHeadBBox(masksDir, format.width, format.height, FRAMING_SAMPLE_COUNT);
+    const subjectBBox = measureSubjectBBox(masksDir, format.width, format.height, FRAMING_SAMPLE_COUNT);
+    if (!headBBox || !subjectBBox) return; // inconclusive read — don't block on it, the matte stage will catch a real problem
+
+    const measuredHeadHeights = (subjectBBox.bottomFrac - headBBox.topFrac) / Math.max(0.001, headBBox.bottomFrac - headBBox.topFrac);
+    if (measuredHeadHeights < requiredHeadHeights - FRAMING_TOLERANCE_HEAD_HEIGHTS) {
+      errors.push(
+        `speaking take framing: shows only ~${measuredHeadHeights.toFixed(1)} head-heights of body below the top of your head, ` +
+          `but this template needs ~${requiredHeadHeights.toFixed(1)} so the desk can occlude you correctly (not end in mid-air above it). ` +
+          `Re-film showing yourself from the top of your head down to at least your elbows/mid-torso — a dark, solid surface overhead, ` +
+          `even front-facing light, and no strong light behind you.`,
+      );
+    }
+  } finally {
+    fs.rmSync(sampleDir, { recursive: true, force: true });
+  }
 };
 
 /** Every slot the format declares: block, shared, music, identity, speaking
@@ -237,6 +321,16 @@ export const intake = (jobDir: string): FilledFormat => {
       errors.push(
         `block "${block.id}" is a voice block but its clip "${block.videoSlot}" has no audio track`,
       );
+    }
+  }
+
+  // Office-composite formats (see checkTalkingHeadFraming's own doc
+  // comment): catch a take that can never reach the desk before any
+  // generate-stage spend, not after a full render.
+  if (format.speakingTakeSlot) {
+    const take = bindings[format.speakingTakeSlot.name];
+    if (take?.type === "file") {
+      checkTalkingHeadFraming(format, take, errors);
     }
   }
 

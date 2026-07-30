@@ -63,19 +63,40 @@ export const laplacianVariance = (gray: Buffer, mask: Buffer | undefined, width:
 /** Median subject-region Laplacian variance over a few sampled frame/mask
  *  pairs — same sampling shape as subjectFit.ts's own bbox measurement,
  *  for the same reason (a single frame can catch a dropped Vision mask or
- *  an atypically blurry motion-blur frame). */
-export const measureSubjectSharpness = (framesDir: string, masksDir: string, width: number, height: number, sampleCount = 5): number | undefined => {
+ *  an atypically blurry motion-blur frame).
+ *
+ * `scale`, when given, measures against the frame resized to
+ * (width*scale, height*scale) instead of the raw extracted frame — the
+ * subject's ACTUAL on-canvas size after subjectFit.ts's own
+ * computeSubjectTransform runs (matte.ts scales the whole cutout by this
+ * same factor before compositing). Laplacian variance is scale-dependent
+ * (upscaling softens edges relatively, downscaling sharpens them), so
+ * measuring on the pre-scale frame anchors solvePlateBlurSigma's own
+ * ratio to a sharpness the subject won't actually have on screen — this
+ * is why the plate-sharpness solve measured 1.05 against a 0.65 target:
+ * the target ratio was being hit against the WRONG subject variance.
+ * Omit (scale=1) for a caller that doesn't apply a subject transform. */
+export const measureSubjectSharpness = (
+  framesDir: string,
+  masksDir: string,
+  width: number,
+  height: number,
+  sampleCount = 5,
+  scale = 1,
+): number | undefined => {
   const files = fs.readdirSync(framesDir).filter((f) => f.endsWith(".png")).sort();
   if (files.length === 0) return undefined;
   const step = Math.max(1, Math.floor(files.length / sampleCount));
   const sampled = files.filter((_, i) => i % step === 0).slice(0, sampleCount);
+  const measureW = Math.max(2, Math.round(width * scale));
+  const measureH = Math.max(2, Math.round(height * scale));
   const values: number[] = [];
   for (const f of sampled) {
     const maskPath = path.join(masksDir, f);
     if (!fs.existsSync(maskPath)) continue;
-    const gray = grayRaw(path.join(framesDir, f), width, height);
-    const mask = grayRaw(maskPath, width, height);
-    values.push(laplacianVariance(gray, mask, width, height));
+    const gray = grayRaw(path.join(framesDir, f), measureW, measureH);
+    const mask = grayRaw(maskPath, measureW, measureH);
+    values.push(laplacianVariance(gray, mask, measureW, measureH));
   }
   if (values.length === 0) return undefined;
   values.sort((a, b) => a - b);
@@ -224,6 +245,18 @@ export const solveGrainStrengthOnVideo = (
   targetStd: number,
   maxStrength = 40,
   sampleCount = 8,
+  /** Re-encodes each probe a SECOND time mirroring Remotion's own render
+   *  defaults (remotion.config.ts sets no explicit codec/crf/pixel-format
+   *  — h264, CRF 18, yuv420p is what `npx remotion render` actually
+   *  produces) before measuring — this clip still gets re-encoded ONE
+   *  MORE time by Remotion itself after this solve runs (this pipeline
+   *  hands Remotion an already-composited-and-grained clip as a source
+   *  asset, which Remotion then re-encodes into the final render), and
+   *  that second lossy pass is exactly what measurably ate grain before
+   *  (target 3.4, final render measured only 1.62). Omit to keep the
+   *  single-encode probe (e.g. callers that measure something Remotion
+   *  never re-encodes). */
+  renderReencode?: { crf: number },
 ): number => {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-grain-solve-"));
   try {
@@ -232,7 +265,18 @@ export const solveGrainStrengthOnVideo = (
       const probePath = path.join(workDir, `probe-${strength}.mp4`);
       const vf = strength > 0 ? `noise=alls=${strength}:allf=t+u` : "null";
       execFileSync("ffmpeg", ["-y", "-v", "error", "-ss", String(Math.max(0, atSec)), "-i", sourcePath, "-t", String(durationSec), "-vf", vf, "-pix_fmt", "yuv420p", probePath]);
-      return measureTemporalGrainCropped(probePath, fps, width, height, region, sampleCount);
+      let measurePath = probePath;
+      if (renderReencode) {
+        const reencodedPath = path.join(workDir, `probe-${strength}-reencoded.mp4`);
+        execFileSync("ffmpeg", [
+          "-y", "-v", "error",
+          "-i", probePath,
+          "-c:v", "libx264", "-crf", String(renderReencode.crf), "-pix_fmt", "yuv420p",
+          reencodedPath,
+        ]);
+        measurePath = reencodedPath;
+      }
+      return measureTemporalGrainCropped(measurePath, fps, width, height, region, sampleCount);
     };
     if (stdAtStrength(0) >= targetStd) return 0; // already grainy enough (unlikely, but don't add more)
     let lo = 0;
@@ -243,6 +287,159 @@ export const solveGrainStrengthOnVideo = (
       else hi = mid;
     }
     return Math.round((lo + hi) / 2);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Room level (face/edge luma ratio — "does the room separate from the face")
+// ---------------------------------------------------------------------------
+
+/** MEDIAN luma over a frame's own left/right edge strips — columns 0-8%
+ *  and 92-100% of width, rows 20-80% of height (clear of the desk
+ *  foreground near the bottom and the title/vignette near the top). A
+ *  roughly-centered talking-head subject never reaches these columns, so
+ *  this reads pure room, never subject — the denominator of the
+ *  face/edge ratio that determines whether a face visually "pops" off its
+ *  background.
+ *
+ * MEDIAN, not mean: measured directly against the actual reference reel
+ * (authoring/draft-baf87683/source.mp4, the office talking-head shot) —
+ * this room has a bright object (a wall map's own light-colored frame
+ * border) sitting inside the upper portion of this exact column/row
+ * region. The MEAN over the full 20-80% band reads 34 (skewed up by that
+ * one bright patch); the MEDIAN reads 20, matching the reference's own
+ * independently-reported edge-luma figure (~18.5-19.5) almost exactly.
+ * A user's own room can just as easily have a lamp, window, or picture
+ * frame sitting in this same geometric region — the median is what stays
+ * representative of "the room, typically" despite one bright or dark
+ * prop, where a straight mean gets dragged around by it; narrowing the
+ * row/column band by hand to dodge this ONE reference's map would only
+ * trade one room-specific blind spot for another. Works on a still OR a
+ * video frame (atSec=0 for a still). */
+export const measureFrameEdgeLuma = (imagePath: string, atSec: number, width: number, height: number): number => {
+  const raw = execFileSync(
+    "ffmpeg",
+    ["-v", "error", "-ss", String(Math.max(0, atSec)), "-i", imagePath, "-frames:v", "1", "-vf", `scale=${width}:${height},format=gray`, "-f", "rawvideo", "-"],
+    { maxBuffer: width * height + 1024 * 1024 },
+  );
+  const rowStart = Math.round(height * 0.2);
+  const rowEnd = Math.round(height * 0.8);
+  const leftColEnd = Math.round(width * 0.08);
+  const rightColStart = Math.round(width * 0.92);
+  const hist = new Array(256).fill(0);
+  let n = 0;
+  for (let y = rowStart; y < rowEnd; y++) {
+    const row = y * width;
+    for (let x = 0; x < leftColEnd; x++) {
+      hist[raw[row + x]]++;
+      n++;
+    }
+    for (let x = rightColStart; x < width; x++) {
+      hist[raw[row + x]]++;
+      n++;
+    }
+  }
+  if (n === 0) return 0;
+  const target = n / 2;
+  let c = 0;
+  for (let v = 0; v < 256; v++) {
+    c += hist[v];
+    if (c >= target) return v;
+  }
+  return 255;
+};
+
+/** The lateral-falloff multiplier (matte.ts's lateralFalloffExpr), averaged
+ *  analytically over the SAME edge columns measureFrameEdgeLuma reads —
+ *  a closed-form function of X, no ffmpeg call needed. Lets
+ *  solveRoomLevelGain solve against the plate BEFORE falloff runs (a
+ *  single still, no per-iteration full composite) while still landing on
+ *  the right target AFTER falloff is applied later in the real pipeline,
+ *  since falloff darkens exactly these columns by a known, computable
+ *  amount. */
+const averageEdgeFalloffFactor = (width: number, edgeFalloff: { minFactor: number; power: number }): number => {
+  const leftColEnd = Math.round(width * 0.08);
+  const rightColStart = Math.round(width * 0.92);
+  let sum = 0;
+  let n = 0;
+  const factorAt = (x: number): number => {
+    const d = Math.abs(x / width - 0.5) * 2;
+    return 1 - (1 - edgeFalloff.minFactor) * Math.pow(d, edgeFalloff.power);
+  };
+  for (let x = 0; x < leftColEnd; x++) {
+    sum += factorAt(x);
+    n++;
+  }
+  for (let x = rightColStart; x < width; x++) {
+    sum += factorAt(x);
+    n++;
+  }
+  return n === 0 ? 1 : sum / n;
+};
+
+/**
+ * Binary-searches a whole-plate luma GAIN (`lutyuv=y=`, so chroma/warmth
+ * are untouched) so the room reads `ratioTarget`x darker than the face —
+ * face/edge ratio as the PRIMARY criterion (not an absolute edge-luma
+ * number), so this generalizes across skin tones: a dark-skinned or
+ * fair-skinned user's own measured face p97 (already correctly lit by
+ * solveDirectionalKey before this runs) sets the numerator, and the room
+ * is solved relative to THAT, never a fixed absolute room-brightness
+ * constant that would over-darken a fair user's room or under-darken a
+ * dark-skinned user's.
+ *
+ * Solves against the plate BEFORE lateral falloff/relight run (a single
+ * still — house style, per solvePlateBlurSigma/solveWarmthFilter), with
+ * falloff's own darkening at the measured columns folded in analytically
+ * (averageEdgeFalloffFactor) rather than re-running the whole composite
+ * per candidate gain. Clamped to [minGain, maxGain]: a take too dark or
+ * too blown to reach the ratio even at the clamp ships with whatever the
+ * clamp allows — the Phase 6 face/edge ratio gate is what actually stops
+ * a build that couldn't get there, not this solve silently overshooting.
+ */
+export const solveRoomLevelGain = (
+  sizedPlatePath: string,
+  width: number,
+  height: number,
+  edgeFalloff: { minFactor: number; power: number },
+  faceP97Target: number,
+  ratioTarget: number,
+  minGain = 0.5,
+  maxGain = 1.5,
+): number => {
+  const falloffFactor = averageEdgeFalloffFactor(width, edgeFalloff);
+  const targetEdgeLumaAfterFalloff = faceP97Target / ratioTarget;
+  const targetEdgeLumaBeforeFalloff = targetEdgeLumaAfterFalloff / Math.max(0.05, falloffFactor);
+
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-room-level-solve-"));
+  try {
+    const edgeLumaAtGain = (gain: number): number => {
+      const outPath = path.join(workDir, `gain-${gain.toFixed(3)}.png`);
+      if (Math.abs(gain - 1) < 1e-4) {
+        fs.copyFileSync(sizedPlatePath, outPath);
+      } else {
+        execFileSync("ffmpeg", [
+          "-y", "-v", "error",
+          "-i", sizedPlatePath,
+          "-vf", `format=yuv420p,lutyuv=y='clip(val*${gain.toFixed(4)}\\,0\\,255)',format=rgb24`,
+          outPath,
+        ]);
+      }
+      return measureFrameEdgeLuma(outPath, 0, width, height);
+    };
+
+    let lo = minGain;
+    let hi = maxGain;
+    // Monotonically increasing in gain — plain binary search, same shape
+    // as this module's other solves.
+    for (let iter = 0; iter < 6; iter++) {
+      const mid = (lo + hi) / 2;
+      if (edgeLumaAtGain(mid) < targetEdgeLumaBeforeFalloff) lo = mid;
+      else hi = mid;
+    }
+    return (lo + hi) / 2;
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }

@@ -784,9 +784,27 @@ export const assemble = (
   // karaokeTitle — most formats won't, and loadPlatesManifest throws for
   // a format with no plates at all (same guard buildMusic uses above).
   let karaokeTitleBaselineFrac: number | undefined;
-  if (format.blocks.some((b) => b.captionVariant === "karaokeTitle")) {
+  const karaokeTitleBlocks = format.blocks.filter((b) => b.captionVariant === "karaokeTitle");
+  if (karaokeTitleBlocks.length > 0) {
     try {
       karaokeTitleBaselineFrac = loadPlatesManifest(format.id).reference.talkingHead.headTopFrac;
+      // backgroundReplace.ts's desk-overlap solve (see its own
+      // solveDeskOverlap doc comment) can shift a block's framing down
+      // from this manifest target, moving that block's actual head top
+      // BELOW where the title's static baseline expects it. The EDL only
+      // carries one global baseline (KaraokeTitleLayer applies it to every
+      // karaokeTitle block alike — there's no per-block hook), so this
+      // takes the LOWEST (most-shifted) actual head top across every
+      // karaokeTitle block that shifted, favoring "title sits a little
+      // higher than strictly necessary on an unshifted block" over "title
+      // overlaps a shifted block's actual head" — the two failure
+      // directions are not equally bad.
+      const shifted = karaokeTitleBlocks
+        .map((b) => filled.karaokeTitleBaselines?.[b.id])
+        .filter((v): v is number => v !== undefined);
+      if (shifted.length > 0) {
+        karaokeTitleBaselineFrac = Math.min(karaokeTitleBaselineFrac, ...shifted);
+      }
     } catch {
       karaokeTitleBaselineFrac = undefined;
     }

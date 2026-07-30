@@ -6,6 +6,7 @@ import {
   EdlSchema,
   FilledFormatSchema,
   InsertsSchema,
+  MatteArtifactSchema,
   ResolvedRolesSchema,
   TranscriptSchema,
   TrimPointsSchema,
@@ -19,6 +20,7 @@ import { deriveTranscriptAndTrimWithStandalone } from "./splitTake";
 import { readSplit, runSplit } from "./orchestrate";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
+import { runMatte } from "./matte";
 import { replaceBackgrounds } from "./backgroundReplace";
 import { resolveRoles } from "./resolveRoles";
 import { ResolverChoice } from "./resolvers";
@@ -32,11 +34,22 @@ import { artifactsDir } from "./paths";
  *
  *   npm run pipeline -- --job jobs/demo [--only <stage>] [--resolver <name>] [--generator <name>]
  *
- * Stages: intake → generate → transcribe → trim → roles → assemble → render.
- * Each stage writes its artifact to artifacts/<job>/ — the debugging
- * surface. When a video comes out wrong, look at which artifact first went
- * wrong, not at the video. --only re-runs a single stage against the
- * artifacts already on disk.
+ * Stages: intake → generate → transcribe → trim → matte → composite →
+ * roles → assemble → render. Each stage writes its artifact to
+ * artifacts/<job>/ — the debugging surface. When a video comes out wrong,
+ * look at which artifact first went wrong, not at the video. --only
+ * re-runs a single stage against the artifacts already on disk.
+ *
+ * matte/composite are split so a backgroundReplace block's matte (video-
+ * native RVM, or Vision+temporal-median fallback — see matte.ts) can be
+ * inspected and measured on its own before compositing runs against it.
+ * trim.json holds PURE, take-relative spans; composite is what rebases
+ * trim.json/transcript.json to the replaced clip's own timeline (same
+ * on-disk contract as before this split, just relocated one stage later)
+ * — so, as before this split (where the same rebase lived inside "trim"),
+ * running `--only composite` twice in a row without an intervening
+ * `--only trim` re-rebases already-rebased spans; always re-run from
+ * `--only trim` forward rather than repeating `--only composite` alone.
  *
  * "generate" fills any slot the format marks with a `generation` spec (an
  * insert — a cutaway or montage clip, never a voice block's own spoken
@@ -47,7 +60,7 @@ import { artifactsDir } from "./paths";
  * no-op that passes `filled` through unchanged.
  */
 
-const STAGES = ["intake", "generate", "transcribe", "trim", "roles", "assemble", "render"] as const;
+const STAGES = ["intake", "generate", "transcribe", "trim", "matte", "composite", "roles", "assemble", "render"] as const;
 type Stage = (typeof STAGES)[number];
 
 const parseArgs = (argv: string[]) => {
@@ -217,15 +230,24 @@ const main = async () => {
       : await trim(format, filled, transcript, args.resolver)
     : read("trim", TrimPointsSchema);
   if (wants("trim")) {
-    const replaced = await replaceBackgrounds(format, filled, trims, transcript);
+    write("trim", trims);
+    for (const d of trims.diagnostics) console.log(`    ${d}`);
+  }
+  if (args.only === "trim") return;
+
+  const matteArtifact = wants("matte") ? await runMatte(format, filled, trims) : read("matte", MatteArtifactSchema);
+  if (wants("matte")) write("matte", matteArtifact);
+  if (args.only === "matte") return;
+
+  if (wants("composite")) {
+    const replaced = await replaceBackgrounds(format, filled, trims, transcript, matteArtifact);
     filled = replaced.filled;
     trims = replaced.trims;
     transcript = replaced.transcript;
     write("transcript", transcript);
     write("trim", trims);
-    for (const d of trims.diagnostics) console.log(`    ${d}`);
   }
-  if (args.only === "trim") return;
+  if (args.only === "composite") return;
 
   const resolved = wants("roles")
     ? await resolveRoles(format, transcript, trims, args.resolver)
@@ -253,7 +275,7 @@ const main = async () => {
   const outPath = render(edl, dir);
   console.log(`\n✔ rendered ${path.relative(process.cwd(), outPath)} (${edl.durationSec.toFixed(2)}s, ${edl.width}x${edl.height}@${edl.fps}fps)`);
 
-  const gateResults = runGates(outPath, edl);
+  const gateResults = runGates(outPath, edl, matteArtifact);
   write("gates", gateResults);
   const failed = gateResults.filter((r) => r.pass === false);
   console.log(`\nacceptance gates: ${gateResults.length - failed.length - gateResults.filter((r) => r.pass === null).length} passed, ${failed.length} failed`);

@@ -3,6 +3,7 @@ import {
   AnchoredTimeSchema,
   AnchorSchema,
   AnchorWindowSchema,
+  BBoxFracSchema,
   BlockSchema,
   BlockTranscriptSchema,
   BlockTrimSchema,
@@ -24,6 +25,8 @@ import {
   InsertsSchema,
   JobManifestSchema,
   LiteralAnchorSchema,
+  MatteArtifactSchema,
+  MatteBlockSchema,
   MediaTypeSchema,
   OverridesSchema,
   PlateAssetSchema,
@@ -96,3 +99,7 @@ export type PlatesManifest = z.infer<typeof PlatesManifestSchema>;
 
 export type GeneratedInsert = z.infer<typeof GeneratedInsertSchema>;
 export type Inserts = z.infer<typeof InsertsSchema>;
+
+export type BBoxFrac = z.infer<typeof BBoxFracSchema>;
+export type MatteBlock = z.infer<typeof MatteBlockSchema>;
+export type MatteArtifact = z.infer<typeof MatteArtifactSchema>;

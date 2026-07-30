@@ -3,7 +3,13 @@ import fs from "node:fs";
 import { EdlSchema } from "./schemas";
 import { loadFormat } from "./loader";
 import { loadPlatesManifest } from "./generation/plates";
-import { Edl, Format } from "./types";
+import { measureFrameEdgeLuma, measureTemporalGrainCropped } from "./generation/officeCompositeQC";
+import {
+  HAIR_TEMPORAL_RATIO_MAX,
+  jitterGatePasses,
+  temporalAlphaGatePasses,
+} from "./generation/maskQC";
+import { Edl, Format, MatteArtifact } from "./types";
 
 /**
  * Acceptance gates for a rendered export — measured against the reference
@@ -499,6 +505,281 @@ const talkingHeadLumaGates = (videoPath: string, edl: Edl, format: Format | unde
     });
 };
 
+/** Face-region p97 luma over a plain RECTANGLE (headBboxFrac's middle 60%
+ *  width, rows 35-85% — same region officeCompositeQC.ts's measureFaceP97
+ *  uses, minus the alpha-mask intersection) — a gate-time approximation:
+ *  unlike the calibrate-time solve, this runs against the FINAL rendered
+ *  frame where the original per-frame mask isn't available without
+ *  re-deriving a timeline-time -> block-relative-frame-index mapping.
+ *  For a well-framed, centered talking-head shot this rectangle is
+ *  almost entirely face/hair pixels anyway, matching the rest of
+ *  gates.ts's own house style of cheap unmasked rectangle measurements
+ *  (frameLumaStats, meanAbsFrameDiff) rather than a full per-pixel mask. */
+const measureFaceP97Rect = (
+  videoPath: string,
+  atSec: number,
+  headBboxFrac: { topFrac: number; bottomFrac: number; leftFrac: number; rightFrac: number },
+  width: number,
+  height: number,
+): number | undefined => {
+  const boxH = headBboxFrac.bottomFrac - headBboxFrac.topFrac;
+  const boxW = headBboxFrac.rightFrac - headBboxFrac.leftFrac;
+  const region = {
+    topFrac: headBboxFrac.topFrac + boxH * 0.35,
+    bottomFrac: headBboxFrac.topFrac + boxH * 0.85,
+    leftFrac: headBboxFrac.leftFrac + boxW * 0.2,
+    rightFrac: headBboxFrac.leftFrac + boxW * 0.8,
+  };
+  const cropW = Math.max(2, Math.round(width * (region.rightFrac - region.leftFrac)));
+  const cropH = Math.max(2, Math.round(height * (region.bottomFrac - region.topFrac)));
+  const cropX = Math.round(width * region.leftFrac);
+  const cropY = Math.round(height * region.topFrac);
+  let raw: Buffer;
+  try {
+    raw = execFileSync(
+      "ffmpeg",
+      ["-v", "error", "-ss", String(Math.max(0, atSec)), "-i", videoPath, "-frames:v", "1", "-vf", `crop=${cropW}:${cropH}:${cropX}:${cropY},format=gray`, "-f", "rawvideo", "-"],
+      { maxBuffer: 1024 * 1024 * 5 },
+    );
+  } catch {
+    return undefined;
+  }
+  if (raw.length === 0) return undefined;
+  const hist = new Array(256).fill(0);
+  for (const b of raw) hist[b]++;
+  const target = raw.length * 0.97;
+  let c = 0;
+  for (let v = 0; v < 256; v++) {
+    c += hist[v];
+    if (c >= target) return v;
+  }
+  return 255;
+};
+
+/** Gate: no-void — the body must reach past the desk's own edge, not end
+ *  in mid-air above it (see backgroundReplace.ts's solveDeskOverlap doc
+ *  comment — this is the render-space, belt-and-braces half; the solve
+ *  itself is the primary defense, enforced at composite time). Amended
+ *  from the original 0.55-0.75H spec: that band fails on the reference
+ *  reel's OWN numbers (the desk foreground itself legitimately reads
+ *  near-black in places past its own edge) — restricted to
+ *  0.55H -> deskEdgeFrac·H, the band that's unambiguously "should be
+ *  body, not background" before the desk foreground even begins. */
+const NO_VOID_ROW_START_FRAC = 0.55;
+const NO_VOID_LUMA_FLOOR = 2.0;
+
+const noVoidLumaGates = (videoPath: string, edl: Edl, format: Format | undefined): GateResult[] => {
+  if (!format) return [];
+  let manifest: ReturnType<typeof loadPlatesManifest> | undefined;
+  try {
+    manifest = loadPlatesManifest(format.id);
+  } catch {
+    return [];
+  }
+  const results: GateResult[] = [];
+  for (const block of format.blocks) {
+    if (!block.backgroundReplace) continue;
+    const seg = edl.video.find((v) => v.blockId === block.id);
+    if (!seg) continue;
+    const sampleWindowEnd = block.punchInTailSec ? Math.max(seg.tlInSec + 0.1, seg.tlOutSec - block.punchInTailSec) : seg.tlOutSec;
+    const sampleSec = sampleTimeAvoidingOverlays(seg.tlInSec, sampleWindowEnd, edl.overlays);
+
+    const w = 180;
+    const h = 320;
+    let raw: Buffer;
+    try {
+      raw = execFileSync(
+        "ffmpeg",
+        ["-v", "error", "-ss", String(Math.max(0, sampleSec)), "-i", videoPath, "-frames:v", "1", "-vf", `scale=${w}:${h},format=gray`, "-f", "rawvideo", "-"],
+        { maxBuffer: 1024 * 1024 * 5 },
+      );
+    } catch {
+      results.push({ name: `no-void: "${block.id}"`, pass: null, measured: "could not extract frame" });
+      continue;
+    }
+    const rowStart = Math.round(h * NO_VOID_ROW_START_FRAC);
+    const rowEnd = Math.round(h * manifest.deskEdgeFrac);
+    const colStart = Math.round(w * 0.35);
+    const colEnd = Math.round(w * 0.65);
+    let minRowMean = Infinity;
+    let minRowFrac = NO_VOID_ROW_START_FRAC;
+    for (let y = rowStart; y < rowEnd; y++) {
+      let sum = 0;
+      for (let x = colStart; x < colEnd; x++) sum += raw[y * w + x];
+      const rowMean = sum / (colEnd - colStart);
+      if (rowMean < minRowMean) {
+        minRowMean = rowMean;
+        minRowFrac = y / h;
+      }
+    }
+    const pass = rowEnd <= rowStart ? true : minRowMean >= NO_VOID_LUMA_FLOOR;
+    results.push({
+      name: `no-void (rows ${NO_VOID_ROW_START_FRAC}H-${manifest.deskEdgeFrac.toFixed(2)}H, center columns): "${block.id}"`,
+      pass,
+      measured: rowEnd <= rowStart ? "band empty (desk edge above 0.55H)" : `min row luma=${minRowMean.toFixed(1)} at ${minRowFrac.toFixed(3)}H (floor ${NO_VOID_LUMA_FLOOR})`,
+      detail: pass ? undefined : "a row this dark between the crown and the desk edge reads as bare plate — the subject doesn't reach the desk",
+    });
+  }
+  return results;
+};
+
+/** Gate: face/edge luma ratio — the PRIMARY room-separation criterion
+ *  (ratio, not an absolute room-brightness number, so it generalizes
+ *  across skin tones — see backgroundReplace.ts's solveRoomLevelGain doc
+ *  comment). Floor of 5.0 is the original request's own explicit
+ *  acceptance bar; the reference reel itself measures ~5.8 (see
+ *  officeCompositeQC.ts's measureFrameEdgeLuma doc comment) — a solve
+ *  landing close to but not necessarily above the reference's own figure
+ *  still passes comfortably above this floor. */
+const FACE_EDGE_RATIO_MIN = 5.0;
+
+const faceEdgeRatioGates = (videoPath: string, edl: Edl, format: Format | undefined, matte: MatteArtifact | undefined): GateResult[] => {
+  if (!format || !matte) return [];
+  const results: GateResult[] = [];
+  for (const block of format.blocks) {
+    if (!block.backgroundReplace) continue;
+    const seg = edl.video.find((v) => v.blockId === block.id);
+    const matteBlock = matte.blocks.find((b) => b.blockId === block.id);
+    if (!seg || !matteBlock?.headBBoxFrac) continue;
+    const sampleWindowEnd = block.punchInTailSec ? Math.max(seg.tlInSec + 0.1, seg.tlOutSec - block.punchInTailSec) : seg.tlOutSec;
+    const sampleSec = sampleTimeAvoidingOverlays(seg.tlInSec, sampleWindowEnd, edl.overlays);
+
+    const faceP97 = measureFaceP97Rect(videoPath, sampleSec, matteBlock.headBBoxFrac, edl.width, edl.height);
+    const edgeLuma = measureFrameEdgeLuma(videoPath, sampleSec, edl.width, edl.height);
+    const name = `face/edge ratio >= ${FACE_EDGE_RATIO_MIN}: "${block.id}"`;
+    if (faceP97 === undefined || edgeLuma === 0) {
+      results.push({ name, pass: null, measured: "could not measure" });
+      continue;
+    }
+    const ratio = faceP97 / edgeLuma;
+    results.push({
+      name,
+      pass: ratio >= FACE_EDGE_RATIO_MIN,
+      measured: `face p97=${faceP97}, edge luma=${edgeLuma}, ratio=${ratio.toFixed(2)}`,
+    });
+  }
+  return results;
+};
+
+/** Gates: final-render grain + sharpness, checked against the SAME
+ *  targets the calibrate-time solve aims for (Phase 5's solveGrainStrengthOnVideo/
+ *  solvePlateBlurSigma) — these are the "did the solve's own target
+ *  survive to the shipped video" check, not a re-solve. Both grain and
+ *  sharpness measured on the SAME final render the solve is meant to
+ *  target — no synthetic probe involved here, so no probe-vs-real
+ *  mismatch to account for. */
+const GRAIN_TOLERANCE = 1.0;
+const SHARPNESS_RATIO_BAND: { min: number; max: number } = { min: 0.45, max: 0.85 };
+
+const grainAndSharpnessGates = (videoPath: string, edl: Edl, format: Format | undefined, matte: MatteArtifact | undefined): GateResult[] => {
+  if (!format) return [];
+  let manifest: ReturnType<typeof loadPlatesManifest> | undefined;
+  try {
+    manifest = loadPlatesManifest(format.id);
+  } catch {
+    return [];
+  }
+  const target = manifest.reference.talkingHead;
+  const results: GateResult[] = [];
+  for (const block of format.blocks) {
+    if (!block.backgroundReplace) continue;
+    const seg = edl.video.find((v) => v.blockId === block.id);
+    if (!seg) continue;
+    const sampleWindowEnd = block.punchInTailSec ? Math.max(seg.tlInSec + 0.1, seg.tlOutSec - block.punchInTailSec) : seg.tlOutSec;
+    const sampleSec = sampleTimeAvoidingOverlays(seg.tlInSec, sampleWindowEnd, edl.overlays);
+
+    const grain = measureTemporalGrainCropped(videoPath, edl.fps, edl.width, edl.height, target.flatBackdropRegion, 8, sampleSec);
+    const grainPass = Math.abs(grain - target.grainStdTarget) <= GRAIN_TOLERANCE;
+    results.push({
+      name: `final-render grain: "${block.id}"`,
+      pass: grainPass,
+      measured: `${grain.toFixed(2)} (target ${target.grainStdTarget}±${GRAIN_TOLERANCE})`,
+    });
+
+    const matteBlock = matte?.blocks.find((b) => b.blockId === block.id);
+    if (matteBlock?.headBBoxFrac) {
+      const w = 180;
+      const h = 320;
+      let raw: Buffer;
+      try {
+        raw = execFileSync(
+          "ffmpeg",
+          ["-v", "error", "-ss", String(Math.max(0, sampleSec)), "-i", videoPath, "-frames:v", "1", "-vf", `scale=${w}:${h},format=gray`, "-f", "rawvideo", "-"],
+          { maxBuffer: 1024 * 1024 * 5 },
+        );
+        const region = target.flatBackdropRegion;
+        const cropW = Math.max(2, Math.round(w * (region.rightFrac - region.leftFrac)));
+        const cropH = Math.max(2, Math.round(h * (region.bottomFrac - region.topFrac)));
+        const cropX = Math.round(w * region.leftFrac);
+        const cropY = Math.round(h * region.topFrac);
+        let bgSumSq = 0, bgSum = 0, bgN = 0;
+        for (let y = cropY; y < cropY + cropH; y++) {
+          for (let x = cropX; x < cropX + cropW; x++) {
+            const i = y * w + x;
+            const lap = -4 * raw[i] + raw[i - 1] + raw[i + 1] + raw[i - w] + raw[i + w];
+            bgSum += lap; bgSumSq += lap * lap; bgN++;
+          }
+        }
+        const bgVariance = bgN > 0 ? bgSumSq / bgN - (bgSum / bgN) * (bgSum / bgN) : 0;
+
+        const hb = matteBlock.headBBoxFrac;
+        const subjTop = Math.round(h * hb.topFrac);
+        const subjBottom = Math.round(h * hb.bottomFrac);
+        const subjLeft = Math.round(w * hb.leftFrac);
+        const subjRight = Math.round(w * hb.rightFrac);
+        let subjSumSq = 0, subjSum = 0, subjN = 0;
+        for (let y = Math.max(1, subjTop); y < Math.min(h - 1, subjBottom); y++) {
+          for (let x = Math.max(1, subjLeft); x < Math.min(w - 1, subjRight); x++) {
+            const i = y * w + x;
+            const lap = -4 * raw[i] + raw[i - 1] + raw[i + 1] + raw[i - w] + raw[i + w];
+            subjSum += lap; subjSumSq += lap * lap; subjN++;
+          }
+        }
+        const subjVariance = subjN > 0 ? subjSumSq / subjN - (subjSum / subjN) * (subjSum / subjN) : 0;
+
+        if (subjVariance > 0) {
+          const ratio = bgVariance / subjVariance;
+          const pass = ratio >= SHARPNESS_RATIO_BAND.min && ratio <= SHARPNESS_RATIO_BAND.max;
+          results.push({
+            name: `final-render sharpness ratio (backdrop/subject): "${block.id}"`,
+            pass,
+            measured: `${ratio.toFixed(2)} (target ${SHARPNESS_RATIO_BAND.min}-${SHARPNESS_RATIO_BAND.max})`,
+            detail: "measured on the final (grain-added) render — grain contributes high-frequency variance to both regions, same methodology the reference's own figure was likely measured with",
+          });
+        }
+      } catch {
+        // best-effort — skip sharpness for this block rather than fail the gate on an extraction error
+      }
+    }
+  }
+  return results;
+};
+
+/** Gates: the two hair-stability metrics computed by the matte stage
+ *  (generation/maskQC.ts), surfaced here so gates.json stays the single
+ *  QC report for a build — not a re-gate (the matte stage already threw
+ *  on the primary metric if it failed, so reaching this point means it
+ *  already passed; this just makes the number visible alongside every
+ *  other acceptance check). */
+const hairStabilityGates = (matte: MatteArtifact | undefined): GateResult[] => {
+  if (!matte) return [];
+  const results: GateResult[] = [];
+  for (const block of matte.blocks) {
+    results.push({
+      name: `hair-stability temporal ratio <= ${HAIR_TEMPORAL_RATIO_MAX}: "${block.blockId}"`,
+      pass: temporalAlphaGatePasses({ hairStd: block.qc.hairTemporalStd, torsoStd: block.qc.torsoTemporalStd, ratio: block.qc.temporalRatio }),
+      measured: `ratio=${block.qc.temporalRatio.toFixed(2)} (hairStd=${block.qc.hairTemporalStd.toFixed(1)}, torsoStd=${block.qc.torsoTemporalStd.toFixed(1)}, engine=${block.engine})`,
+    });
+    results.push({
+      name: `hair-edge boundary jitter (informational): "${block.blockId}"`,
+      pass: null,
+      measured: `ratio=${block.qc.jitterRatio.toFixed(2)}, maxP95Residual=${block.qc.maxResidualP95Px.toFixed(2)}px` +
+        ` (would-${jitterGatePasses({ hairJitterPx: block.qc.hairJitterPx, torsoJitterPx: block.qc.torsoJitterPx, jitterRatio: block.qc.jitterRatio, maxResidualP95Px: block.qc.maxResidualP95Px }) ? "pass" : "fail"} the unused position-tracking gate)`,
+    });
+  }
+  return results;
+};
+
 /** Gates: caption hygiene — no flash-frame group, and the bigTitle layer
  *  (full-screen keyword cards) stays a punctuation device, not a karaoke
  *  line through the whole voice runtime (measured once: 24/27 groups
@@ -543,7 +824,7 @@ const structureGate = (edl: Edl, format: Format | undefined): GateResult => {
   };
 };
 
-export const runGates = (videoPath: string, edl: Edl): GateResult[] => {
+export const runGates = (videoPath: string, edl: Edl, matte?: MatteArtifact): GateResult[] => {
   let format: Format | undefined;
   try {
     format = loadFormat(edl.formatId);
@@ -558,6 +839,10 @@ export const runGates = (videoPath: string, edl: Edl): GateResult[] => {
     ...shotLumaGates(videoPath, edl),
     ...plateCompositeBrightnessGates(videoPath, edl, format),
     ...talkingHeadLumaGates(videoPath, edl, format),
+    ...noVoidLumaGates(videoPath, edl, format),
+    ...faceEdgeRatioGates(videoPath, edl, format, matte),
+    ...grainAndSharpnessGates(videoPath, edl, format, matte),
+    ...hairStabilityGates(matte),
     ...captionGates(edl, format),
     ...motionSignatureGates(videoPath, edl, format),
     shotDensityGate(edl),

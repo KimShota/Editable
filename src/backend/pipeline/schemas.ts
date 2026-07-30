@@ -780,6 +780,17 @@ export const FilledFormatSchema = z.object({
   bindings: z.record(z.string(), BoundAssetSchema),
   overrides: OverridesSchema.optional(),
   lexicon: z.array(z.string()).default([]),
+  /** Per-block karaoke-title baseline override, keyed by blockId — set by
+   *  backgroundReplace.ts ONLY when its own desk-overlap solve shifted a
+   *  block's framing down from the manifest's own headTopFrac target (see
+   *  backgroundReplace.ts's solveDeskOverlap doc comment). assemble.ts
+   *  prefers this over the manifest's static target when present, so the
+   *  title registers against where the head actually landed. In-memory
+   *  only within a single run (same "filled.json stays pure intake
+   *  output" contract every other backgroundReplace binding follows) —
+   *  absent for a standalone `--only assemble` invocation, same
+   *  pre-existing gap as those bindings. */
+  karaokeTitleBaselines: z.record(z.string(), z.number()).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -1145,6 +1156,17 @@ export const PlatesManifestSchema = z.object({
        *  comment. Used as the directional key's own solve target (2d),
        *  not the whole-subject relight curve's target. */
       faceP97Target: z.number(),
+      /** Target ratio of face p97 to the room's own edge luma (measured
+       *  via generation/officeCompositeQC.ts's measureFrameEdgeLuma) — how
+       *  much the face should "pop" off the room, the PRIMARY room-level
+       *  criterion (ratio, not an absolute room-brightness number) so it
+       *  generalizes across skin tones: solveRoomLevelGain solves the
+       *  room relative to THIS job's own measured face p97, never a fixed
+       *  absolute target that would over-darken a fair user's room or
+       *  under-darken a dark-skinned user's. Measured directly against
+       *  the reference reel itself (authoring/draft-baf87683/source.mp4,
+       *  t=1.0-2.0s, stable at edge luma 20 throughout): 116/20 = 5.8. */
+      faceEdgeRatioTarget: z.number().positive(),
       /** Target ratio of the composited backdrop's own Laplacian-variance
        *  sharpness to the subject's — a plate this much SOFTER than the
        *  subject reads as "behind them," not "pasted on top." The actual
@@ -1186,6 +1208,68 @@ export const PlatesManifestSchema = z.object({
       durationSec: z.number().positive(),
     })
     .optional(),
+});
+
+// ---------------------------------------------------------------------------
+// Matte — the isolated video-matting stage's own artifact
+// (artifacts/<job>/matte.json). See pipeline/matte.ts.
+// ---------------------------------------------------------------------------
+
+export const BBoxFracSchema = z.object({
+  topFrac: z.number(),
+  bottomFrac: z.number(),
+  leftFrac: z.number(),
+  rightFrac: z.number(),
+});
+
+export const MatteBlockSchema = z.object({
+  blockId: z.string(),
+  videoSlot: z.string(),
+  /** jobDir-relative paths, same convention as BoundAsset.path. */
+  subclipPath: z.string(),
+  masksDir: z.string(),
+  previewPath: z.string(),
+  frameCount: z.number().int().positive(),
+  fps: z.number().positive(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  engine: z.enum(["rvm", "vision"]),
+  downsampleRatio: z.number().positive().optional(),
+  subjectBBoxFrac: BBoxFracSchema.optional(),
+  headBBoxFrac: BBoxFracSchema.optional(),
+  /** sha256 over the sorted per-frame mask files' own hashes — stamped
+   *  into the composite stage's cache key (backgroundReplace.ts) so a
+   *  changed matte invalidates the flattened composite AND the fg-alpha
+   *  layer together, keeping the two in lockstep without re-running
+   *  Vision/RVM twice per block. */
+  masksHash: z.string(),
+  qc: z.object({
+    /** Informational only — see generation/maskQC.ts's own doc comment
+     *  for why boundary-position tracking doesn't reliably discriminate
+     *  temporal stability (dominated by hair-wisp presence/absence, not
+     *  genuine wobble). Not gated on. */
+    hairJitterPx: z.number(),
+    torsoJitterPx: z.number(),
+    jitterRatio: z.number(),
+    maxResidualP95Px: z.number(),
+    /** PRIMARY stability metric — per-pixel temporal alpha variance,
+     *  hair band vs torso band. Gated at HAIR_TEMPORAL_RATIO_MAX. */
+    hairTemporalStd: z.number(),
+    torsoTemporalStd: z.number(),
+    temporalRatio: z.number(),
+    /** (subjectBottom - headTop) / headHeight, in head-heights — how much
+     *  body the SOURCE footage shows below the crown. A raw measurement
+     *  only: the required threshold depends on the target plate's own
+     *  deskEdgeFrac, which is backgroundReplace.ts's concern, not this
+     *  stage's — this stage has no plate to compare against. Undefined
+     *  when a head bbox couldn't be measured. */
+    bodyLenHeadHeights: z.number().optional(),
+  }),
+});
+
+export const MatteArtifactSchema = z.object({
+  formatId: z.string(),
+  blocks: z.array(MatteBlockSchema),
 });
 
 // ---------------------------------------------------------------------------
