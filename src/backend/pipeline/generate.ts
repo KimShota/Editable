@@ -78,6 +78,13 @@ export const generate = async (
   const provider = pickGenerationProvider(generatorChoice);
   const styleProfile = loadStyleProfile(format.id);
   const rawIdentityImages = identityImagePaths(format, filled);
+  // Triptych's "realCrop" sub-shot motion (schemas.ts's SubShotSpecSchema)
+  // crops straight from the job's own raw speaking-take footage — the
+  // generate stage runs BEFORE trim/backgroundReplace, so this is the
+  // raw take, not the office-composited version; fine for a tight
+  // close-up crop, where the backdrop barely reads anyway.
+  const speakingTakeBinding = format.speakingTakeSlot ? filled.bindings[format.speakingTakeSlot.name] : undefined;
+  const speakingTakePath = speakingTakeBinding?.type === "file" ? speakingTakeBinding.absPath : undefined;
 
   const generatedDir = path.join(filled.jobDir, "generated");
   fs.mkdirSync(generatedDir, { recursive: true });
@@ -154,6 +161,8 @@ export const generate = async (
         subShots: spec.subShots,
         posePrompt: spec.posePrompt,
         outPath: absOutPath,
+        speakingTakePath,
+        strict: process.env.STRICT_GENERATION === "1",
       });
       fs.writeFileSync(hashFile, hash);
     }

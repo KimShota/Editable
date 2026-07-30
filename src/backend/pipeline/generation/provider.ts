@@ -51,6 +51,25 @@ export type GenerationRequest = {
   posePrompt?: string;
   /** Where the provider must write the resulting MP4. */
   outPath: string;
+  /** Absolute path to the job's own speaking-take footage, when the
+   *  format has one (FormatSchema's speakingTakeSlot) — triptych's
+   *  "realCrop" sub-shot motion crops a real, identity-perfect window out
+   *  of it instead of generating anything (see SubShotSpecSchema's
+   *  motion doc comment). Undefined for a format with no single-take
+   *  voice blocks at all. */
+  speakingTakePath?: string;
+  /** generatedScene only — when true, a shot that exhausts its retry
+   *  ladder without clearing hard gates THROWS (naming the slot) instead
+   *  of silently tiering down to the composite-v2 fallback. Off by
+   *  default: a job that can never fail outright is the right behavior
+   *  for a worldwide product (some real result beats a hard failure for
+   *  an ordinary user), but during active tuning/QA a silent tier-down is
+   *  exactly the kind of thing that should stop the run instead of
+   *  shipping quietly — this shipped as a real incident: two montage
+   *  members tiered down to composites of the user's own real (light-
+   *  colored) trousers, and nothing surfaced it until a human noticed
+   *  trouser color in a rendered frame. */
+  strict?: boolean;
 };
 
 export interface GenerationProvider {
@@ -59,8 +78,16 @@ export interface GenerationProvider {
 }
 
 /** How far zoompan pushes in over the clip's full duration — subtle, not a
- *  Ken-Burns cliche, since the point is to not distract from the montage. */
-const ZOOM_PER_FRAME = 0.0008;
+ *  Ken-Burns cliche, since the point is to not distract from the montage.
+ *  Lowered from 0.0008: measured directly against the reference reel's own
+ *  silhouette shots (mean frame-to-frame luma |Δ| ~0.5-0.6, "essentially
+ *  static, no fake drift" per the motion-parity plan) vs this pipeline's
+ *  own generated stills at the old rate (~1.3-1.4, roughly 2.4x too much
+ *  motion for a shot the reference holds still) — every caller of
+ *  animateStillToClip in this pipeline is a generated/composited still
+ *  (beats, montage members, end card, detail stills, the no-API fallback),
+ *  none of which should read as more animated than the reference's own. */
+const ZOOM_PER_FRAME = 0.00035;
 const MAX_ZOOM = 1.25;
 
 /**

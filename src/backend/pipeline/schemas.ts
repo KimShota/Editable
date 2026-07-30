@@ -163,6 +163,43 @@ export const SubShotSpecSchema = z.object({
    *  reused still get a visibly different push than the shot it's reused
    *  from, so the same source image doesn't read as a repeated shot. */
   panDirection: z.enum(["in", "out", "left", "right"]).optional(),
+  /** triptych panels only — how this panel gets its own motion, instead
+   *  of every panel sharing one flat Ken-Burns push over the whole
+   *  stacked frame (the "still masquerading as a moving shot" defect:
+   *  measured against the reference, its middle/cash panel moves ~24
+   *  luma/frame vs a silhouette still's own ~0.5-1.5). "kenBurns"
+   *  (default): the existing still + slow push, for panels the reference
+   *  itself barely moves (shoes, ~4.6). "realCrop": crops a window of the
+   *  job's own speaking-take footage instead of generating anything —
+   *  identity-perfect, genuinely moving, free (the eyes panel). "dop":
+   *  generates the panel's still exactly as today, then sends it through
+   *  Higgsfield's DoP image2video for real motion (the cash panel, whose
+   *  measured shuffle motion a still or a push can't approximate).
+   *  "templateClip": plays a pre-built, format-shipped clip verbatim (see
+   *  `templateClipPath`) — for a panel with no identity content at all
+   *  (cash, shoes), built ONCE offline and reused free for every job,
+   *  rather than paying for DoP on every single build. */
+  motion: z.enum(["kenBurns", "realCrop", "dop", "templateClip"]).default("kenBurns"),
+  /** motion:"realCrop" only — where to crop from, as a FRACTION (0-1) of
+   *  the job's own speaking-take total duration, not an absolute second
+   *  count: every user's take runs a different length depending on their
+   *  own pacing, so a fixed second offset tuned against one job's ~10s
+   *  take would crop the wrong moment (or past the end entirely) for
+   *  anyone else's. A fraction scales with whatever the user actually
+   *  recorded. 0.75 (this format's own default) lands late in the take,
+   *  inside the final line for most users' own pacing. */
+  realCropAtFrac: z.number().min(0).max(1).optional(),
+  /** motion:"dop" only — the motion prompt sent to Higgsfield alongside
+   *  the generated still (e.g. "a hand shuffles a stack of banknotes").
+   *  Falls back to `shot` when omitted. */
+  motionPrompt: z.string().optional(),
+  /** motion:"templateClip" only — formatAssetsDir(formatId)-relative
+   *  filename of the pre-built clip (checked into formats/assets/<id>/,
+   *  same convention as PlateAssetSchema's own `file`) to play verbatim
+   *  for this panel — resolved to an absolute path at generation time by
+   *  modelShots.ts, never stored as one, so the format JSON stays
+   *  portable across machines/deployments. */
+  templateClipPath: z.string().optional(),
 });
 
 export const GenerationSpecSchema = z.object({
@@ -281,9 +318,18 @@ export const BlockSchema = z.object({
    *  block regardless of this field. "bigTitle": ALSO build full-screen
    *  keyword-title cards (see `keywordTitle`) that render concurrently
    *  with the lowerThird line — the reference reel shows both layers at
-   *  once, not one word-karaoke line replacing the other. Drives
-   *  Captions.tsx's per-group render branch. */
-  captionVariant: z.enum(["lowerThird", "bigTitle"]).default("lowerThird"),
+   *  once, not one word-karaoke line replacing the other. "karaokeTitle":
+   *  REPLACES lowerThird/bigTitle entirely with one full-screen Didone
+   *  title card per word of the block's own line, shown one at a time in
+   *  sequence (assemble.ts builds one EdlCaptionGroup carrying every
+   *  word, each with its own tlStartSec/tlEndSec — KaraokeTitleLayer.tsx
+   *  picks whichever is active). Positioned so its own baseline sits
+   *  where the talking-head composite's own head-top lands (see
+   *  PlatesManifestSchema's headTopFrac), which is what lets the subject
+   *  occlude it — see EdlVideo.tsx's render order doc comment for why
+   *  this needs a SEPARATE render pass from ordinary captions, not just
+   *  another variant inside Captions.tsx. */
+  captionVariant: z.enum(["lowerThird", "bigTitle", "karaokeTitle"]).default("lowerThird"),
   /** Only meaningful alongside captionVariant:"bigTitle". Which word(s) of
    *  the block get their own full-screen title card, instead of every
    *  word (the reference punches ONE chosen word per beat, not a karaoke
@@ -837,6 +883,12 @@ export const EdlVideoSegmentSchema = z.object({
   /** Independent of `muted` (which is all-or-nothing) — lets a clip's own
    *  audio be dialed down/up rather than only ever fully on or fully off. */
   volume: z.number().min(0).max(1).default(1),
+  /** public/-relative path to this segment's own fg-alpha layer (subject
+   *  cutout + desk foreground, transparent elsewhere — see matte.ts's
+   *  compositeSubjectAlphaVideo), when backgroundReplace.ts built one.
+   *  EdlVideo.tsx renders it as a SEPARATE layer above the karaoke title
+   *  and below other overlays — see its own render-order doc comment. */
+  fgSrc: z.string().optional(),
 });
 
 export const EdlOverlaySchema = z.object({
@@ -895,7 +947,7 @@ export const EdlCaptionGroupSchema = z.object({
    *  wants BOTH a lower-third opening caption AND full-screen keyword
    *  titles over the same block, at the same time (two groups with
    *  overlapping tlIn/tlOut, one of each variant). */
-  variant: z.enum(["lowerThird", "bigTitle"]).default("lowerThird"),
+  variant: z.enum(["lowerThird", "bigTitle", "karaokeTitle"]).default("lowerThird"),
   /** The owning block's own `captionTheme`, or the format's captionStyle
    *  theme when the block doesn't override it — see BlockSchema's doc
    *  comment. Captions.tsx picks its color/weight/casing from this. */
@@ -935,6 +987,14 @@ export const EdlSchema = z.object({
    *  inserts alike, unlike generation/provider.ts's ffmpeg grade which
    *  only ever touched generated stills. */
   grade: GradeSchema.optional(),
+  /** Where a karaokeTitle card's own baseline should sit (frame fraction)
+   *  — carried straight through from the format's own talking-head
+   *  headTopFrac (PlatesManifestSchema) when any block uses captionVariant
+   *  "karaokeTitle", so KaraokeTitleLayer.tsx stays generic/data-driven
+   *  (see EdlVideo.tsx's own doc comment: "new format = new config, not
+   *  new components") instead of hardcoding a position that's specific to
+   *  this one format's own head framing. */
+  karaokeTitleBaselineFrac: z.number().min(0).max(1).optional(),
   transitions: z.array(EdlTransitionSchema).default([]),
   music: z
     .object({
@@ -1059,6 +1119,57 @@ export const PlatesManifestSchema = z.object({
       headHeightFrac: z.number().min(0).max(1),
       lumaP50: z.number(),
       lumaP95: z.number(),
+      /** Reference's own face-region (head-bbox) mean luma, measured the
+       *  SAME way relight.ts's measureFaceLuma measures a render — see
+       *  solveSubjectRelight's faceMeasured/faceTargetMean doc comment for
+       *  why this differs from (and is more useful than) a hand-picked
+       *  bright-patch reading. */
+      faceLumaMean: z.number(),
+      /** Lateral (X-axis) darkening applied to the FLATTENED talking-head
+       *  composite so the frame edges fall off toward black the way the
+       *  reference's own single-key-light room does — see matte.ts's
+       *  applyLateralFalloff. minFactor: RGB multiplier at the frame's own
+       *  left/right edges (1 = no darkening). power: curve shape (1 =
+       *  linear falloff from center; >1 keeps more of the center
+       *  unaffected, falling off faster near the edges). Tuned once
+       *  against this job's own reference/render gap, not measured
+       *  directly — same category as deskEdgeFrac. */
+      edgeFalloff: z.object({ minFactor: z.number().min(0).max(1), power: z.number().positive() }),
+      /** Reference's own face-region p97 luma (middle 60% width of the
+       *  head bbox, rows 35-85% of the box — excludes hair/forehead and
+       *  chin/neck shadow — intersected with the person mask, 97th
+       *  percentile). Distinct from faceLumaMean above (a MEAN over the
+       *  whole head bbox, hair included): a fixed-rectangle sample that
+       *  sweeps in hair/shadow reads far darker than the face actually is
+       *  — see generation/officeCompositeQC.ts's measureFaceP97 doc
+       *  comment. Used as the directional key's own solve target (2d),
+       *  not the whole-subject relight curve's target. */
+      faceP97Target: z.number(),
+      /** Target ratio of the composited backdrop's own Laplacian-variance
+       *  sharpness to the subject's — a plate this much SOFTER than the
+       *  subject reads as "behind them," not "pasted on top." The actual
+       *  blur sigma applied is solved per job against this job's own
+       *  measured subject sharpness (generation/officeCompositeQC.ts's
+       *  solvePlateBlurSigma), never a fixed sigma. */
+      plateSharpnessRatioMid: z.number().positive(),
+      /** Target temporal luma std (grain) on a flat backdrop patch — real
+       *  sensor noise flickers frame to frame; a synthesized/still plate
+       *  has none until this is added. The noise filter STRENGTH needed
+       *  to hit this is solved per plate (solveGrainStrength), not fixed. */
+      grainStdTarget: z.number().positive(),
+      /** Target R/B channel-mean ratio ("warmth") for the composited
+       *  room. The colorbalance SHIFT needed to hit this is solved from
+       *  the plate's own measured R/B (solveWarmthShift), not fixed. */
+      roomWarmthTarget: z.number().positive(),
+      /** A flat, texture-free patch of the office plate (frame fractions)
+       *  — away from the subject and desk foreground — used to measure
+       *  and solve both grainStdTarget and roomWarmthTarget against. */
+      flatBackdropRegion: z.object({
+        topFrac: z.number().min(0).max(1),
+        bottomFrac: z.number().min(0).max(1),
+        leftFrac: z.number().min(0).max(1),
+        rightFrac: z.number().min(0).max(1),
+      }),
     }),
     endCard: z.object({
       subjectTopFrac: z.number().min(0).max(1),

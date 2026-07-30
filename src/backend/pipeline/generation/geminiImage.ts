@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { withTimeout } from "./withTimeout";
 
 /**
  * Shared Gemini `generateContent` plumbing — factored out of gemini.ts
@@ -62,15 +63,32 @@ const callGemini = async (
     ...(imageConfig ? { imageConfig } : {}),
   };
 
-  const response = await fetch(`${GEMINI_API_BASE}/models/${model}:generateContent?key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      ...(Object.keys(generationConfig).length > 0 ? { generationConfig } : {}),
-    }),
-  });
-  const json = await response.json();
+  // Two independent layers, not redundant: AbortSignal is the "real"
+  // cancellation (frees the socket) but was observed NOT firing reliably
+  // on its own this session (a run stalled 20+ minutes with both this and
+  // faceCheck.ts's SDK timeout supposedly active) — withTimeout is a hard
+  // backstop that settles this call's own promise on schedule regardless
+  // of whether the abort actually propagated through fetch/undici.
+  const doFetch = async (): Promise<Response> => {
+    try {
+      return await fetch(`${GEMINI_API_BASE}/models/${model}:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          ...(Object.keys(generationConfig).length > 0 ? { generationConfig } : {}),
+        }),
+        signal: AbortSignal.timeout(115_000),
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "TimeoutError") {
+        throw new Error(`gemini ${model}: request timed out after 115s (no response — likely a stuck connection, not a slow one)`);
+      }
+      throw err;
+    }
+  };
+  const response = await withTimeout(doFetch(), 120_000, `gemini ${model}`);
+  const json = await withTimeout(response.json(), 30_000, `gemini ${model} (parsing response body)`);
   if (!response.ok) {
     throw new Error(`gemini ${model}: API error ${response.status}: ${JSON.stringify(json).slice(0, 2000)}`);
   }

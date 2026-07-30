@@ -125,7 +125,7 @@
         }
       ],
       "captions": true,
-      "captionVariant": "bigTitle",
+      "captionVariant": "karaokeTitle",
       "roles": [],
       "anchors": [
         {
@@ -198,7 +198,7 @@
         }
       ],
       "captions": true,
-      "captionVariant": "bigTitle",
+      "captionVariant": "karaokeTitle",
       "roles": [],
       "anchors": [
         {
@@ -272,8 +272,7 @@
         }
       ],
       "captions": true,
-      "captionVariant": "bigTitle",
-      "keywordTitle": { "source": "llm", "maxWords": 3 },
+      "captionVariant": "karaokeTitle",
       "roles": [],
       "anchors": [
         {
@@ -316,9 +315,9 @@
             "durationSec": 1.8,
             "seed": 0,
             "subShots": [
-              { "kind": "detailStill", "shot": "extreme close-up of eyeglasses and eyes, dramatic hard-key lighting, deep shadow", "treatment": "silhouette", "seed": 0 },
-              { "kind": "detailStill", "shot": "close-up of hands counting a stack of hundred dollar bills, dramatic lighting", "treatment": "silhouette", "seed": 1 },
-              { "kind": "detailStill", "shot": "close-up of polished dress shoes on a dark wood floor, dramatic lighting", "treatment": "silhouette", "seed": 2 }
+              { "kind": "detailStill", "shot": "extreme close-up of eyes, real footage crop", "treatment": "silhouette", "seed": 0, "motion": "realCrop", "realCropAtFrac": 0.75 },
+              { "kind": "detailStill", "shot": "close-up of hands counting a stack of hundred dollar bills, dramatic lighting", "treatment": "silhouette", "seed": 1, "motion": "templateClip", "templateClipPath": "template-clips/cash-shuffle.mp4" },
+              { "kind": "detailStill", "shot": "close-up of polished dress shoes on a dark wood floor, dramatic lighting", "treatment": "silhouette", "seed": 2, "motion": "templateClip", "templateClipPath": "template-clips/dress-shoes.mp4" }
             ]
           }
         }
@@ -326,7 +325,18 @@
       "captions": false,
       "roles": [],
       "anchors": [],
-      "events": [],
+      "events": [
+        {
+          "id": "triptych-name-stamp",
+          "kind": "overlay",
+          "component": {
+            "component": "TriptychNameStamp",
+            "params": { "textAnchor": "name-marker", "textAnchorBlockId": "name-reveal" }
+          },
+          "timing": { "kind": "fixed", "anchor": "blockEnd", "offsetSec": -0.25 },
+          "durationSec": 0.25
+        }
+      ],
       "transitionAfter": {
         "component": "cut",
         "params": { "durationSec": 0 }

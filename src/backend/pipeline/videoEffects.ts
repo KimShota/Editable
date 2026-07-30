@@ -29,6 +29,16 @@ export const applyPunchInTail = (
     /** Vertical bias of the crop window: 0 = top-aligned (favors a face
      *  near the top of frame), 1 = bottom-aligned. */
     yBias?: number;
+    /** true for an alpha-carrying input/output (ProRes 4444, .mov, no
+     *  audio) instead of the ordinary opaque libx264/.mp4 path — the
+     *  karaokeTitle fg-alpha layer (matte.ts's compositeSubjectAlphaVideo)
+     *  needs the SAME punch-in crop/zoom applied as the flattened
+     *  composite it sits on top of, or the two layers shear apart during
+     *  bold-claim's own punch-in tail (see backgroundReplace.ts's own
+     *  doc comment on why the two layers must always move together). The
+     *  crop/scale/concat filter graph itself is identical either way —
+     *  only the codec/pix_fmt and audio mapping differ. */
+    alpha?: boolean;
   },
 ): void => {
   const zoom = opts.zoom ?? 0.5;
@@ -47,8 +57,8 @@ export const applyPunchInTail = (
     "-i", inputPath,
     "-filter_complex", filterComplex,
     "-map", "[vout]",
-    "-map", "0:a?",
-    "-c:a", "copy",
+    ...(opts.alpha ? [] : ["-map", "0:a?", "-c:a", "copy"]),
+    ...(opts.alpha ? ["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le"] : []),
     outPath,
   ]);
 };

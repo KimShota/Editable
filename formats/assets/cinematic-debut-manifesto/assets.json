@@ -62,10 +62,25 @@
   "deskEdgeFrac": 0.63,
   "reference": {
     "talkingHead": {
-      "headTopFrac": 0.29,
-      "headHeightFrac": 0.145,
+      "headTopFrac": 0.264,
+      "headHeightFrac": 0.17,
       "lumaP50": 14,
-      "lumaP95": 76
+      "lumaP95": 76,
+      "faceLumaMean": 44,
+      "edgeFalloff": {
+        "minFactor": 0.3,
+        "power": 1.7
+      },
+      "faceP97Target": 116,
+      "plateSharpnessRatioMid": 0.65,
+      "grainStdTarget": 3.4,
+      "roomWarmthTarget": 2.3,
+      "flatBackdropRegion": {
+        "topFrac": 0.04,
+        "bottomFrac": 0.2,
+        "leftFrac": 0.06,
+        "rightFrac": 0.34
+      }
     },
     "endCard": {
       "subjectTopFrac": 0.245,

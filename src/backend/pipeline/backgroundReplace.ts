@@ -1,12 +1,21 @@
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { probeFile } from "./intake";
-import { compositeVideoOnBackdrop, generateVignetteBackdrop } from "./generation/matte";
+import { applyLateralFalloff, compositeSubjectAlphaVideo, compositeVideoOnBackdrop, generateVignetteBackdrop, resizeCover, SubjectTransform } from "./generation/matte";
 import { deskForegroundPath, loadPlatesManifest, platePath } from "./generation/plates";
-import { measureSubjectBBox, computeSubjectTransform } from "./generation/subjectFit";
+import { measureSubjectBBox, measureHeadBBox, computeSubjectTransform } from "./generation/subjectFit";
 import { measureSubjectLuma, solveSubjectRelight } from "./generation/relight";
+import {
+  applyFilterToImage,
+  measureSubjectSharpness,
+  solveDirectionalKey,
+  solveGrainStrengthOnVideo,
+  solvePlateBlurSigma,
+  solveWarmthFilter,
+} from "./generation/officeCompositeQC";
 import { applyPunchInTail, extractCloseUpCutaway } from "./videoEffects";
 import { PIPELINE_VERSION } from "./pipelineVersion";
 import { Block, BoundAsset, FilledFormat, Format, PlatesManifest, Transcript, TrimPoints } from "./types";
@@ -103,19 +112,155 @@ const resolvePlateComposite = (block: Block): { plate: string; treatment: "lit" 
  *  `lumaTarget` is given — skipped for a silhouette treatment, since
  *  SILHOUETTE_CRUSH already does the darkening and stacking a relight
  *  curve under it would just fight the crush). Shared by both the
- *  talking-head office composite and the broll plate composites below. */
+ *  talking-head office composite and the broll plate composites below.
+ *
+ *  `useHeadFraming`, when true, switches the framing measurement from
+ *  whole-person to head-only: the framing target (topFrac/heightFrac) is
+ *  a HEAD measurement for the talking-head shot, and fitting it against
+ *  measureSubjectBBox's whole-person bbox scales the entire seated
+ *  person to head size — the "half life-size" defect this exists to fix
+ *  (see subjectFit.ts's measureHeadBBox doc comment).
+ *
+ *  The relight curve itself stays anchored to the WHOLE-SUBJECT
+ *  p50/p95 (not the face region specifically) — a face-anchored midtone
+ *  was tried and measured directly: it does brighten the face, but the
+ *  SAME curve applies to every other subject pixel too (clothing, hair),
+ *  and anchoring the midtone to the face's own (brighter) value steepens
+ *  the low-end slope enough to noticeably over-brighten the whole
+ *  composite (measured: whole-frame p50 jumped from the reference's own
+ *  ~14-17 to ~69-74). The scale fix ABOVE turns out to already fix most
+ *  of the face-too-dark complaint on its own (a correctly-sized head is a
+ *  much larger fraction of the sampled subject mask, measured face patch
+ *  34→37 with the plain whole-subject curve unmodified) without needing
+ *  a face-specific curve override that unbalances everything else. */
 const calibrateSubject = (
   target: { topFrac: number; heightFrac: number },
   lumaTarget: { p50: number; p95: number } | undefined,
   width: number,
   height: number,
+  useHeadFraming?: boolean,
 ) => (framesDir: string, masksDir: string) => {
-  const bbox = measureSubjectBBox(masksDir, width, height);
+  const bbox = useHeadFraming ? measureHeadBBox(masksDir, width, height) : measureSubjectBBox(masksDir, width, height);
   const subjectTransform = computeSubjectTransform(bbox, target, width, height);
   if (!lumaTarget) return { subjectTransform };
   const measured = measureSubjectLuma(framesDir, masksDir);
-  const subjectFilter = measured ? solveSubjectRelight(measured, lumaTarget) : undefined;
+  if (!measured) return { subjectTransform };
+  const subjectFilter = solveSubjectRelight(measured, lumaTarget);
   return { subjectTransform, subjectFilter };
+};
+
+/**
+ * The talking-head office composite's own calibrate callback (plan v6 §2):
+ * on top of calibrateSubject's framing + whole-subject relight curve, this
+ * also solves the four "reads as pasted" fixes — sharpness (2a), grain
+ * (2b), color temperature (2c), and a directional key (2d) — every one of
+ * them by MEASURING this job's own subject (2a, 2d) or the plate itself
+ * (2b, 2c) and solving a filter to hit the reference's own fixed target
+ * (PlatesManifestSchema's talkingHead.faceP97Target/plateSharpnessRatioMid/
+ * grainStdTarget/roomWarmthTarget — see officeCompositeQC.ts), never a
+ * constant applied blind. `officePlatePath`/`fps` are closed over rather
+ * than threaded through compositeVideoOnBackdrop's calibrate signature,
+ * since only this one caller needs them.
+ */
+const buildOfficeCompositeCalibrate = (
+  target: PlatesManifest["reference"]["talkingHead"],
+  officePlatePath: string,
+  width: number,
+  height: number,
+  fps: number,
+) => (framesDir: string, masksDir: string) => {
+  const bbox = measureHeadBBox(masksDir, width, height);
+  const subjectTransform = computeSubjectTransform(bbox, { topFrac: target.headTopFrac, heightFrac: target.headHeightFrac }, width, height);
+
+  const measured = measureSubjectLuma(framesDir, masksDir);
+  let subjectFilter = measured ? solveSubjectRelight(measured, { p50: target.lumaP50, p95: target.lumaP95 }) : undefined;
+
+  // 2d — directional key: probe what the whole-subject curve above
+  // actually does to the FACE specifically (p97 of the hair/shadow-
+  // excluding region) on ONE representative frame, then solve (iterating
+  // — a one-shot target/measured ratio was tried and measured directly to
+  // undershoot, see officeCompositeQC.ts's solveDirectionalKey doc
+  // comment) a feathered gain centered on the head bbox that closes that
+  // remaining gap — a flat lift would brighten hands/torso right along
+  // with the face, which is exactly the defect this avoids.
+  if (subjectFilter && bbox) {
+    const sampleFrame = pickMiddleFrame(framesDir);
+    if (sampleFrame) {
+      const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-facep97-probe-"));
+      try {
+        const cutoutPath = path.join(probeDir, "cutout.png");
+        execFileSync("ffmpeg", [
+          "-y", "-v", "error",
+          "-i", path.join(framesDir, sampleFrame), "-i", path.join(masksDir, sampleFrame),
+          "-filter_complex", "[0][1]alphamerge",
+          cutoutPath,
+        ]);
+        const relitPath = path.join(probeDir, "relit.png");
+        applyFilterToImage(cutoutPath, subjectFilter, relitPath);
+        const gainExpr = solveDirectionalKey(relitPath, path.join(masksDir, sampleFrame), bbox, width, height, target.faceP97Target);
+        if (gainExpr) {
+          subjectFilter = `${subjectFilter},format=rgba,geq=r='r(X\\,Y)*${gainExpr}':g='g(X\\,Y)*${gainExpr}':b='b(X\\,Y)*${gainExpr}':a='alpha(X\\,Y)'`;
+        }
+      } finally {
+        fs.rmSync(probeDir, { recursive: true, force: true });
+      }
+    }
+  }
+
+  // 2a/2c — plate-side fixes (blur, then color); both solve against a
+  // canvas-sized copy of the raw plate (the same resolution the composite
+  // actually uses). 2b (grain) is NOT solved here — see replaceBackgrounds'
+  // own grain step, applied after this composite AND applyLateralFalloff
+  // are both done, against the ACTUAL final encode rather than a plate-only
+  // probe (a probe-solved strength measured ~2x too weak once it went
+  // through the real pipeline's own encode passes — see
+  // officeCompositeQC.ts's solveGrainStrengthOnVideo doc comment).
+  let backdropFilter: string | undefined;
+  const subjectVariance = measureSubjectSharpness(framesDir, masksDir, width, height);
+  if (subjectVariance !== undefined && subjectVariance > 0) {
+    const plateProbeDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-plate-solve-"));
+    try {
+      const sizedPlate = path.join(plateProbeDir, "plate.png");
+      resizeCover(officePlatePath, width, height, sizedPlate);
+
+      const sigma = solvePlateBlurSigma(sizedPlate, width, height, subjectVariance, target.plateSharpnessRatioMid);
+      const blurredPlate = path.join(plateProbeDir, "plate-blur.png");
+      if (sigma > 0.01) {
+        applyFilterToImage(sizedPlate, `gblur=sigma=${sigma.toFixed(3)}`, blurredPlate);
+      } else {
+        fs.copyFileSync(sizedPlate, blurredPlate);
+      }
+
+      const region = target.flatBackdropRegion;
+      const cropW = Math.max(2, Math.round(width * (region.rightFrac - region.leftFrac)));
+      const cropH = Math.max(2, Math.round(height * (region.bottomFrac - region.topFrac)));
+      const cropX = Math.round(width * region.leftFrac);
+      const cropY = Math.round(height * region.topFrac);
+      const flatPatch = path.join(plateProbeDir, "flat-patch.png");
+      applyFilterToImage(blurredPlate, `crop=${cropW}:${cropH}:${cropX}:${cropY}`, flatPatch);
+
+      const filterStages: string[] = [];
+      if (sigma > 0.01) filterStages.push(`gblur=sigma=${sigma.toFixed(3)}`);
+      const { rs, bs } = solveWarmthFilter(flatPatch, cropW, cropH, target.roomWarmthTarget);
+      if (Math.abs(rs) > 0.005 || Math.abs(bs) > 0.005) {
+        filterStages.push(`colorbalance=rs=${rs.toFixed(4)}:rm=${rs.toFixed(4)}:rh=${rs.toFixed(4)}:bs=${bs.toFixed(4)}:bm=${bs.toFixed(4)}:bh=${bs.toFixed(4)}`);
+      }
+      if (filterStages.length > 0) backdropFilter = filterStages.join(",");
+    } finally {
+      fs.rmSync(plateProbeDir, { recursive: true, force: true });
+    }
+  }
+
+  return { subjectTransform, subjectFilter, backdropFilter };
+};
+
+/** Middle frame of a sampled sequence — a representative pose (not the
+ *  first frame, which for a talking-head take is disproportionately
+ *  likely to be a mid-blink or pre-settle frame). */
+const pickMiddleFrame = (framesDir: string): string | undefined => {
+  const files = fs.readdirSync(framesDir).filter((f) => f.endsWith(".png")).sort();
+  if (files.length === 0) return undefined;
+  return files[Math.floor(files.length / 2)];
 };
 
 export const replaceBackgrounds = async (
@@ -193,10 +338,23 @@ export const replaceBackgrounds = async (
 
       // backgroundReplace, punchInTailSec, or both — either way `current`
       // ends up pointing at whatever the block's video should be before
-      // the final rename into absOutPath.
+      // the final rename into absOutPath. `currentFg` tracks the matching
+      // fg-alpha layer the SAME way, staying in lockstep through
+      // punchInTailSec too (see the alpha-preserving applyPunchInTail
+      // call below) — undefined for any block that isn't captionVariant
+      // "karaokeTitle" (no fg layer to track at all).
       let current = subClipPath;
+      let currentFg: string | undefined;
       if (block.backgroundReplace) {
         const compositedPath = path.join(generatedDir, `${block.videoSlot}-composited.mp4`);
+        // Captured here so the fg-alpha layer below (built only for
+        // karaokeTitle blocks) reuses the SAME transform/relight this
+        // composite used, rather than re-deriving its own — the two
+        // layers must line up pixel-for-pixel or the subject would visibly
+        // jump between the flattened composite and the fg layer sitting
+        // on top of it.
+        let capturedTransform: SubjectTransform | undefined;
+        let capturedFilter: string | undefined;
         compositeVideoOnBackdrop({
           subjectVideoPath: current,
           backdropPath: officePlatePath,
@@ -205,14 +363,80 @@ export const replaceBackgrounds = async (
           width: format.width,
           height: format.height,
           fps: format.fps,
-          calibrate: calibrateSubject(
-            { topFrac: talkingHeadTarget!.headTopFrac, heightFrac: talkingHeadTarget!.headHeightFrac },
-            { p50: talkingHeadTarget!.lumaP50, p95: talkingHeadTarget!.lumaP95 },
-            format.width,
-            format.height,
-          ),
+          calibrate: (framesDir, masksDir) => {
+            const result = buildOfficeCompositeCalibrate(
+              talkingHeadTarget!,
+              officePlatePath,
+              format.width,
+              format.height,
+              format.fps,
+            )(framesDir, masksDir);
+            capturedTransform = result.subjectTransform;
+            capturedFilter = result.subjectFilter;
+            return result;
+          },
         });
-        current = compositedPath;
+        // Runs on the flattened composite (subject + desk foreground both
+        // already baked in) — see matte.ts's applyLateralFalloff doc
+        // comment for why this is a separate pass rather than folded into
+        // compositeVideoOnBackdrop itself.
+        const falloffPath = path.join(generatedDir, `${block.videoSlot}-falloff.mp4`);
+        applyLateralFalloff(compositedPath, falloffPath, talkingHeadTarget!.edgeFalloff);
+        fs.rmSync(compositedPath, { force: true });
+        current = falloffPath;
+
+        // 2b (grain), last: solved against THIS clip — the actual,
+        // already fully-composited-and-recompressed output — not a
+        // synthetic probe (see officeCompositeQC.ts's
+        // solveGrainStrengthOnVideo doc comment for why an isolated probe
+        // measurably undershoots once real encoder rate-control and a
+        // second recompression pass are both in play). Applied whole-
+        // frame, not backdrop-only: real camera grain isn't selective
+        // either, and this IS the last processing step, so there's no
+        // later re-encode left to attenuate it further.
+        const grainStrength = solveGrainStrengthOnVideo(
+          falloffPath,
+          Math.min(0.3, (span.srcOutSec - span.srcInSec) / 3),
+          talkingHeadTarget!.flatBackdropRegion,
+          format.width,
+          format.height,
+          format.fps,
+          talkingHeadTarget!.grainStdTarget,
+        );
+        if (grainStrength > 0) {
+          const grainedPath = path.join(generatedDir, `${block.videoSlot}-grained.mp4`);
+          execFileSync("ffmpeg", [
+            "-y", "-v", "error",
+            "-i", falloffPath,
+            "-vf", `noise=alls=${grainStrength}:allf=t+u`,
+            "-c:a", "copy",
+            grainedPath,
+          ]);
+          fs.rmSync(falloffPath, { force: true });
+          current = grainedPath;
+        }
+
+        // karaokeTitle blocks need the title to sit BEHIND the head (see
+        // schemas.ts's captionVariant doc comment) — build the matching
+        // fg-alpha layer (subject + desk foreground, transparent
+        // elsewhere) here, right where the flattened composite's own
+        // transform/filter are already in hand. Bound to a synthetic
+        // "<videoSlot>-fg" key below, mirroring ecuCutaway's own
+        // synthetic-slot pattern — assemble.ts looks it up the same way.
+        if (block.captionVariant === "karaokeTitle") {
+          const fgPath = path.join(generatedDir, `${block.videoSlot}-fg.mov`);
+          compositeSubjectAlphaVideo({
+            subjectVideoPath: subClipPath,
+            foregroundPath: officeForegroundPath,
+            outPath: fgPath,
+            width: format.width,
+            height: format.height,
+            fps: format.fps,
+            subjectTransform: capturedTransform,
+            subjectFilter: capturedFilter,
+          });
+          currentFg = fgPath;
+        }
       }
       if (block.punchInTailSec !== undefined) {
         const punchedPath = path.join(generatedDir, `${block.videoSlot}-punchin.mp4`);
@@ -224,9 +448,29 @@ export const replaceBackgrounds = async (
         });
         if (current !== subClipPath) fs.rmSync(current, { force: true });
         current = punchedPath;
+
+        // Keep the fg layer moving in lockstep with the flattened
+        // composite's own punch-in, or the two layers shear apart during
+        // the tail (see the alpha-preserving applyPunchInTail doc comment).
+        if (currentFg) {
+          const punchedFgPath = path.join(generatedDir, `${block.videoSlot}-fg-punchin.mov`);
+          applyPunchInTail(currentFg, punchedFgPath, {
+            durationSec: span.srcOutSec - span.srcInSec,
+            tailSec: block.punchInTailSec,
+            width: format.width,
+            height: format.height,
+            alpha: true,
+          });
+          fs.rmSync(currentFg, { force: true });
+          currentFg = punchedFgPath;
+        }
       }
       fs.renameSync(current, absOutPath);
       fs.rmSync(subClipPath, { force: true });
+      if (currentFg) {
+        const fgOutPath = path.join(generatedDir, `${block.videoSlot}-fg.mov`);
+        if (currentFg !== fgOutPath) fs.renameSync(currentFg, fgOutPath);
+      }
     });
 
     const probed = probeFile(absOutPath);
@@ -240,6 +484,21 @@ export const replaceBackgrounds = async (
       height: probed.height,
       hasAudio: probed.hasAudio,
     };
+    if (block.backgroundReplace && block.captionVariant === "karaokeTitle") {
+      const fgRelPath = path.join("generated", `${block.videoSlot}-fg.mov`);
+      const fgAbsPath = path.join(filled.jobDir, fgRelPath);
+      const fgProbed = probeFile(fgAbsPath);
+      newBindings[`${block.videoSlot}-fg`] = {
+        type: "file",
+        path: fgRelPath,
+        absPath: fgAbsPath,
+        mediaType: "video",
+        durationSec: fgProbed.durationSec,
+        width: fgProbed.width,
+        height: fgProbed.height,
+        hasAudio: false,
+      };
+    }
     // The new file starts at 0 and IS this block's span, unlike before
     // where it was a sub-span inside the shared take — rebase this
     // block's transcript words the same way (still take-relative until

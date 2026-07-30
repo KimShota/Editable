@@ -3,6 +3,7 @@ import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
+import { withTimeout } from "./withTimeout";
 
 /**
  * Claude-vision QC — the semantic half of shotQC.ts's measurements
@@ -24,7 +25,16 @@ const getClient = (): Anthropic => {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error("faceCheck: ANTHROPIC_API_KEY is required (put it in .env)");
   }
-  cachedClient = new Anthropic();
+  // Default SDK timeout is 10 MINUTES, and the SDK retries timeouts on its
+  // own on top of that — a stuck connection during this format's own
+  // multi-attempt Gemini ladder (each attempt runs 3-4 of these checks in
+  // parallel) could silently cost 20-30+ minutes before finally
+  // surfacing an error, which every caller here already wraps in its own
+  // try/catch + fallback. 60s is comfortably above this call's own real
+  // latency (a small structured-JSON vision call) and short enough that a
+  // stuck connection fails fast into the fallback instead of stalling the
+  // whole generate stage.
+  cachedClient = new Anthropic({ timeout: 60_000 });
   return cachedClient;
 };
 
@@ -40,12 +50,20 @@ const readImageBlock = (absPath: string): { type: "image"; source: { type: "base
 const askVision = async <T>(imagePaths: string[], question: string, schema: z.ZodType<T>, model = DEFAULT_MODEL): Promise<T> => {
   const client = getClient();
   const content = [...imagePaths.map(readImageBlock), { type: "text" as const, text: question }];
-  const response = await client.messages.parse({
-    model,
-    max_tokens: 1024,
-    messages: [{ role: "user", content }],
-    output_config: { format: zodOutputFormat(schema) },
-  });
+  // withTimeout on top of the client's own `timeout: 60_000` (getClient) —
+  // the SDK option is the real cancellation, this is a hard backstop for
+  // when it doesn't fire (see withTimeout.ts's own doc comment — observed
+  // directly this session).
+  const response = await withTimeout(
+    client.messages.parse({
+      model,
+      max_tokens: 1024,
+      messages: [{ role: "user", content }],
+      output_config: { format: zodOutputFormat(schema) },
+    }),
+    75_000,
+    "faceCheck (Anthropic vision)",
+  );
   if (!response.parsed_output) {
     throw new Error("faceCheck: response did not match schema");
   }

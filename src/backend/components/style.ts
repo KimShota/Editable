@@ -25,19 +25,26 @@ export const STICKER_ACCENT = "#EC7A5E";
 export const PLAYFAIR_DISPLAY_FONT = "Playfair Display Black";
 export const PLAYFAIR_DISPLAY_STACK = `"${PLAYFAIR_DISPLAY_FONT}", Georgia, "Times New Roman", serif`;
 
-/** The red used by the reference reel's titles and captions. */
-export const KUMAR_RED = "#E31E24";
+/** The red used by the reference reel's titles and captions — measured
+ *  directly from the reference footage (mean of every nearly-pure-red
+ *  pixel in a title-card frame: rgb(248,2,3)), not the prior hand-picked
+ *  #E31E24 (a darker, more muted red the reference doesn't actually use). */
+export const KUMAR_RED = "#F80203";
 
 /** Rough width-fit for a Didone-serif uppercase title (Captions.tsx's
- *  bigTitle cards, TextOverlay's kumarSplitTitle) — no canvas text
- *  measurement available inline in a Remotion render, so this
+ *  bigTitle/karaokeTitle cards, TextOverlay's kumarSplitTitle) — no canvas
+ *  text measurement available inline in a Remotion render, so this
  *  approximates a bold serif uppercase glyph's average width as a
  *  fraction of its own font size. Good enough to keep a short word and a
  *  long word both spanning roughly the same fraction of frame width,
- *  which a single fixed fontSize can't do. */
-export const fitDidoneFontSize = (text: string, frameWidth: number, maxPx = 150, minPx = 56): number => {
+ *  which a single fixed fontSize can't do. `frameHeight`, when given,
+ *  adds a second cap so a SHORT word (few characters, width alone would
+ *  size it huge) doesn't balloon past a sane fraction of the frame's own
+ *  height — width-fit and height-cap combined, not either alone. */
+export const fitDidoneFontSize = (text: string, frameWidth: number, frameHeight?: number, maxPx = 260, minPx = 56): number => {
   const CHAR_WIDTH_FACTOR = 0.62;
-  const targetWidthPx = frameWidth * 0.86;
+  const targetWidthPx = frameWidth * 0.9;
   const raw = targetWidthPx / (Math.max(1, text.length) * CHAR_WIDTH_FACTOR);
-  return Math.min(maxPx, Math.max(minPx, raw));
+  const heightCap = frameHeight !== undefined ? frameHeight * 0.16 : maxPx;
+  return Math.min(maxPx, heightCap, Math.max(minPx, raw));
 };

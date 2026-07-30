@@ -42,14 +42,14 @@ const OUTRO_YELLOW = "#FFD400";
 
 const BigTitleCard: React.FC<{ group: EdlCaptionGroup }> = ({ group }) => {
   const frame = useCurrentFrame();
-  const { fps, width } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
   ensureDisplayFonts();
 
   const localFrame = frame - Math.round(group.tlInSec * fps);
   const progress = spring({ frame: localFrame, fps, config: { damping: 12, stiffness: 200 } });
   const scale = interpolate(progress, [0, 1], [1.35, 1]);
   const text = group.words[0].text;
-  const fontSize = fitDidoneFontSize(text, width);
+  const fontSize = fitDidoneFontSize(text, width, height);
 
   return (
     <AbsoluteFill style={{ justifyContent: "center", alignItems: "center", padding: 40 }}>

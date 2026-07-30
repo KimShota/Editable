@@ -55,6 +55,8 @@ import { CutawayOverlay } from "./components/CutawayOverlay";
 import { StickerTitle } from "./components/StickerTitle";
 import { SkillCard } from "./components/SkillCard";
 import { Captions } from "./components/Captions";
+import { KaraokeTitleLayer } from "./components/KaraokeTitleLayer";
+import { TriptychNameStamp } from "./components/TriptychNameStamp";
 
 /**
  * The generic EDL renderer. This single composition renders ANY finished
@@ -75,6 +77,7 @@ const OVERLAY_COMPONENTS: Record<
   CutawayOverlay: CutawayOverlay as React.FC<Record<string, unknown>>,
   StickerTitle: StickerTitle as React.FC<Record<string, unknown>>,
   SkillCard: SkillCard as React.FC<Record<string, unknown>>,
+  TriptychNameStamp: TriptychNameStamp as React.FC<Record<string, unknown>>,
 };
 
 /**
@@ -113,6 +116,34 @@ const IncomingTransition: React.FC<{
  *  sets `previewMode`, so `render.ts` always gets the real source. */
 const previewProxySrc = (jobId: string, src: string): string =>
   `/api/jobs/${jobId}/preview-proxy?src=${encodeURIComponent(src)}`;
+
+/** The karaokeTitle fg-alpha layer (matte.ts's compositeSubjectAlphaVideo)
+ *  for ONE video segment — subject + desk foreground, transparent
+ *  elsewhere, sitting ABOVE the karaoke title so the subject's own
+ *  opaque pixels occlude it (see EdlVideo.tsx's own render-order doc
+ *  comment). No `muted`/`volume` handling: this layer never carries
+ *  audio (compositeSubjectAlphaVideo never encodes an audio track), and
+ *  the base Segment for the SAME clip already plays the real audio. */
+const FgLayer: React.FC<{ src: string; srcInSec: number; srcOutSec: number; jobId: string; previewMode?: boolean }> = ({
+  src,
+  srcInSec,
+  srcOutSec,
+  jobId,
+  previewMode,
+}) => {
+  const { fps } = useVideoConfig();
+  const resolvedSrc = previewMode ? previewProxySrc(jobId, src) : staticFile(src);
+  return (
+    <OffthreadVideo
+      src={resolvedSrc}
+      muted
+      startFrom={Math.round(srcInSec * fps)}
+      endAt={Math.round(srcOutSec * fps)}
+      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+      transparent
+    />
+  );
+};
 
 const Segment: React.FC<{
   seg: EdlVideoSegment;
@@ -182,6 +213,28 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
           </Sequence>
         ))}
       </AbsoluteFill>
+
+      {/* karaokeTitle + its fg-alpha layer: title BEHIND, subject ON TOP
+         — see schemas.ts's captionVariant doc comment and matte.ts's
+         compositeSubjectAlphaVideo. Positioned here, between the base
+         video and the ordinary overlays/captions below, so a titled
+         block's own head genuinely occludes the letters rather than the
+         title sitting flat in front of (or fully behind) the whole frame. */}
+      {edl.captions.some((g) => g.variant === "karaokeTitle") && (
+        <KaraokeTitleLayer groups={edl.captions} baselineFrac={edl.karaokeTitleBaselineFrac} />
+      )}
+      {edl.video
+        .filter((seg) => seg.fgSrc)
+        .map((seg) => (
+          <Sequence
+            key={`fg:${seg.id}`}
+            from={toFrames(seg.tlInSec)}
+            durationInFrames={toFrames(seg.tlOutSec) - toFrames(seg.tlInSec)}
+            name={`fg:${seg.id}`}
+          >
+            <FgLayer src={seg.fgSrc!} srcInSec={seg.srcInSec} srcOutSec={seg.srcOutSec} jobId={edl.jobId} previewMode={previewMode} />
+          </Sequence>
+        ))}
 
       {edl.overlays.map((overlay) => {
         const Component = OVERLAY_COMPONENTS[overlay.component];

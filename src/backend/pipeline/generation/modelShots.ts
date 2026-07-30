@@ -5,11 +5,14 @@ import path from "node:path";
 import { GenerationProvider, GenerationRequest, animateStillToClip } from "./provider";
 import { compositeOnBackdrop, resizeContainPad, resizeCover } from "./matte";
 import { loadPlatesManifest, platePath } from "./plates";
+import { formatAssetsDir } from "../paths";
 import { measureSubjectBBox, computeSubjectTransform } from "./subjectFit";
 import { measureSubjectLuma, solveSubjectRelight } from "./relight";
 import { pickByPose } from "./identityPrep";
 import { generateImage } from "./geminiImage";
 import { generateSceneStill, SceneResult } from "./generatedShots";
+import { animateStillWithDop } from "./higgsfieldDop";
+import { extractCloseUpCutaway } from "../videoEffects";
 import { PlatesManifest, PoseTag, SubShotSpec } from "../types";
 
 /**
@@ -164,7 +167,7 @@ const buildDetailStillImage = async (
   width: number,
   height: number,
   outImagePath: string,
-): Promise<void> => {
+): Promise<{ tier: "gemini" | "composite" }> => {
   try {
     const bytes = await generateImage(detailPrompt(req, shot), req.identityImages, 3);
     const workDir = workDirFor("detail");
@@ -175,6 +178,7 @@ const buildDetailStillImage = async (
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }
+    return { tier: "gemini" };
   } catch (err) {
     console.warn(`modelShots: detailStill "${shot}" Gemini generation failed, falling back to a photo composite — ${(err as Error).message}`);
     // seed varies the fallback pick across sub-shots — without it every
@@ -182,6 +186,7 @@ const buildDetailStillImage = async (
     // exact same photo, showing 3 identical panels instead of 3 distinct
     // (if degraded) ones.
     buildPlateStillImage(req, { plate: "studio-cyc", treatment: "silhouette", poseTag: "closeup", seed }, width, height, outImagePath);
+    return { tier: "composite" };
   }
 };
 
@@ -201,15 +206,50 @@ const slotNameFromOutPath = (outPath: string): string => path.basename(outPath, 
  *  never cleared identity — reuses the SAME deterministic photo-on-plate
  *  composite plateStill already is, at the failed shot's own plate/
  *  treatment/pose. Identity-safe by construction (the user's own pixels),
- *  which is the whole point of a tier-down. */
+ *  which is the whole point of a tier-down.
+ *
+ *  `req.strict` (GenerationRequest doc comment) skips the tier-down
+ *  entirely and throws instead, naming `label` — see this file's own
+ *  ShotTier doc comment for why a silent tier-down is worth being able to
+ *  turn into a hard failure. */
 const compositeV2TierDown = (
   req: GenerationRequest,
   spec: { plate: string; treatment: "lit" | "silhouette"; poseTag?: PoseTag; seed: number },
   width: number,
   height: number,
+  label: string,
 ) => (outImagePath: string): void => {
+  if (req.strict) {
+    throw new Error(
+      `modelShots: "${label}" exhausted its generation ladder without clearing hard gates — refusing to ` +
+        `silently tier down to composite-v2 (STRICT_GENERATION=1). Retry, or unset STRICT_GENERATION to allow the fallback.`,
+    );
+  }
   buildPlateStillImage(req, spec, width, height, outImagePath);
 };
+
+/** Which generation path actually produced a shot's pixels — the plan's
+ *  own "tier truth" requirement: a shot's `flag` (green/orange/red) says
+ *  how well QC scored it, but doesn't say WHETHER it's actually the
+ *  AI-generated pose that was asked for, or the identity-safe fallback
+ *  wearing the user's own real clothes. Surfaced per-member for
+ *  montageReel/triptych (see buildMontageReel/buildTriptych's own
+ *  `members` collection) so a tier-down is visible in the contact sheet
+ *  and job.json instead of only showing up as a trouser-color mismatch a
+ *  human happens to notice. */
+export type ShotTier = "gemini" | "composite" | "reuse" | "realCrop" | "templateClip";
+
+/** Persisted the SAME way a top-level generatedScene slot's own still is
+ *  (see modelShotsGenerationProvider's "generatedScene" case) — montage/
+ *  triptych MEMBERS never had this before, so a member that regenerated
+ *  during a later run (network flake, retry, whatever) with no cached
+ *  still to reuse was gone for good, unrecoverable without a fresh
+ *  Gemini spend. `parentSlotName`/`memberIndex` name the file; every
+ *  member gets one regardless of which tier it actually landed on
+ *  (composite/reuse members too — cheap, and keeps the directory a
+ *  complete record of "what actually rendered" for this job). */
+const memberStillPath = (jobDir: string, parentSlotName: string, memberIndex: number): string =>
+  path.join(stillsDir(jobDir), `${parentSlotName}__member-${memberIndex}.png`);
 
 /** Builds ONE sub-shot's still image at (width, height), dispatching on
  *  its own kind — the shared step montageReel/triptych both fan out to.
@@ -217,21 +257,31 @@ const compositeV2TierDown = (
  *  undefined for a sub-shot kind with no ladder of its own (plateStill,
  *  detailStill, reuse — a reuse's quality is whatever its source shot's
  *  flag already was, tracked on THAT shot's own top-level insert, not
- *  duplicated here). */
+ *  duplicated here). `memberContext`, when given, additionally persists
+ *  this member's own still (see memberStillPath's doc comment). */
 const buildSubShotImage = async (
   req: GenerationRequest,
   sub: SubShotSpec,
   width: number,
   height: number,
   outImagePath: string,
-): Promise<{ flag?: "green" | "orange" | "red" }> => {
+  memberContext?: { parentSlotName: string; memberIndex: number },
+): Promise<{ flag?: "green" | "orange" | "red"; tier: ShotTier }> => {
+  const persistMember = () => {
+    if (!memberContext) return;
+    fs.mkdirSync(stillsDir(req.jobDir), { recursive: true });
+    fs.copyFileSync(outImagePath, memberStillPath(req.jobDir, memberContext.parentSlotName, memberContext.memberIndex));
+  };
+
   if (sub.kind === "plateStill") {
     buildPlateStillImage(req, { plate: sub.plate, treatment: sub.treatment, poseTag: sub.poseTag, seed: sub.seed }, width, height, outImagePath);
-    return {};
+    persistMember();
+    return { tier: "composite" };
   }
   if (sub.kind === "detailStill") {
-    await buildDetailStillImage(req, sub.shot, sub.seed, width, height, outImagePath);
-    return {};
+    const { tier } = await buildDetailStillImage(req, sub.shot, sub.seed, width, height, outImagePath);
+    persistMember();
+    return { tier };
   }
   if (sub.kind === "reuse") {
     if (!sub.reuseSlot) throw new Error("modelShots: reuse sub-shot needs a reuseSlot");
@@ -252,20 +302,23 @@ const buildSubShotImage = async (
     } else {
       fs.copyFileSync(sourcePath, outImagePath);
     }
-    return {};
+    persistMember();
+    return { tier: "reuse" };
   }
   // generatedScene sub-shot (montage-1/2/3 in the shot pack — real
   // generation targets declared inline as montageReel members rather
   // than separate top-level slots).
   if (!sub.plate || !sub.posePrompt) throw new Error(`modelShots: generatedScene sub-shot "${sub.shot}" needs plate + posePrompt`);
   const spec = { plate: sub.plate, treatment: sub.treatment, poseTag: sub.poseTag, seed: sub.seed };
+  const memberLabel = memberContext ? `${memberContext.parentSlotName} member ${memberContext.memberIndex} (${sub.shot})` : sub.shot;
   const result = await generateSceneStill(
     { ...req, plate: sub.plate, treatment: sub.treatment },
     { plate: sub.plate, treatment: sub.treatment, posePrompt: sub.posePrompt, poseTag: sub.poseTag, seed: sub.seed },
     outImagePath,
-    compositeV2TierDown(req, spec, width, height),
+    compositeV2TierDown(req, spec, width, height, memberLabel),
   );
-  return { flag: result.flag };
+  persistMember();
+  return { flag: result.flag, tier: result.provider === "composite-v2" ? "composite" : "gemini" };
 };
 
 const concatClips = (clipPaths: string[], outPath: string): void => {
@@ -288,59 +341,201 @@ const worstFlag = (flags: Array<"green" | "orange" | "red" | undefined>): "green
   return present.reduce((worst, f) => (FLAG_RANK[f] > FLAG_RANK[worst] ? f : worst));
 };
 
-const buildMontageReel = async (req: GenerationRequest): Promise<{ flag?: "green" | "orange" | "red" }> => {
+export type MemberTierRecord = { label: string; tier: ShotTier; flag?: "green" | "orange" | "red" };
+
+const buildMontageReel = async (req: GenerationRequest): Promise<{ flag?: "green" | "orange" | "red"; members: MemberTierRecord[] }> => {
   const subShots = req.subShots ?? [];
   if (subShots.length === 0) throw new Error("modelShots: montageReel needs at least one sub-shot");
   const perClipSec = req.durationSec / subShots.length;
+  const parentSlotName = slotNameFromOutPath(req.outPath);
   const workDir = workDirFor("montage-reel");
   try {
     const clipPaths: string[] = [];
     const flags: Array<"green" | "orange" | "red" | undefined> = [];
+    const members: MemberTierRecord[] = [];
     for (let i = 0; i < subShots.length; i++) {
       const stillPath = path.join(workDir, `still-${i}.png`);
-      const { flag } = await buildSubShotImage(req, subShots[i], req.width, req.height, stillPath);
+      const { flag, tier } = await buildSubShotImage(req, subShots[i], req.width, req.height, stillPath, { parentSlotName, memberIndex: i });
       flags.push(flag);
+      members.push({ label: subShots[i].shot, tier, flag });
       const clipPath = path.join(workDir, `clip-${i}.mp4`);
       animateStillToClip(stillPath, { durationSec: perClipSec, width: req.width, height: req.height, fps: req.fps, outPath: clipPath });
       clipPaths.push(clipPath);
     }
     concatClips(clipPaths, req.outPath);
-    return { flag: worstFlag(flags) };
+    return { flag: worstFlag(flags), members };
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
 };
 
-const buildTriptych = async (req: GenerationRequest): Promise<{ flag?: "green" | "orange" | "red" }> => {
+const probeDurationSec = (absPath: string): number => {
+  const out = execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", absPath]).toString().trim();
+  return Number(out) || 0;
+};
+
+/** Builds ONE triptych panel as a durationSec-long VIDEO clip at
+ *  (width, panelHeight) — NOT a still, unlike montageReel's own members:
+ *  each panel needs its OWN independent motion (SubShotSpecSchema's
+ *  motion doc comment), which a single shared Ken-Burns push over one
+ *  flattened stacked image can't produce (measured: the reference's cash
+ *  panel moves ~24 luma/frame, ~40x a silhouette still's own push). */
+const buildTriptychPanelClip = async (
+  req: GenerationRequest,
+  sub: SubShotSpec,
+  width: number,
+  panelHeight: number,
+  durationSec: number,
+  outClipPath: string,
+  memberContext: { parentSlotName: string; memberIndex: number },
+): Promise<{ flag?: "green" | "orange" | "red"; tier: ShotTier }> => {
+  if (sub.motion === "realCrop") {
+    if (!req.speakingTakePath) {
+      throw new Error(`modelShots: triptych realCrop panel "${sub.shot}" needs the format's own speakingTakeSlot`);
+    }
+    // A FRACTION of the take's own total duration, not an absolute second
+    // count — see SubShotSpecSchema's realCropAtFrac doc comment for why
+    // (every user's take runs a different length).
+    const takeDurationSec = probeDurationSec(req.speakingTakePath);
+    const atSec = Math.max(0, Math.min(takeDurationSec - durationSec, (sub.realCropAtFrac ?? 0.75) * takeDurationSec));
+    extractCloseUpCutaway(req.speakingTakePath, outClipPath, {
+      atSec,
+      durationSec,
+      width,
+      height: panelHeight,
+      zoom: 0.32,
+      yBias: 0.35,
+    });
+    fs.mkdirSync(stillsDir(req.jobDir), { recursive: true });
+    execFileSync("ffmpeg", ["-y", "-v", "error", "-i", outClipPath, "-frames:v", "1", memberStillPath(req.jobDir, memberContext.parentSlotName, memberContext.memberIndex)]);
+    return { tier: "realCrop" };
+  }
+  if (sub.motion === "templateClip") {
+    if (!sub.templateClipPath) throw new Error(`modelShots: triptych templateClip panel "${sub.shot}" needs a templateClipPath`);
+    const absTemplateClipPath = path.join(formatAssetsDir(req.formatId), sub.templateClipPath);
+    if (!fs.existsSync(absTemplateClipPath)) {
+      throw new Error(`modelShots: templateClipPath "${sub.templateClipPath}" not found at ${absTemplateClipPath}`);
+    }
+    // Middle window, not the first durationSec seconds — same reasoning
+    // as the "dop" case just below: a generated video's own motion
+    // typically ramps up from a quieter start rather than staying
+    // uniform throughout, so the opening seconds read as the LEAST
+    // animated part (measured directly on this format's own shoe/cash
+    // clips: the first 1.8s of a 5.4s DoP render measured under half the
+    // motion signature of its own middle window).
+    const templateDurationSec = probeDurationSec(absTemplateClipPath);
+    const windowStart = Math.max(0, (templateDurationSec - durationSec) / 2);
+    execFileSync("ffmpeg", [
+      "-y", "-v", "error",
+      "-ss", String(windowStart),
+      "-i", absTemplateClipPath,
+      "-t", String(durationSec),
+      "-vf", `scale=${width}:${panelHeight}:force_original_aspect_ratio=increase,crop=${width}:${panelHeight}`,
+      "-an",
+      outClipPath,
+    ]);
+    fs.mkdirSync(stillsDir(req.jobDir), { recursive: true });
+    execFileSync("ffmpeg", ["-y", "-v", "error", "-i", outClipPath, "-frames:v", "1", memberStillPath(req.jobDir, memberContext.parentSlotName, memberContext.memberIndex)]);
+    return { tier: "templateClip" };
+  }
+
+  const workDir = workDirFor("triptych-panel");
+  try {
+    const stillPath = path.join(workDir, "still.png");
+    const { flag, tier } = await buildSubShotImage(req, sub, width, panelHeight, stillPath, memberContext);
+
+    if (sub.motion === "dop") {
+      try {
+        const bytes = await animateStillWithDop(stillPath, sub.motionPrompt ?? sub.shot);
+        const rawClipPath = path.join(workDir, "dop-raw.mp4");
+        fs.writeFileSync(rawClipPath, bytes);
+        // DoP's own output duration/resolution won't match this panel's
+        // slot exactly — take the MIDDLE durationSec-long window (motion
+        // reads most natural mid-clip, not during its own startup/settle)
+        // and resize onto the panel's target canvas.
+        const probeSec = probeDurationSec(rawClipPath);
+        const windowStart = Math.max(0, (probeSec - durationSec) / 2);
+        execFileSync("ffmpeg", [
+          "-y", "-v", "error",
+          "-ss", String(windowStart),
+          "-i", rawClipPath,
+          "-t", String(durationSec),
+          "-vf", `scale=${width}:${panelHeight}:force_original_aspect_ratio=increase,crop=${width}:${panelHeight}`,
+          "-an",
+          outClipPath,
+        ]);
+        return { flag, tier };
+      } catch (err) {
+        console.warn(`modelShots: triptych DoP animation failed for "${sub.shot}", falling back to a still push — ${(err as Error).message}`);
+        animateStillToClip(stillPath, { durationSec, width, height: panelHeight, fps: req.fps, outPath: outClipPath });
+        return { flag, tier };
+      }
+    }
+
+    animateStillToClip(stillPath, { durationSec, width, height: panelHeight, fps: req.fps, outPath: outClipPath });
+    return { flag, tier };
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+};
+
+/** Panel height fractions top-to-bottom (eyes/cash/shoes), measured
+ *  against the reference's own triptych seams (~0.35H, ~0.67H) — not
+ *  equal thirds, the top panel reads slightly taller. Falls back to
+ *  equal division for a subShots count other than 3 (a format author
+ *  changing the panel count loses the measured proportions, not
+ *  correctness). */
+const TRIPTYCH_PANEL_HEIGHT_FRACS = [0.35, 0.32, 0.33];
+
+const buildTriptych = async (req: GenerationRequest): Promise<{ flag?: "green" | "orange" | "red"; members: MemberTierRecord[] }> => {
   const subShots = req.subShots ?? [];
   if (subShots.length === 0) throw new Error("modelShots: triptych needs at least one sub-shot");
-  const panelHeight = Math.round(req.height / subShots.length / 2) * 2;
+  const heightFracs = subShots.length === TRIPTYCH_PANEL_HEIGHT_FRACS.length
+    ? TRIPTYCH_PANEL_HEIGHT_FRACS
+    : subShots.map(() => 1 / subShots.length);
+  const panelHeights = heightFracs.map((f) => Math.round((req.height * f) / 2) * 2);
+  // Rounding each panel to an even height independently can leave the
+  // sum a few px off req.height — the vstack+crop pass below absorbs
+  // that the same way the old equal-thirds version already did.
+  const parentSlotName = slotNameFromOutPath(req.outPath);
+
   const workDir = workDirFor("triptych");
   try {
-    const panelPaths: string[] = [];
+    const clipPaths: string[] = [];
     const flags: Array<"green" | "orange" | "red" | undefined> = [];
+    const members: MemberTierRecord[] = [];
     for (let i = 0; i < subShots.length; i++) {
-      const panelPath = path.join(workDir, `panel-${i}.png`);
-      const { flag } = await buildSubShotImage(req, subShots[i], req.width, panelHeight, panelPath);
+      const clipPath = path.join(workDir, `panel-${i}.mp4`);
+      const { flag, tier } = await buildTriptychPanelClip(req, subShots[i], req.width, panelHeights[i], req.durationSec, clipPath, { parentSlotName, memberIndex: i });
       flags.push(flag);
-      panelPaths.push(panelPath);
+      members.push({ label: subShots[i].shot, tier, flag });
+      clipPaths.push(clipPath);
     }
-    const stackedPath = path.join(workDir, "stacked.png");
-    // vstack needs matching widths (guaranteed — every panel built at
-    // req.width) and doesn't itself guarantee the sum matches req.height
-    // exactly (rounding panelHeight down to an even number can leave a
-    // few px short) — pad/crop back to the exact canvas afterward.
-    const inputs = panelPaths.flatMap((p) => ["-i", p]);
+    // Video vstack (not an image stack + single shared push): each input
+    // is already its own durationSec-long clip with its own motion —
+    // stacking the VIDEO streams keeps every panel's own motion intact
+    // instead of flattening to one frame and animating the whole thing
+    // uniformly (the "still masquerading as a moving shot" defect this
+    // whole rewrite exists to fix).
+    // Each panel's own clip may have come from a different native frame
+    // rate (realCrop inherits the speaking-take's own fps; DoP's output
+    // has its own) — normalize every input to req.fps BEFORE vstack, or
+    // mismatched rates going into the same stack can misalign/stutter.
+    const inputs = clipPaths.flatMap((p) => ["-i", p]);
+    const normalized = clipPaths.map((_, i) => `[${i}:v]fps=${req.fps}[v${i}]`).join(";");
+    const stackInputs = clipPaths.map((_, i) => `[v${i}]`).join("");
     execFileSync("ffmpeg", [
       "-y", "-v", "error",
       ...inputs,
       "-filter_complex",
-      `${panelPaths.map((_, i) => `[${i}]`).join("")}vstack=${panelPaths.length},scale=${req.width}:${req.height}:force_original_aspect_ratio=increase,crop=${req.width}:${req.height}`,
-      "-frames:v", "1",
-      stackedPath,
+      `${normalized};${stackInputs}vstack=${clipPaths.length},scale=${req.width}:${req.height}:force_original_aspect_ratio=increase,crop=${req.width}:${req.height}[v]`,
+      "-map", "[v]",
+      "-r", String(req.fps),
+      "-t", String(req.durationSec),
+      "-an",
+      req.outPath,
     ]);
-    animateStillToClip(stackedPath, { durationSec: req.durationSec, width: req.width, height: req.height, fps: req.fps, outPath: req.outPath });
-    return { flag: worstFlag(flags) };
+    return { flag: worstFlag(flags), members };
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
@@ -351,8 +546,13 @@ const buildTriptych = async (req: GenerationRequest): Promise<{ flag?: "green" |
  *  qcSidecarPath. `attempts` (the full per-attempt QC record) is kept
  *  even for a non-generatedScene shot's empty case, so the shape is
  *  uniform for the contact-sheet builder. */
-const writeQcSidecar = (outPath: string, flag: "green" | "orange" | "red" | undefined, qc: unknown): void => {
-  if (flag === undefined) return; // plateStill/detailStill: no ladder, nothing to record
+const writeQcSidecar = (outPath: string, flag: "green" | "orange" | "red" | undefined, qc: { members?: MemberTierRecord[] } & Record<string, unknown>): void => {
+  // Written whenever there's SOMETHING worth recording — a QC flag, or (a
+  // montageReel/triptych with no flag of its own, e.g. every member is a
+  // plain composite with no generation ladder) at least the per-member
+  // tier breakdown, so tier truth is never silently absent just because
+  // nothing failed a QC gate.
+  if (flag === undefined && !qc.members?.length) return;
   fs.writeFileSync(`${outPath}.qc.json`, JSON.stringify({ flag, qc }, null, 2));
 };
 
@@ -397,7 +597,7 @@ export const modelShotsGenerationProvider: GenerationProvider = {
             req,
             { ...spec, posePrompt: req.posePrompt },
             stillPath,
-            compositeV2TierDown(req, spec, req.width, req.height),
+            compositeV2TierDown(req, spec, req.width, req.height, slotName),
           );
           // Persisted for any LATER block's montageReel "reuse" sub-shot
           // (see buildSubShotImage's "reuse" case) — this block must come
@@ -406,20 +606,21 @@ export const modelShotsGenerationProvider: GenerationProvider = {
           fs.mkdirSync(stillsDir(req.jobDir), { recursive: true });
           fs.copyFileSync(stillPath, stillPathFor(req.jobDir, slotName));
           animateStillToClip(stillPath, { durationSec: req.durationSec, width: req.width, height: req.height, fps: req.fps, outPath: req.outPath });
-          writeQcSidecar(req.outPath, result.flag, { attempts: result.attempts, provider: result.provider });
+          const tier: ShotTier = result.provider === "composite-v2" ? "composite" : "gemini";
+          writeQcSidecar(req.outPath, result.flag, { attempts: result.attempts, provider: result.provider, tier });
         } finally {
           fs.rmSync(workDir, { recursive: true, force: true });
         }
         return;
       }
       case "montageReel": {
-        const { flag } = await buildMontageReel(req);
-        writeQcSidecar(req.outPath, flag, { note: "worst flag among montageReel sub-shots" });
+        const { flag, members } = await buildMontageReel(req);
+        writeQcSidecar(req.outPath, flag, { note: "worst flag among montageReel sub-shots", members });
         return;
       }
       case "triptych": {
-        const { flag } = await buildTriptych(req);
-        writeQcSidecar(req.outPath, flag, { note: "worst flag among triptych sub-shots" });
+        const { flag, members } = await buildTriptych(req);
+        writeQcSidecar(req.outPath, flag, { note: "worst flag among triptych sub-shots", members });
         return;
       }
       default:

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { lumaStatsFromGrayBuffer, LumaStats } from "./luma";
+import { SubjectBBoxFrac } from "./subjectFit";
 
 /**
  * Calibrates a per-subject ffmpeg filter chain that maps a cutout's own
@@ -65,6 +66,73 @@ export const measureSubjectLuma = (framesDir: string, masksDir: string, sampleCo
   return lumaStatsFromGrayBuffer(values);
 };
 
+/** Same as subjectPixelsFromFrame, restricted to a bbox region (fractions
+ *  of the frame) — still masked (mask > threshold), so a loosely-fit
+ *  region box can't pull in background pixels at its own edges. */
+const subjectPixelsFromFrameInRegion = (
+  framePath: string,
+  maskPath: string,
+  width: number,
+  height: number,
+  region: SubjectBBoxFrac,
+): number[] => {
+  const gray = execFileSync("ffmpeg", ["-v", "error", "-i", framePath, "-f", "rawvideo", "-pix_fmt", "gray", "-"], {
+    maxBuffer: 1024 * 1024 * 20,
+  });
+  const mask = execFileSync("ffmpeg", ["-v", "error", "-i", maskPath, "-f", "rawvideo", "-pix_fmt", "gray", "-"], {
+    maxBuffer: 1024 * 1024 * 20,
+  });
+  const top = Math.max(0, Math.floor(region.topFrac * height));
+  const bottom = Math.min(height - 1, Math.ceil(region.bottomFrac * height));
+  const left = Math.max(0, Math.floor(region.leftFrac * width));
+  const right = Math.min(width - 1, Math.ceil(region.rightFrac * width));
+  const values: number[] = [];
+  for (let y = top; y <= bottom; y++) {
+    const rowOffset = y * width;
+    for (let x = left; x <= right; x++) {
+      const i = rowOffset + x;
+      if (i < gray.length && i < mask.length && mask[i] > MASK_THRESHOLD) values.push(gray[i]);
+    }
+  }
+  return values;
+};
+
+/** Face-only luma stats — same sampling shape as measureSubjectLuma, but
+ *  restricted to a head bbox (subjectFit.ts's measureHeadBBox). Exists
+ *  because measureSubjectLuma's own p50 is dominated by whatever the
+ *  LARGEST masked region is — for a seated waist-up shot, that's the
+ *  torso/clothing, not the face — so solving a relight curve against the
+ *  whole-subject p50/p95 systematically under-lights the face even when
+ *  clothing lands exactly on target (measured: whole-subject-anchored
+ *  curve put the face at luma 34 against a reference face patch of 65 —
+ *  the curve was doing its job, just anchored to the wrong region). */
+export const measureFaceLuma = (
+  framesDir: string,
+  masksDir: string,
+  headBbox: SubjectBBoxFrac,
+  width: number,
+  height: number,
+  sampleCount = 5,
+): LumaStats | undefined => {
+  const frameFiles = fs
+    .readdirSync(framesDir)
+    .filter((f) => f.endsWith(".png"))
+    .sort();
+  if (frameFiles.length === 0) return undefined;
+  const step = Math.max(1, Math.floor(frameFiles.length / sampleCount));
+  const sampled = frameFiles.filter((_, i) => i % step === 0).slice(0, sampleCount);
+
+  const values: number[] = [];
+  for (const f of sampled) {
+    const maskPath = path.join(masksDir, f);
+    if (!fs.existsSync(maskPath)) continue;
+    const framePixels = subjectPixelsFromFrameInRegion(path.join(framesDir, f), maskPath, width, height, headBbox);
+    for (let i = 0; i < framePixels.length; i++) values.push(framePixels[i]);
+  }
+  if (values.length < 50) return undefined; // too little face coverage to trust
+  return lumaStatsFromGrayBuffer(values);
+};
+
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
 
 /**
@@ -90,10 +158,22 @@ const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
  * Remapping luma alone and leaving chroma untouched can't produce that
  * failure mode — hue is preserved by construction.
  */
-export const solveSubjectRelight = (measured: LumaStats, target: { p50: number; p95: number }): string => {
-  const midIn = clamp01(measured.p50 / 255);
+export const solveSubjectRelight = (
+  measured: LumaStats,
+  target: { p50: number; p95: number },
+  /** Overrides the curve's MIDTONE anchor with a face-region mean instead
+   *  of the whole-subject p50 — pass both faceMeasured (measureFaceLuma's
+   *  own .mean over the cutout's own head region) and target.faceMean
+   *  (the reference's own measured face-patch mean) to anchor the curve
+   *  so the FACE lands on target, not just whichever region happens to
+   *  dominate the subject mask's pixel count. Highlight anchor (p95)
+   *  still comes from the whole subject either way. */
+  faceMeasured?: number,
+  faceTargetMean?: number,
+): string => {
+  const midIn = faceMeasured !== undefined ? clamp01(faceMeasured / 255) : clamp01(measured.p50 / 255);
   const hiIn = clamp01(measured.p95 / 255);
-  const midOut = clamp01(target.p50 / 255);
+  const midOut = faceTargetMean !== undefined ? clamp01(faceTargetMean / 255) : clamp01(target.p50 / 255);
   const hiOut = clamp01(target.p95 / 255);
 
   const WARM_DESAT = "eq=saturation=0.88,colorbalance=rs=0.06:gs=0.0:bs=-0.08:rm=0.04:gm=0.0:bm=-0.05";

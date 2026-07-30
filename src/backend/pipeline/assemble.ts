@@ -210,7 +210,12 @@ export const assemble = (
    * Resolve a component ref's slot indirection against the job bindings:
    * textSlot → text param; imageSlot/audioSlot/videoSlot → src param;
    * textAnchor → text param from the anchor's captured words (optionally
-   * shaped by a textTemplate containing "{captured}").
+   * shaped by a textTemplate containing "{captured}"), matched against
+   * `blockId`'s own resolved roles — normally the event's OWN block, but a
+   * ref may set `textAnchorBlockId` (a literal block id, e.g. a broll
+   * block's stamp reusing a voice block's captured name) to reach across
+   * blocks; the caller resolves that override into `blockId` before
+   * calling this.
    * Returns a `skipReason` if a required slot/capture is unbound — specific
    * enough to show a user why an event never showed up, instead of a
    * server-only console.warn (the event is skipped either way).
@@ -255,8 +260,10 @@ export const assemble = (
         const template = ref.params.textTemplate;
         params.text =
           typeof template === "string" ? template.split("{captured}").join(captured) : captured;
-      } else if (key === "textTemplate") {
-        // Consumed alongside textAnchor above.
+      } else if (key === "textTemplate" || key === "textAnchorBlockId") {
+        // Consumed alongside textAnchor above (textAnchorBlockId is
+        // resolved into the `blockId` param this function was CALLED
+        // with, by the caller, before we ever see it here).
       } else {
         params[key] = value;
       }
@@ -385,6 +392,14 @@ export const assemble = (
     const takeOrder =
       transcript.blocks.find((b) => b.blockId === block.id)?.takeOrder ?? takeFiles.map((_, i) => i);
 
+    // karaokeTitle's own fg-alpha layer (backgroundReplace.ts, bound to
+    // the synthetic "<videoSlot>-fg" key — same pattern as ecuCutaway's
+    // own synthetic slot) covers the block's WHOLE span as one file, same
+    // as backgroundReplace itself — only attached to the first segment,
+    // which is the only one that exists for any single-take-derived voice
+    // block (the only kind that ever sets captionVariant "karaokeTitle").
+    const fgAsset = block.captionVariant === "karaokeTitle" ? fileAsset(filled, `${block.videoSlot}-fg`) : undefined;
+
     let segCursor = tlInSec;
     let lastSegId = block.id;
     trim.takes.forEach((t, i) => {
@@ -403,6 +418,7 @@ export const assemble = (
         // B-roll plays under the music/voice; its own audio is muted.
         muted: block.kind === "broll",
         volume: 1,
+        fgSrc: i === 0 && fgAsset ? stage(fgAsset) : undefined,
       });
       segCursor += durationSec;
       lastSegId = segId;
@@ -411,7 +427,8 @@ export const assemble = (
     for (const event of block.events) {
       const override = overrides?.events[event.id];
       const ref = override?.component ?? event.component;
-      const resolvedRef = resolveComponentParams(ref, block.id);
+      const textAnchorBlockId = typeof ref.params.textAnchorBlockId === "string" ? ref.params.textAnchorBlockId : block.id;
+      const resolvedRef = resolveComponentParams(ref, textAnchorBlockId);
       if ("skipReason" in resolvedRef) {
         diagnostics.push(`skipped "${event.id}" in block "${block.id}" — ${resolvedRef.skipReason}`);
         continue;
@@ -509,78 +526,103 @@ export const assemble = (
       const isEmphasized = (w: Word): boolean =>
         captureSpans.some((span) => w.startSec < span.end && w.endSec > span.start);
 
-      // Every captioned block ALWAYS gets ordinary multi-word lowerThird
-      // coverage (see BlockSchema's captionVariant doc comment — bigTitle
-      // is additive, not a replacement). Word ends are floored to
-      // MIN_WORD_DURATION_SEC so a genuinely zero-duration whisper
-      // timestamp can't seed a flash-frame group.
-      let group: EdlCaptionGroup | null = null;
-      for (const w of words) {
-        const tlStartSec = tlInSec + w.startSec;
-        const tlEndSec = Math.max(tlInSec + w.endSec, tlStartSec + MIN_WORD_DURATION_SEC);
-        const lastEnd = group?.words[group.words.length - 1]?.tlEndSec ?? -Infinity;
-        const startNew =
-          !group ||
-          group.words.length >= CAPTION_WORDS_PER_GROUP ||
-          tlStartSec - lastEnd > CAPTION_GAP_SEC;
-        if (startNew) {
-          group = { id: `caption-${captions.length}`, words: [], tlInSec: tlStartSec, tlOutSec: tlEndSec, variant: "lowerThird", theme };
-          captions.push(group);
-        }
-        group!.words.push({ text: w.text, tlStartSec, tlEndSec, emphasis: isEmphasized(w) });
-        group!.tlOutSec = Math.min(tlEndSec + CAPTION_TAIL_SEC, tlOutSec);
-      }
-      // A lowerThird group stays up until the next lowerThird group takes
-      // over — restricted to this block's own lowerThird groups, so a
-      // bigTitle group pushed below (independent timing/lifetime) can't
-      // get pulled into this chain or stretch a lowerThird line short.
-      const lowerThirdGroups = captions.filter((g) => g.tlInSec >= tlInSec && g.variant === "lowerThird");
-      for (let i = 0; i < lowerThirdGroups.length - 1; i++) {
-        lowerThirdGroups[i].tlOutSec = lowerThirdGroups[i + 1].tlInSec;
-      }
-      // A group STILL shorter than the floor (the "extend to next" pass
-      // can't rescue a block's own last group) gets merged into its
-      // neighbor rather than rendered — see MIN_GROUP_DURATION_SEC. Merge
-      // backward when possible (keeps reading order stable); forward only
-      // for a block's very first group, which has no predecessor.
-      for (let i = 0; i < lowerThirdGroups.length; i++) {
-        const g = lowerThirdGroups[i];
-        if (g.tlOutSec - g.tlInSec >= MIN_GROUP_DURATION_SEC) continue;
-        const target = i > 0 ? lowerThirdGroups[i - 1] : lowerThirdGroups[i + 1];
-        if (!target) continue; // this block's only group — nothing to merge into, leave it
-        target.words.push(...g.words);
-        target.tlInSec = Math.min(target.tlInSec, g.tlInSec);
-        target.tlOutSec = Math.max(target.tlOutSec, g.tlOutSec);
-        const idx = captions.indexOf(g);
-        if (idx !== -1) captions.splice(idx, 1);
-      }
-
-      // bigTitle (additive): one full-screen card per picked keyword, held
-      // for at least MIN_BIGTITLE_DURATION_SEC, independent of and
-      // overlapping the lowerThird coverage above — see keywordTitle's
-      // doc comment for how the word(s) are chosen.
-      if (block.captionVariant === "bigTitle") {
-        const config = block.keywordTitle ?? { source: "capture" as const, maxWords: 1 };
-        let candidateWords: Word[];
-        if (config.source === "capture") {
-          candidateWords = words.filter((w) => captureSpans.some((span) => w.startSec < span.end && w.endSec > span.start));
-        } else {
-          const literalAnchor = block.anchors.find((a) => a.kind === "literal");
-          const markerEndSec = literalAnchor ? roleEdgeSec(literalAnchor.id, "end", block.id) - tlInSec : 0;
-          candidateWords = words.filter((w) => w.startSec >= markerEndSec);
-        }
-        const picked = pickKeywordWords(candidateWords, config.maxWords);
-        for (const w of picked) {
+      if (block.captionVariant === "karaokeTitle") {
+        // REPLACES lowerThird/bigTitle entirely (see schemas.ts's
+        // captionVariant doc comment) — one group carrying EVERY word of
+        // the block's own line, each with its own tlStartSec/tlEndSec;
+        // KaraokeTitleLayer.tsx picks whichever word is active and shows
+        // it full-screen, one at a time. No multi-word grouping/merging
+        // needed here (that machinery exists to keep a lowerThird LINE
+        // readable — karaokeTitle only ever shows one word).
+        const karaokeWords = words.map((w) => {
           const tlStartSec = tlInSec + w.startSec;
-          const tlEndSec = Math.max(tlInSec + w.endSec, tlStartSec + MIN_BIGTITLE_DURATION_SEC);
+          const tlEndSec = Math.max(tlInSec + w.endSec, tlStartSec + MIN_WORD_DURATION_SEC);
+          return { text: w.text, tlStartSec, tlEndSec, emphasis: isEmphasized(w) };
+        });
+        if (karaokeWords.length > 0) {
           captions.push({
             id: `caption-${captions.length}`,
-            words: [{ text: w.text, tlStartSec, tlEndSec, emphasis: true }],
-            tlInSec: tlStartSec,
-            tlOutSec: Math.min(tlEndSec, tlOutSec),
-            variant: "bigTitle",
+            words: karaokeWords,
+            tlInSec: karaokeWords[0].tlStartSec,
+            tlOutSec: Math.min(karaokeWords[karaokeWords.length - 1].tlEndSec + CAPTION_TAIL_SEC, tlOutSec),
+            variant: "karaokeTitle",
             theme,
           });
+        }
+      } else {
+        // Every captioned block ALWAYS gets ordinary multi-word lowerThird
+        // coverage (see BlockSchema's captionVariant doc comment — bigTitle
+        // is additive, not a replacement). Word ends are floored to
+        // MIN_WORD_DURATION_SEC so a genuinely zero-duration whisper
+        // timestamp can't seed a flash-frame group.
+        let group: EdlCaptionGroup | null = null;
+        for (const w of words) {
+          const tlStartSec = tlInSec + w.startSec;
+          const tlEndSec = Math.max(tlInSec + w.endSec, tlStartSec + MIN_WORD_DURATION_SEC);
+          const lastEnd = group?.words[group.words.length - 1]?.tlEndSec ?? -Infinity;
+          const startNew =
+            !group ||
+            group.words.length >= CAPTION_WORDS_PER_GROUP ||
+            tlStartSec - lastEnd > CAPTION_GAP_SEC;
+          if (startNew) {
+            group = { id: `caption-${captions.length}`, words: [], tlInSec: tlStartSec, tlOutSec: tlEndSec, variant: "lowerThird", theme };
+            captions.push(group);
+          }
+          group!.words.push({ text: w.text, tlStartSec, tlEndSec, emphasis: isEmphasized(w) });
+          group!.tlOutSec = Math.min(tlEndSec + CAPTION_TAIL_SEC, tlOutSec);
+        }
+        // A lowerThird group stays up until the next lowerThird group takes
+        // over — restricted to this block's own lowerThird groups, so a
+        // bigTitle group pushed below (independent timing/lifetime) can't
+        // get pulled into this chain or stretch a lowerThird line short.
+        const lowerThirdGroups = captions.filter((g) => g.tlInSec >= tlInSec && g.variant === "lowerThird");
+        for (let i = 0; i < lowerThirdGroups.length - 1; i++) {
+          lowerThirdGroups[i].tlOutSec = lowerThirdGroups[i + 1].tlInSec;
+        }
+        // A group STILL shorter than the floor (the "extend to next" pass
+        // can't rescue a block's own last group) gets merged into its
+        // neighbor rather than rendered — see MIN_GROUP_DURATION_SEC. Merge
+        // backward when possible (keeps reading order stable); forward only
+        // for a block's very first group, which has no predecessor.
+        for (let i = 0; i < lowerThirdGroups.length; i++) {
+          const g = lowerThirdGroups[i];
+          if (g.tlOutSec - g.tlInSec >= MIN_GROUP_DURATION_SEC) continue;
+          const target = i > 0 ? lowerThirdGroups[i - 1] : lowerThirdGroups[i + 1];
+          if (!target) continue; // this block's only group — nothing to merge into, leave it
+          target.words.push(...g.words);
+          target.tlInSec = Math.min(target.tlInSec, g.tlInSec);
+          target.tlOutSec = Math.max(target.tlOutSec, g.tlOutSec);
+          const idx = captions.indexOf(g);
+          if (idx !== -1) captions.splice(idx, 1);
+        }
+
+        // bigTitle (additive): one full-screen card per picked keyword, held
+        // for at least MIN_BIGTITLE_DURATION_SEC, independent of and
+        // overlapping the lowerThird coverage above — see keywordTitle's
+        // doc comment for how the word(s) are chosen.
+        if (block.captionVariant === "bigTitle") {
+          const config = block.keywordTitle ?? { source: "capture" as const, maxWords: 1 };
+          let candidateWords: Word[];
+          if (config.source === "capture") {
+            candidateWords = words.filter((w) => captureSpans.some((span) => w.startSec < span.end && w.endSec > span.start));
+          } else {
+            const literalAnchor = block.anchors.find((a) => a.kind === "literal");
+            const markerEndSec = literalAnchor ? roleEdgeSec(literalAnchor.id, "end", block.id) - tlInSec : 0;
+            candidateWords = words.filter((w) => w.startSec >= markerEndSec);
+          }
+          const picked = pickKeywordWords(candidateWords, config.maxWords);
+          for (const w of picked) {
+            const tlStartSec = tlInSec + w.startSec;
+            const tlEndSec = Math.max(tlInSec + w.endSec, tlStartSec + MIN_BIGTITLE_DURATION_SEC);
+            captions.push({
+              id: `caption-${captions.length}`,
+              words: [{ text: w.text, tlStartSec, tlEndSec, emphasis: true }],
+              tlInSec: tlStartSec,
+              tlOutSec: Math.min(tlEndSec, tlOutSec),
+              variant: "bigTitle",
+              theme,
+            });
+          }
         }
       }
     }
@@ -738,6 +780,18 @@ export const assemble = (
   const hasStyleProfile = fs.existsSync(path.join(formatStylesDir, `${format.id}.json`));
   const grade = hasStyleProfile ? loadStyleProfile(format.id).grade : undefined;
 
+  // Only bother loading the plates manifest if some block actually uses
+  // karaokeTitle — most formats won't, and loadPlatesManifest throws for
+  // a format with no plates at all (same guard buildMusic uses above).
+  let karaokeTitleBaselineFrac: number | undefined;
+  if (format.blocks.some((b) => b.captionVariant === "karaokeTitle")) {
+    try {
+      karaokeTitleBaselineFrac = loadPlatesManifest(format.id).reference.talkingHead.headTopFrac;
+    } catch {
+      karaokeTitleBaselineFrac = undefined;
+    }
+  }
+
   const edl: Edl = EdlSchema.parse({
     jobId: filled.jobId,
     formatId: format.id,
@@ -751,6 +805,7 @@ export const assemble = (
     captions,
     captionStyle: format.captionStyle,
     grade,
+    karaokeTitleBaselineFrac,
     transitions,
     music,
     assets,

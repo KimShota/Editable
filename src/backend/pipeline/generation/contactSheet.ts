@@ -75,18 +75,23 @@ sheet.save(out_path, quality=90)
 print("OK", out_path)
 `;
 
-/** Builds one contact-sheet JPG from every flagged insert in `inserts`
- *  (generatedScene-derived shots — plateStill/detailStill have no ladder
- *  and no flag, so they're absent from the sheet by design). Writes
- *  nothing and returns false if no insert carries a flag. */
+/** Builds one contact-sheet JPG from every insert in `inserts` worth
+ *  showing: a QC-flagged generatedScene shot, OR a montageReel/triptych
+ *  with per-member tier info even when its own aggregate flag is absent
+ *  (e.g. every member is a plain composite with no QC ladder at all —
+ *  tier truth still belongs on the sheet). Writes nothing and returns
+ *  false if there's nothing to show. */
 export const buildContactSheet = (jobDir: string, inserts: Inserts, outPath: string): boolean => {
-  const flagged = inserts.inserts.filter((i) => i.flag !== undefined);
-  if (flagged.length === 0) return false;
+  const shown = inserts.inserts.filter((i) => {
+    const qc = (i.qc ?? {}) as { members?: Array<{ label: string; tier: string }> };
+    return i.flag !== undefined || (qc.members?.length ?? 0) > 0;
+  });
+  if (shown.length === 0) return false;
 
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-contactsheet-"));
   try {
     const tiles: Array<Tile & { color: [number, number, number] }> = [];
-    for (const insert of flagged) {
+    for (const insert of shown) {
       const absVideoPath = path.join(jobDir, insert.path);
       const framePath = path.join(workDir, `${insert.slotName}.png`);
       try {
@@ -99,17 +104,26 @@ export const buildContactSheet = (jobDir: string, inserts: Inserts, outPath: str
       const attempts = Array.isArray(qc.attempts) ? (qc.attempts as Array<Record<string, unknown>>) : undefined;
       const lastAttempt = attempts?.[attempts.length - 1];
       const geometry = lastAttempt?.geometry as Record<string, unknown> | undefined;
-      const summary = geometry
-        ? `bbox=${Number(geometry.bboxHeightFrac ?? 0).toFixed(2)}H luma=${geometry.subjectMedianLuma ?? "?"}`
-        : typeof qc.note === "string"
-          ? qc.note
-          : "";
+      const members = qc.members as Array<{ label: string; tier: string; flag?: string }> | undefined;
+      // Tier truth, always shown when known: the single top-level tier
+      // (generatedScene), or one letter per montageReel/triptych member
+      // (g=gemini, c=composite, r=reuse, x=realCrop, t=templateClip) so a
+      // tier-down is visible at a glance instead of requiring a trouser-
+      // color inspection to notice.
+      const tierTag = typeof qc.tier === "string"
+        ? `tier=${qc.tier}`
+        : members
+          ? `tiers=[${members.map((m) => m.tier[0]).join("")}]`
+          : undefined;
+      const geometrySummary = geometry ? `bbox=${Number(geometry.bboxHeightFrac ?? 0).toFixed(2)}H luma=${geometry.subjectMedianLuma ?? "?"}` : undefined;
+      const summary = [tierTag, geometrySummary ?? (typeof qc.note === "string" ? qc.note : undefined)].filter(Boolean).join(" ");
+      const flag = (insert.flag ?? "orange") as "green" | "orange" | "red";
       tiles.push({
         imagePath: framePath,
         label: insert.slotName,
-        flag: insert.flag as "green" | "orange" | "red",
+        flag,
         summary,
-        color: FLAG_COLOR[insert.flag as string] ?? [80, 80, 80],
+        color: FLAG_COLOR[flag] ?? [80, 80, 80],
       });
     }
 

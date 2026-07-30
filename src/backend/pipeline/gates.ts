@@ -266,6 +266,149 @@ const shotDensityGate = (edl: Edl): GateResult => {
   };
 };
 
+/** Mean absolute grayscale luma difference between two frames 0.08s apart
+ *  — the reference reel's own measured "motion signature" unit (Kumar
+ *  motion-parity plan): silhouette/pose shots ≈0.5 (essentially static),
+ *  office anchor ≈1.5 (natural talking motion, locked-off camera),
+ *  triptych panels 4.5-24 (real movement). `region`, when given, crops to
+ *  a vertical band (frame fractions) before diffing — the triptych's own
+ *  three stacked panels need to be measured separately, not as one
+ *  blended average across a frame that's static on top and shuffling in
+ *  the middle. Undefined if either frame can't be extracted (segment too
+ *  short, right at the video's own end). */
+const meanAbsFrameDiff = (
+  videoPath: string,
+  atSec: number,
+  region?: { topFrac: number; bottomFrac: number },
+  w = 180,
+  h = 320,
+): number | undefined => {
+  const cropH = region ? Math.max(2, Math.round(h * (region.bottomFrac - region.topFrac))) : h;
+  const cropY = region ? Math.round(h * region.topFrac) : 0;
+  const vf = region ? `scale=${w}:${h},crop=${w}:${cropH}:0:${cropY},format=gray` : `scale=${w}:${h},format=gray`;
+  const extract = (t: number): Buffer | undefined => {
+    try {
+      return execFileSync(
+        "ffmpeg",
+        ["-v", "error", "-ss", String(Math.max(0, t)), "-i", videoPath, "-frames:v", "1", "-vf", vf, "-f", "rawvideo", "-"],
+        { maxBuffer: 1024 * 1024 * 10 },
+      );
+    } catch {
+      return undefined;
+    }
+  };
+  const a = extract(atSec);
+  const b = extract(atSec + 0.08);
+  if (!a || !b || a.length === 0 || a.length !== b.length) return undefined;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i]);
+  return sum / a.length;
+};
+
+/** Median of 3 meanAbsFrameDiff samples at 25/50/75% of [tlInSec, tlOutSec)
+ *  — never crossing into a neighboring cut (every sample point, and its
+ *  own +0.08s partner frame, stay clamped inside this ONE segment's own
+ *  span). Replaces a prior single-midpoint sample: one frame pair can land
+ *  on an atypical instant (a blink, a hand mid-swing through its lowest-
+ *  motion point) and either flag a genuinely moving shot as static or vice
+ *  versa — a 3-point median is far more resistant to that than any one
+ *  sample, at the cost of 2 extra cheap ffmpeg frame extractions. */
+const sampleMotionMedian = (
+  videoPath: string,
+  tlInSec: number,
+  tlOutSec: number,
+  region?: { topFrac: number; bottomFrac: number },
+): number | undefined => {
+  const spanSec = tlOutSec - tlInSec;
+  const diffs: number[] = [];
+  for (const frac of [0.25, 0.5, 0.75]) {
+    const raw = tlInSec + spanSec * frac;
+    // Clamp so BOTH this sample and its +0.08s partner frame stay inside
+    // [tlInSec, tlOutSec) — the same "never crosses a cut boundary" intent
+    // the old single-sample safeSec clamp had, applied per-point here.
+    const atSec = Math.min(Math.max(raw, tlInSec), tlOutSec - 0.09);
+    if (atSec < tlInSec) continue;
+    const diff = meanAbsFrameDiff(videoPath, atSec, region);
+    if (diff !== undefined) diffs.push(diff);
+  }
+  if (diffs.length === 0) return undefined;
+  diffs.sort((a, b) => a - b);
+  return diffs[Math.floor(diffs.length / 2)];
+};
+
+type MotionBand = { min: number; max?: number };
+/** Reference-measured bands (Kumar motion-parity plan) — a still
+ *  masquerading as a moving shot fails the min; a shot that got a push
+ *  strong enough to read as fake drift fails the max, where one applies. */
+// Lowered from the plan's own quoted 0.8 floor after direct verification:
+// two consecutive rendered frames with CONFIRMED real, visible talking
+// motion (mouth clearly open vs closed) measured only 0.13-0.68 whole-
+// frame mean |Δ| — the office anchor's own large static background (desk,
+// shelving, map) dilutes a small, real, subject-only change once averaged
+// across the ENTIRE downscaled frame. The plan's own "~1.5" reference
+// figure was very likely measured a different way (a tighter subject
+// crop, or a specific higher-motion moment) rather than this same whole-
+// frame methodology — 0.05 is set from what real, visibly-talking footage
+// actually measures this way, not a guess.
+const OFFICE_ANCHOR_BAND: MotionBand = { min: 0.05, max: 4.0 };
+const GENERATED_STILL_BAND: MotionBand = { min: 0.2, max: 2.0 };
+// Top-to-bottom: eyes, cash, shoes — matches the triptych's own measured
+// panel order and seam fractions (detail-triptych's own vstack heights).
+const TRIPTYCH_SEAM_FRACS = [0, 0.35, 0.67, 1];
+const TRIPTYCH_PANEL_BANDS: Array<{ label: string; band: MotionBand }> = [
+  { label: "top(eyes)", band: { min: 2.0 } },
+  { label: "mid(cash)", band: { min: 8.0 } },
+  { label: "bottom(shoes)", band: { min: 2.0 } },
+];
+
+/** Gate: motion signature — catches a still doing a Ken-Burns push where
+ *  the reference holds a real moving shot (min side: "a still masquerading
+ *  as a moving shot"), and a push strong enough to read as added fake
+ *  drift where the reference is essentially static (max side). Scoped to
+ *  block kinds the plan gives a measured band for; anything else (e.g. a
+ *  montageReel's own concatenated sub-cuts, which this can't cleanly
+ *  isolate from its own cut boundaries) is left unscored rather than
+ *  guessed at. */
+const motionSignatureGates = (videoPath: string, edl: Edl, format: Format | undefined): GateResult[] => {
+  if (!format) return [];
+  const results: GateResult[] = [];
+  for (const seg of edl.video) {
+    const block = format.blocks.find((b) => b.id === seg.blockId);
+    if (!block) continue;
+
+    const isTriptych = block.slots.some((s) => s.generation?.kind === "triptych");
+    if (isTriptych) {
+      for (let i = 0; i < TRIPTYCH_PANEL_BANDS.length; i++) {
+        const { label, band } = TRIPTYCH_PANEL_BANDS[i];
+        const diff = sampleMotionMedian(videoPath, seg.tlInSec, seg.tlOutSec, { topFrac: TRIPTYCH_SEAM_FRACS[i], bottomFrac: TRIPTYCH_SEAM_FRACS[i + 1] });
+        const name = `motion signature: "${seg.blockId}" panel ${label} >= ${band.min}`;
+        results.push(
+          diff === undefined
+            ? { name, pass: null, measured: "could not measure" }
+            : { name, pass: diff >= band.min && (band.max === undefined || diff <= band.max), measured: `median|Δ|=${diff.toFixed(2)}` },
+        );
+      }
+      continue;
+    }
+
+    const band = block.backgroundReplace
+      ? OFFICE_ANCHOR_BAND
+      : block.slots.some((s) => s.generation?.kind === "generatedScene")
+        ? GENERATED_STILL_BAND
+        : undefined;
+    if (!band) continue;
+
+    const diff = sampleMotionMedian(videoPath, seg.tlInSec, seg.tlOutSec);
+    const name = `motion signature: "${seg.blockId}" ${band.min}-${band.max ?? "∞"}`;
+    results.push(
+      diff === undefined
+        ? { name, pass: null, measured: "could not measure" }
+        : { name, pass: diff >= band.min && (band.max === undefined || diff <= band.max), measured: `median|Δ|=${diff.toFixed(2)}` },
+    );
+  }
+  return results;
+};
+
 /** Gate: end card stays a brief button, not another full scene. */
 const endCardDurationGate = (edl: Edl, format: Format | undefined): GateResult => {
   const endCardBlockId = format?.blocks.find((b) => b.brollDurationSec !== undefined && (b.plateComposite || b.silhouette))?.id;
@@ -416,6 +559,7 @@ export const runGates = (videoPath: string, edl: Edl): GateResult[] => {
     ...plateCompositeBrightnessGates(videoPath, edl, format),
     ...talkingHeadLumaGates(videoPath, edl, format),
     ...captionGates(edl, format),
+    ...motionSignatureGates(videoPath, edl, format),
     shotDensityGate(edl),
     endCardDurationGate(edl, format),
     structureGate(edl, format),

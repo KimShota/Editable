@@ -191,6 +191,41 @@ export const generateVignetteBackdrop = (width: number, height: number, outPath:
 };
 
 /**
+ * Darkens a flattened composite laterally toward its own left/right
+ * edges — the fix for a composite whose room stays as bright at the frame
+ * edges as the reference's own room falls off toward black (measured gap
+ * on this job's own footage: reference edge patches ~7-27, this
+ * composite's own edges ~40-80 before this runs, despite the wall/plate
+ * itself matching almost exactly — the plate isn't the problem, nothing
+ * was pulling its own edges down the way a real single-key-light room
+ * would). A pure multiplicative RGB scale — 1.0 (no change) at the frame's
+ * horizontal center, falling to `minFactor` at the left/right edges along
+ * a `power`-shaped curve (PlatesManifestSchema's talkingHead.edgeFalloff)
+ * — so a roughly-centered subject (the talking-head composite's own
+ * auto-framed subject) is left close to untouched while the room around
+ * them pulls down toward the reference's own falloff. Runs on the
+ * FLATTENED composite (after the desk foreground is already baked in),
+ * not as part of compositeVideoOnBackdrop itself, since it's specific to
+ * the talking-head office composite — the broll plate composites (their
+ * own subject isn't necessarily centered the same way, e.g. the sofa
+ * shot) don't call this.
+ */
+export const applyLateralFalloff = (
+  inputPath: string,
+  outputPath: string,
+  opts: { minFactor: number; power: number },
+): void => {
+  const factorExpr = `(1-(1-${opts.minFactor})*pow(abs(X/W-0.5)*2\\,${opts.power}))`;
+  execFileSync("ffmpeg", [
+    "-y", "-v", "error",
+    "-i", inputPath,
+    "-vf", `geq=r='r(X\\,Y)*${factorExpr}':g='g(X\\,Y)*${factorExpr}':b='b(X\\,Y)*${factorExpr}'`,
+    "-c:a", "copy",
+    outputPath,
+  ]);
+};
+
+/**
  * Composites a person, cut out of `subjectImagePath`, onto `backdropPath`
  * (any generated or plain backdrop, same pixel size as the subject) with a
  * soft drop shadow — the shared "put the real subject on a synthesized
@@ -348,8 +383,23 @@ export const compositeVideoOnBackdrop = (opts: {
    *  before the final composite runs, so a caller can measure the subject
    *  (bbox, luma) and derive subjectFilter/subjectTransform without a
    *  separate extraction pass of its own. Overrides the two options above
-   *  when it returns a value for either. */
-  calibrate?: (framesDir: string, masksDir: string) => { subjectFilter?: string; subjectTransform?: SubjectTransform };
+   *  when it returns a value for either. `backdropFilter`, when returned,
+   *  is an extra ffmpeg `-vf` chain applied to the backdrop AFTER its own
+   *  cover-fit resize — the office-composite fixes (plate defocus/color-
+   *  temperature, both solved against this job's own measured subject and
+   *  the fixed plate, never baked-in constants applied blind) hang off
+   *  this hook rather than a separate pass, since `calibrate` already has
+   *  the subject frames/masks this solve needs in hand. (Grain is NOT
+   *  applied here — a temporal-noise filter needs to run on the backdrop's
+   *  own VIDEO stream, after `-loop 1` turns the still into a sequence of
+   *  otherwise-identical frames, not on the still once (which bakes in one
+   *  static noise pattern and reads as a frozen grainy TEXTURE, not real
+   *  grain-over-time) — and, separately, a probe-solved strength measured
+   *  against just the plate undershoots once it's inside the real
+   *  composited-and-recompressed output. See backgroundReplace.ts's own
+   *  post-falloff grain step, solved against the actual final encode via
+   *  officeCompositeQC.ts's solveGrainStrengthOnVideo.) */
+  calibrate?: (framesDir: string, masksDir: string) => { subjectFilter?: string; subjectTransform?: SubjectTransform; backdropFilter?: string };
 }): void => {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-matte-video-"));
   try {
@@ -374,6 +424,11 @@ export const compositeVideoOnBackdrop = (opts: {
 
     const backdropSized = path.join(workDir, "backdrop.png");
     resizeCover(opts.backdropPath, opts.width, opts.height, backdropSized);
+    if (calibrated?.backdropFilter) {
+      const backdropTreated = path.join(workDir, "backdrop-treated.png");
+      execFileSync("ffmpeg", ["-y", "-v", "error", "-i", backdropSized, "-vf", calibrated.backdropFilter, backdropTreated]);
+      fs.renameSync(backdropTreated, backdropSized);
+    }
 
     let foregroundSized: string | undefined;
     if (opts.foregroundPath) {
@@ -441,6 +496,145 @@ export const compositeVideoOnBackdrop = (opts: {
       "-r", String(opts.fps),
       "-c:a", "aac",
       "-shortest",
+      opts.outPath,
+    ]);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+};
+
+/** A fully transparent RGBA still at (width, height) — NOT
+ *  `color=c=black@0.0`: that `@alpha` suffix on the `color` lavfi source
+ *  is silently ignored in this environment (verified: the resulting PNG's
+ *  own alpha channel reads 255, fully opaque, despite the `@0.0`).
+ *  Forcing alpha to 0 via an explicit `geq` expression after converting
+ *  to rgba is what actually produces a transparent pixel. */
+const transparentCanvas = (width: number, height: number, outPath: string): void => {
+  execFileSync("ffmpeg", [
+    "-y", "-v", "error",
+    "-f", "lavfi", "-i", `color=c=black:s=${width}x${height}`,
+    "-vf", `format=rgba,geq=r='r(X\\,Y)':g='g(X\\,Y)':b='b(X\\,Y)':a=0`,
+    "-frames:v", "1",
+    outPath,
+  ]);
+};
+
+/**
+ * Same subject cutout + desk-foreground layering as
+ * compositeVideoOnBackdrop's own last steps, but with NO backdrop and NO
+ * drop shadow — just the subject (matted, transformed, and relit exactly
+ * the same way, via the same `calibrate` callback shape) and the
+ * foreground, composited onto a transparent canvas and encoded with a
+ * real alpha channel (ProRes 4444, .mov). This is the "fg" layer the
+ * title z-order fix needs: Remotion composites it ON TOP of the karaoke
+ * title, so wherever the subject's own pixels are opaque, they occlude
+ * the title text exactly like the flattened composite's own subject
+ * does, while the title itself sits BEHIND this layer and becomes
+ * visible only where the subject is transparent (see EdlVideo.tsx's
+ * render order).
+ *
+ * ProRes 4444, not VP9/webm: VP9 alpha in a webm container stores alpha
+ * as a side-channel ffmpeg's own `overlay` filter doesn't apply on
+ * decode by default (verified directly — a webm built this way overlays
+ * as fully OPAQUE, showing its own base yuv420p plane, not the intended
+ * cutout-on-transparency). ProRes 4444 reports genuine yuva444p on its
+ * primary stream and composites correctly through the same overlay
+ * filter with no special handling. Bigger on disk than VP9 would be, but
+ * this is a short per-job intermediate consumed locally, not something
+ * streamed or distributed — reliability wins over file size here.
+ *
+ * No shadow: a drop shadow only makes visual sense cast onto a backdrop,
+ * which this layer doesn't have — the flattened composite (with the
+ * backdrop AND its own shadow already baked in) is unaffected by this
+ * layer's existence and keeps working exactly as it did before.
+ */
+export const compositeSubjectAlphaVideo = (opts: {
+  subjectVideoPath: string;
+  foregroundPath?: string;
+  outPath: string;
+  width: number;
+  height: number;
+  fps: number;
+  silhouette?: boolean;
+  darken?: number;
+  subjectFilter?: string;
+  subjectTransform?: SubjectTransform;
+  calibrate?: (framesDir: string, masksDir: string) => { subjectFilter?: string; subjectTransform?: SubjectTransform };
+}): void => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-matte-alpha-"));
+  try {
+    const framesDir = path.join(workDir, "frames");
+    fs.mkdirSync(framesDir);
+    execFileSync("ffmpeg", [
+      "-y", "-v", "error",
+      "-i", opts.subjectVideoPath,
+      "-vf", `fps=${opts.fps},scale=${opts.width}:${opts.height}:force_original_aspect_ratio=increase,crop=${opts.width}:${opts.height}`,
+      path.join(framesDir, "f%05d.png"),
+    ]);
+
+    const masksDir = path.join(workDir, "masks");
+    matteFramesBatch(framesDir, masksDir);
+
+    const calibrated = opts.calibrate?.(framesDir, masksDir);
+    const subjectFilter = calibrated?.subjectFilter ?? opts.subjectFilter;
+    const transform = calibrated?.subjectTransform ?? opts.subjectTransform ?? IDENTITY_TRANSFORM;
+
+    let foregroundSized: string | undefined;
+    if (opts.foregroundPath) {
+      foregroundSized = path.join(workDir, "foreground.png");
+      resizeCoverRGBA(opts.foregroundPath, opts.width, opts.height, foregroundSized);
+    }
+
+    const transparentPath = path.join(workDir, "transparent.png");
+    transparentCanvas(opts.width, opts.height, transparentPath);
+
+    const scale = transform.scale;
+    const scaledW = Math.max(2, Math.round((opts.width * scale) / 2) * 2);
+    const scaledH = Math.max(2, Math.round((opts.height * scale) / 2) * 2);
+    const scaleFilter = scale !== 1 ? `,scale=${scaledW}:${scaledH}` : "";
+
+    const crushFilter = opts.silhouette ? SILHOUETTE_CRUSH : opts.darken ? darkenFilter(opts.darken) : undefined;
+    const postAlphaFilter = [crushFilter, subjectFilter].filter(Boolean).join(",");
+    const cutoutFilter = postAlphaFilter
+      ? `[1][2]alphamerge,${postAlphaFilter}${scaleFilter}[cutout]`
+      : `[1][2]alphamerge${scaleFilter}[cutout]`;
+
+    const inputArgs = [
+      "-loop", "1", "-i", transparentPath,
+      "-framerate", String(opts.fps), "-i", path.join(framesDir, "f%05d.png"),
+      "-framerate", String(opts.fps), "-i", path.join(masksDir, "f%05d.png"),
+    ];
+    const filterParts = [cutoutFilter];
+    if (foregroundSized) {
+      inputArgs.push("-loop", "1", "-i", foregroundSized);
+      filterParts.push(`[0][cutout]overlay=${transform.xOffsetPx}:${transform.yOffsetPx}:format=auto[bg_subject]`);
+      filterParts.push(`[bg_subject][3]overlay=0:0:format=auto,fps=${opts.fps}[out]`);
+    } else {
+      filterParts.push(`[0][cutout]overlay=${transform.xOffsetPx}:${transform.yOffsetPx}:format=auto,fps=${opts.fps}[out]`);
+    }
+
+    // Explicit frame count, not `-shortest`: `-shortest` only takes effect
+    // when the OUTPUT has multiple mapped streams of different lengths (it
+    // stops at whichever ends first) — this output maps a single video
+    // stream (`[out]`, no audio), so `-shortest` has nothing to compare
+    // against and is a silent no-op. Input 0 (transparentPath) and,
+    // when present, the foreground input are both `-loop 1` — infinite on
+    // their own — so with no explicit bound the filtergraph (not just the
+    // muxer) runs unbounded. This shipped as a real incident: one call
+    // filled tens of GB in under two minutes before being caught and
+    // killed by hand. `frameCount`, from the frame sequence actually
+    // extracted above, is a hard, unambiguous stop the encoder itself
+    // enforces — the same technique provider.ts's animateStillToClip
+    // already uses for its own single-video-stream output.
+    const frameCount = fs.readdirSync(framesDir).filter((f) => f.endsWith(".png")).length;
+    execFileSync("ffmpeg", [
+      "-y", "-v", "error",
+      ...inputArgs,
+      "-filter_complex", filterParts.join(";"),
+      "-map", "[out]",
+      "-frames:v", String(frameCount),
+      "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le",
+      "-r", String(opts.fps),
       opts.outPath,
     ]);
   } finally {

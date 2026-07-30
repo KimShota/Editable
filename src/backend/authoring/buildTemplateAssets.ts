@@ -45,7 +45,19 @@ type FormatAssetConfig = {
   deskForegroundSource: string;
   deskEdgeFrac: number;
   reference: {
-    talkingHead: { headTopFrac: number; headHeightFrac: number; lumaP50: number; lumaP95: number };
+    talkingHead: {
+      headTopFrac: number;
+      headHeightFrac: number;
+      lumaP50: number;
+      lumaP95: number;
+      faceLumaMean: number;
+      edgeFalloff: { minFactor: number; power: number };
+      faceP97Target: number;
+      plateSharpnessRatioMid: number;
+      grainStdTarget: number;
+      roomWarmthTarget: number;
+      flatBackdropRegion: { topFrac: number; bottomFrac: number; leftFrac: number; rightFrac: number };
+    };
     endCard: { subjectTopFrac: number; subjectHeightFrac: number; lumaP50: number; lumaP95: number };
   };
   /** Absolute path to a source audio file to cut the music bed from, plus
@@ -84,7 +96,47 @@ const FORMATS: FormatAssetConfig[] = [
     deskForegroundSource: "office-dark.png",
     deskEdgeFrac: 0.63,
     reference: {
-      talkingHead: { headTopFrac: 0.29, headHeightFrac: 0.145, lumaP50: 14, lumaP95: 76 },
+      // headTopFrac/headHeightFrac/faceLumaMean re-measured directly (not
+      // hand-eyeballed) via subjectFit.ts's measureHeadBBox + relight.ts's
+      // measureFaceLuma against 10 sampled frames of the reference's own
+      // office shot (authoring/draft-baf87683/source.mp4) — the prior hand
+      // grid-read (0.29/0.145) undersized the head by roughly 2x once
+      // actually run through computeSubjectTransform's calibration, which
+      // is what motivated re-measuring headHeightFrac properly rather than
+      // re-eyeballing it. edgeFalloff tuned against this job's own
+      // measured render/reference edge-luma gap (see matte.ts's
+      // applyLateralFalloff doc comment).
+      talkingHead: {
+        headTopFrac: 0.264,
+        headHeightFrac: 0.17,
+        lumaP50: 14,
+        lumaP95: 76,
+        faceLumaMean: 44.0,
+        // Tuned via direct render-vs-reference verification on this job's
+        // own footage (see the P1 build notes): minFactor 0.3/power 1.7
+        // lands left-edge patch ~19-22 / right-edge patch ~8-10 against
+        // the reference's own measured 27.4/7.3 — face/edge ratio 2.0-2.2,
+        // meeting the plan's own >=2.0 acceptance bar.
+        edgeFalloff: { minFactor: 0.3, power: 1.7 },
+        // v6 fixes (measured against out/cinematic-debut-manifesto-2ec1ca.mp4
+        // and the reference reel): the OLD faceLumaMean/p50 sample above mixed
+        // hair/shadow into a fixed rectangle and read ~60-70; the real face
+        // (p97 of the narrower hair/shadow-excluding region — see
+        // officeCompositeQC.ts's measureFaceP97) measures ~116. Sharpness/
+        // grain/warmth targets are the reference's own physical read on its
+        // office plate; the FILTER PARAMETERS needed to hit them are solved
+        // per job/plate (never baked in) — see solvePlateBlurSigma/
+        // solveGrainStrength/solveWarmthShift.
+        faceP97Target: 116,
+        plateSharpnessRatioMid: 0.65,
+        grainStdTarget: 3.4,
+        roomWarmthTarget: 2.3,
+        // Upper-left quadrant of the office-dark plate: above the subject's
+        // own head band (headTopFrac 0.264) and clear of the desk foreground
+        // (deskEdgeFrac 0.63) and the subject's own horizontal center — a
+        // genuinely flat, texture-free patch of wall.
+        flatBackdropRegion: { topFrac: 0.04, bottomFrac: 0.2, leftFrac: 0.06, rightFrac: 0.34 },
+      },
       // Measured against measure-endcard.png (grid-overlay read): a tight
       // face-box reads p50~103 (well-lit skin), a sweater/torso box reads
       // p50~14 (near-black clothing) — the subject mask mixes both, weighted

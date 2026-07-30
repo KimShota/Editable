@@ -72,7 +72,7 @@ const splitTitleLines = (text: string): [string, string] => {
  *  instead of one centered block sitting on top of them. */
 const KumarSplitTitle: React.FC<{ text: string }> = ({ text }) => {
   const frame = useCurrentFrame();
-  const { fps, width } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
   ensureDisplayFonts();
   const progress = spring({ frame, fps, config: { damping: 12, stiffness: 200 } });
   const scale = interpolate(progress, [0, 1], [1.35, 1]);
@@ -81,7 +81,7 @@ const KumarSplitTitle: React.FC<{ text: string }> = ({ text }) => {
   const lineStyle = (line: string): React.CSSProperties => ({
     fontFamily: PLAYFAIR_DISPLAY_STACK,
     fontWeight: 900,
-    fontSize: fitDidoneFontSize(line, width),
+    fontSize: fitDidoneFontSize(line, width, height),
     lineHeight: 1.1,
     color: KUMAR_RED,
     textAlign: "center",

@@ -142,6 +142,19 @@ const main = async () => {
       console.log(
         `    generated ${i.blockId}/${i.slotName} (${i.kind}, ${i.durationSec.toFixed(2)}s${i.cacheHit ? ", cache hit" : ""})`,
       );
+      // Tier truth, printed loudly at build time — not just recorded in
+      // inserts.json for a later contact-sheet look (see
+      // modelShots.ts's ShotTier doc comment for why this exists: a
+      // silent tier-down previously only showed up as a trouser-color
+      // mismatch a human happened to notice).
+      const qc = (i.qc ?? {}) as { tier?: string; members?: Array<{ label: string; tier: string; flag?: string }> };
+      if (qc.tier) {
+        console.log(`      tier: ${qc.tier}${qc.tier === "composite" ? "  ⚠ tiered down — not the AI-generated pose" : ""}`);
+      } else if (qc.members?.length) {
+        for (const m of qc.members) {
+          console.log(`      member "${m.label}": tier=${m.tier}${m.tier === "composite" ? "  ⚠ tiered down" : ""}${m.flag ? ` flag=${m.flag}` : ""}`);
+        }
+      }
     }
     for (const s of result.inserts.skipped) {
       console.log(`    skipped generation for ${s.blockId}/${s.slotName} — user supplied their own clip`);
