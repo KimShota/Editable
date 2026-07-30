@@ -12,6 +12,7 @@ import {
   ComponentRefSchema,
   EdlCaptionGroupSchema,
   EdlCaptionWordSchema,
+  EdlMusicSchema,
   EdlOverlaySchema,
   EdlSchema,
   EdlSfxSchema,
@@ -89,6 +90,7 @@ export type EdlSfx = z.infer<typeof EdlSfxSchema>;
 export type EdlCaptionWord = z.infer<typeof EdlCaptionWordSchema>;
 export type EdlCaptionGroup = z.infer<typeof EdlCaptionGroupSchema>;
 export type EdlTransition = z.infer<typeof EdlTransitionSchema>;
+export type EdlMusic = z.infer<typeof EdlMusicSchema>;
 export type Edl = z.infer<typeof EdlSchema>;
 
 export type StyleProfile = z.infer<typeof StyleProfileSchema>;

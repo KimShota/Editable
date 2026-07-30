@@ -5,7 +5,7 @@ import type { Edl } from "@backend/pipeline/types";
 import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import { TimelineClip } from "./TimelineClip";
 import { assignLanes, laneCount } from "./lanes";
-import { isSelected, Selection, SelectionTrack, toggleSelect, MUSIC_ID } from "./selection";
+import { isSelected, Selection, SelectionTrack, toggleSelect } from "./selection";
 import { buildMajorLadder, chooseTickScale, formatTick } from "./tickScale";
 import { FitIcon, ScissorsIcon, TrashIcon, ZoomInIcon, ZoomOutIcon } from "./Icons";
 
@@ -50,7 +50,7 @@ type ClipView = {
   thumbnailSrc?: string;
 };
 
-type FloatTrack = "overlay" | "sfx" | "captions";
+type FloatTrack = "overlay" | "sfx" | "captions" | "music";
 
 /**
  * One track's label + clips + the interactive background that starts a
@@ -81,9 +81,9 @@ function TrackRow({
   track: SelectionTrack;
   selection: Selection;
   onSelect: (s: Selection) => void;
-  /** Only the three free-floating tracks support "drag one, group moves
+  /** Only the free-floating tracks support "drag one, group moves
    *  together" — video is contiguous (reorder, not a free move) and
-   *  transition/music are always singletons. */
+   *  transition is always addressed by its own single afterClipId. */
   onGroupMove?: (track: FloatTrack, ids: string[], deltaSec: number) => void;
   pxPerSec: number;
   locked?: boolean;
@@ -250,7 +250,7 @@ const TimelineTracks = memo(function TimelineTracks({
   sfxClips,
   transitionClips,
   captionClips,
-  musicView,
+  musicClips,
   selection,
   onSelect,
   onRulerPointerDown,
@@ -262,8 +262,6 @@ const TimelineTracks = memo(function TimelineTracks({
   commitFloatMove,
   commitFloatTrim,
   commitGroupMove,
-  commitMusicMove,
-  commitMusicTrim,
 }: {
   pxPerSec: number;
   majorTicks: number[];
@@ -275,7 +273,7 @@ const TimelineTracks = memo(function TimelineTracks({
   sfxClips: ClipView[];
   transitionClips: ClipView[];
   captionClips: ClipView[];
-  musicView: ClipView | null;
+  musicClips: ClipView[];
   selection: Selection;
   onSelect: (s: Selection) => void;
   onRulerPointerDown: (e: React.PointerEvent) => void;
@@ -292,8 +290,6 @@ const TimelineTracks = memo(function TimelineTracks({
     deltaSec: number,
   ) => void;
   commitGroupMove: (track: FloatTrack, ids: string[], deltaSec: number) => void;
-  commitMusicMove: (deltaSec: number) => void;
-  commitMusicTrim: (edge: "in" | "out", deltaSec: number) => void;
 }) {
   return (
     <>
@@ -394,15 +390,19 @@ const TimelineTracks = memo(function TimelineTracks({
           pxPerSec={pxPerSec}
         />
       )}
-      {musicView && (
+      {musicClips.length > 0 && (
         <TrackRow
           label="Music"
-          clips={[musicView]}
+          clips={musicClips}
           colorClass={TRACK_COLOR.music}
-          handlers={{ move: (_id, d) => commitMusicMove(d), trim: (_id, edge, d) => commitMusicTrim(edge, d) }}
+          handlers={{
+            move: (id, d) => commitFloatMove("music", id, d),
+            trim: (id, edge, d) => commitFloatTrim("music", id, edge, d),
+          }}
           track="music"
           selection={selection}
           onSelect={onSelect}
+          onGroupMove={commitGroupMove}
           pxPerSec={pxPerSec}
         />
       )}
@@ -556,16 +556,14 @@ export function Timeline({
     [edl.captions],
   );
 
-  const musicView: ClipView | null = useMemo(
+  const musicClips: ClipView[] = useMemo(
     () =>
-      edl.music
-        ? {
-            id: MUSIC_ID,
-            tlInSec: edl.music.tlInSec,
-            tlOutSec: edl.music.tlInSec + (edl.music.durationSec ?? edl.durationSec - edl.music.tlInSec),
-            label: edl.music.src.split("/").pop() ?? "music",
-          }
-        : null,
+      edl.music.map((m) => ({
+        id: m.id,
+        tlInSec: m.tlInSec,
+        tlOutSec: m.tlInSec + (m.durationSec ?? edl.durationSec - m.tlInSec),
+        label: m.src.split("/").pop() ?? "music",
+      })),
     [edl.music, edl.durationSec],
   );
 
@@ -685,12 +683,13 @@ export function Timeline({
 
   const commitFloatMove = useCallback(
     (track: FloatTrack, clipId: string, deltaSec: number) => {
-      const clips = track === "overlay" ? edl.overlays : track === "sfx" ? edl.sfx : edl.captions;
+      const clips =
+        track === "overlay" ? edl.overlays : track === "sfx" ? edl.sfx : track === "captions" ? edl.captions : edl.music;
       const clip = clips.find((c) => c.id === clipId);
       if (!clip) return;
       onOp({ type: "move", track, id: clipId, tlInSec: Math.max(0, clip.tlInSec + deltaSec) });
     },
-    [edl.overlays, edl.sfx, edl.captions, onOp],
+    [edl.overlays, edl.sfx, edl.captions, edl.music, onOp],
   );
 
   const commitFloatTrim = useCallback(
@@ -700,12 +699,14 @@ export function Timeline({
           ? overlayClips.find((c) => c.id === clipId)
           : track === "sfx"
             ? sfxClips.find((c) => c.id === clipId)
-            : captionClips.find((c) => c.id === clipId);
+            : track === "captions"
+              ? captionClips.find((c) => c.id === clipId)
+              : musicClips.find((c) => c.id === clipId);
       if (!view) return;
       const tlSec = (edge === "in" ? view.tlInSec : view.tlOutSec) + deltaSec;
       onOp({ type: "trimEdge", track, id: clipId, edge, tlSec });
     },
-    [overlayClips, sfxClips, captionClips, onOp],
+    [overlayClips, sfxClips, captionClips, musicClips, onOp],
   );
 
   // Multi-select group-drag: one atomic edit shifts every selected clip on
@@ -718,28 +719,17 @@ export function Timeline({
     [onOp],
   );
 
-  const commitMusicMove = useCallback(
-    (deltaSec: number) => {
-      if (!edl.music) return;
-      onOp({ type: "move", track: "music", id: MUSIC_ID, tlInSec: Math.max(0, edl.music.tlInSec + deltaSec) });
-    },
-    [edl.music, onOp],
-  );
-
-  const commitMusicTrim = useCallback(
-    (edge: "in" | "out", deltaSec: number) => {
-      if (!musicView) return;
-      const tlSec = (edge === "in" ? musicView.tlInSec : musicView.tlOutSec) + deltaSec;
-      onOp({ type: "trimEdge", track: "music", id: MUSIC_ID, edge, tlSec });
-    },
-    [musicView, onOp],
-  );
-
   // Toolbar split/delete act on whatever's currently selected — a shortcut
   // for the same actions available per-clip in the Inspector. Only the
-  // four real clip tracks support split/delete (transitions/music don't).
+  // four real clip tracks support split (transitions/music have no
+  // meaningful "cut in two").
   const isSplittableTrack = (t: SelectionTrack): t is "video" | "overlay" | "sfx" | "captions" =>
     t === "video" || t === "overlay" || t === "sfx" || t === "captions";
+
+  // Delete is broader than split — transitions and music can be removed
+  // outright even though they can't be split.
+  const isDeletableTrack = (t: SelectionTrack): t is "video" | "overlay" | "sfx" | "captions" | "transition" | "music" =>
+    isSplittableTrack(t) || t === "transition" || t === "music";
 
   // Split only ever acts on exactly one clip (no "split all" bulk action —
   // where the playhead falls inside several selected clips at once isn't a
@@ -767,7 +757,7 @@ export function Timeline({
 
   const canDeleteSelection =
     !!selection &&
-    isSplittableTrack(selection.track) &&
+    isDeletableTrack(selection.track) &&
     !(selection.track === "video" && edl.video.length - selection.ids.length <= 0);
 
   const splitSelection = () => {
@@ -776,7 +766,7 @@ export function Timeline({
   };
 
   const deleteSelection = () => {
-    if (!selection || !isSplittableTrack(selection.track)) return;
+    if (!selection || !isDeletableTrack(selection.track)) return;
     onOp({ type: "deleteMany", track: selection.track, ids: selection.ids });
   };
 
@@ -842,7 +832,7 @@ export function Timeline({
             sfxClips={sfxClips}
             transitionClips={transitionClips}
             captionClips={captionClips}
-            musicView={musicView}
+            musicClips={musicClips}
             selection={selection}
             onSelect={onSelect}
             onRulerPointerDown={onRulerPointerDown}
@@ -854,8 +844,6 @@ export function Timeline({
             commitFloatMove={commitFloatMove}
             commitFloatTrim={commitFloatTrim}
             commitGroupMove={commitGroupMove}
-            commitMusicMove={commitMusicMove}
-            commitMusicTrim={commitMusicTrim}
           />
 
           {/* Playhead — the line is decorative only (so it doesn't block

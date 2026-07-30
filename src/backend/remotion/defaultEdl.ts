@@ -41,6 +41,7 @@ export const defaultEdl: Edl = {
   sfx: [],
   captions: [],
   transitions: [],
+  music: [],
   assets: {},
   diagnostics: [],
 };

@@ -690,7 +690,7 @@ export const assemble = (
   // user-bound musicSlot wins; otherwise fall back to the format's own
   // checked-in template bed, when it has one (loadPlatesManifest throws
   // for a format with no plates at all — most formats, hence the guard).
-  const buildMusic = (): Edl["music"] => {
+  const buildMusic = (): Edl["music"][number] | undefined => {
     const boundAsset = format.musicSlot ? fileAsset(filled, format.musicSlot.name) : undefined;
 
     let src: string;
@@ -760,6 +760,7 @@ export const assemble = (
       .filter((s): s is { tlInSec: number; tlOutSec: number } => s !== undefined);
 
     return {
+      id: "music",
       src,
       volume: format.musicVolume,
       tlInSec,
@@ -771,7 +772,8 @@ export const assemble = (
       duckWindows,
     };
   };
-  const music = buildMusic();
+  const builtMusic = buildMusic();
+  const music = builtMusic ? [builtMusic] : [];
 
   // Only load a StyleProfile if the format actually has one — most formats
   // never will, and loadStyleProfile() warns on a miss (appropriate when

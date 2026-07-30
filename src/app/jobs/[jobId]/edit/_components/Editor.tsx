@@ -12,7 +12,7 @@ import { MediaPanel } from "./MediaPanel";
 import { OverlayCanvas } from "./OverlayCanvas";
 import { RenderPanel } from "./RenderPanel";
 import { ResizeHandle } from "./ResizeHandle";
-import { Selection } from "./selection";
+import { MediaKind, Selection } from "./selection";
 import { formatTimecode } from "./timeFormat";
 import {
   ArrowLeftIcon,
@@ -214,6 +214,35 @@ export function Editor({
     [edl, sendOpToServer],
   );
 
+  // Uploads a user-supplied file and wires it into the timeline in one
+  // round trip (see /api/jobs/[jobId]/timeline/media) — same undo/redo
+  // bookkeeping as submitOp, since "add music" is just another edit.
+  const uploadMedia = useCallback(
+    async (file: File, kind: MediaKind, atSec: number): Promise<boolean> => {
+      setPending(true);
+      setError(null);
+      try {
+        const body = new FormData();
+        body.append("file", file);
+        body.append("kind", kind);
+        body.append("atSec", String(atSec));
+        const res = await fetch(`/api/jobs/${jobId}/timeline/media`, { method: "POST", body });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "upload failed");
+        setUndoStack((s) => [...s.slice(-(MAX_HISTORY - 1)), edl]);
+        setRedoStack([]);
+        setEdl(data.edl as Edl);
+        return true;
+      } catch (err) {
+        setError((err as Error).message);
+        return false;
+      } finally {
+        setPending(false);
+      }
+    },
+    [jobId, edl],
+  );
+
   const undo = useCallback(async () => {
     if (undoStack.length === 0 || pending) return;
     const target = undoStack[undoStack.length - 1];
@@ -261,15 +290,8 @@ export function Editor({
       }
 
       if ((e.key === "Delete" || e.key === "Backspace") && selection) {
-        if (
-          selection.track === "video" ||
-          selection.track === "overlay" ||
-          selection.track === "sfx" ||
-          selection.track === "captions"
-        ) {
-          e.preventDefault();
-          submitOp({ type: "deleteMany", track: selection.track, ids: selection.ids });
-        }
+        e.preventDefault();
+        submitOp({ type: "deleteMany", track: selection.track, ids: selection.ids });
       }
       if (e.key === " ") {
         e.preventDefault();
@@ -371,7 +393,7 @@ export function Editor({
       <div className="flex min-h-0 flex-1 flex-col p-2.5">
         <div className="flex min-h-0 flex-1">
           <div style={{ width: layout.mediaPanelWidth }} className={`shrink-0 ${panelClass}`}>
-            <MediaPanel edl={edl} onJumpTo={jumpTo} />
+            <MediaPanel edl={edl} onJumpTo={jumpTo} onUpload={uploadMedia} currentTimeSec={currentTimeSec} pending={pending} />
           </div>
           <ResizeHandle orientation="vertical" onResize={resizeMediaPanel} />
 

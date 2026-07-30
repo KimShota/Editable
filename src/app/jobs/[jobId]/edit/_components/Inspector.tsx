@@ -355,36 +355,50 @@ export function Inspector({
             Drag the transition on the timeline to snap it onto a different cut, or drag its right edge to
             change how long it plays. It also moves automatically when you trim or reorder the clip next to it.
           </p>
+          <div className={actionsClass}>
+            <button onClick={() => onOp({ type: "delete", track: "transition", id })} className={dangerButtonClass}>
+              <TrashIcon className="h-4 w-4" />
+              Delete transition
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  if (selection.track === "music" && edl.music) {
-    const durationSec = edl.music.durationSec ?? edl.durationSec - edl.music.tlInSec;
+  if (selection.track === "music") {
+    const music = edl.music.find((m) => m.id === id);
+    if (!music) return null;
+    const durationSec = music.durationSec ?? edl.durationSec - music.tlInSec;
     return (
       <div className="flex h-full flex-col">
-        {header("Music", edl.music.src.split("/").pop())}
+        {header("Music", music.src.split("/").pop())}
         <div className={sectionClass}>
           <Field label="Timeline window">
             <p className="text-sm tabular-nums text-[color:var(--ed-ink)]">
-              {edl.music.tlInSec.toFixed(2)}s – {(edl.music.tlInSec + durationSec).toFixed(2)}s
+              {music.tlInSec.toFixed(2)}s – {(music.tlInSec + durationSec).toFixed(2)}s
               <span className="text-[color:var(--ed-ink-dim)]"> ({durationSec.toFixed(2)}s)</span>
             </p>
           </Field>
-          <Field label={`Volume — ${Math.round(edl.music.volume * 100)}%`}>
+          <Field label={`Volume — ${Math.round(music.volume * 100)}%`}>
             <input
               type="range"
               min={0}
               max={1}
               step={0.01}
-              defaultValue={edl.music.volume}
+              defaultValue={music.volume}
               onChange={(e) =>
-                onOp({ type: "setProp", track: "music", id: "music", patch: { volume: Number(e.target.value) } })
+                onOp({ type: "setProp", track: "music", id: music.id, patch: { volume: Number(e.target.value) } })
               }
               className="w-full accent-[color:var(--ed-accent)]"
             />
           </Field>
+          <div className={actionsClass}>
+            <button onClick={() => onOp({ type: "delete", track: "music", id: music.id })} className={dangerButtonClass}>
+              <TrashIcon className="h-4 w-4" />
+              Delete music
+            </button>
+          </div>
         </div>
       </div>
     );

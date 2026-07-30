@@ -244,6 +244,7 @@ const main = async () => {
     filled = replaced.filled;
     trims = replaced.trims;
     transcript = replaced.transcript;
+    write("filled", filled);
     write("transcript", transcript);
     write("trim", trims);
   }

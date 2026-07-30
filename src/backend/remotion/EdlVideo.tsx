@@ -14,15 +14,15 @@ import { Edl, EdlTransition, EdlVideoSegment } from "../pipeline/types";
 
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
 
-/** Frame-aware volume envelope for the music bed — fade-in/out at the
+/** Frame-aware volume envelope for one music bed — fade-in/out at the
  *  bed's own head/tail, plus a ramped (not stepped) duck under every
- *  voice-block window in `duckWindows` (see schemas.ts's EdlSchema.music
- *  doc comment). `frame` is LOCAL to the bed's own Sequence (0 at
- *  edl.music.tlInSec), matching what Remotion's Audio `volume` callback
+ *  voice-block window in `duckWindows` (see schemas.ts's EdlMusicSchema
+ *  doc comment). `frame` is LOCAL to the bed's own Sequence (0 at the
+ *  bed's own tlInSec), matching what Remotion's Audio `volume` callback
  *  receives. Windows are assumed non-overlapping (voice blocks don't
  *  overlap each other); only the first match applies. */
 const DUCK_RAMP_SEC = 0.25;
-const musicVolumeAt = (music: NonNullable<Edl["music"]>, fps: number) => (frame: number): number => {
+const musicVolumeAt = (music: Edl["music"][number], fps: number) => (frame: number): number => {
   const tSec = music.tlInSec + frame / fps;
   const endSec = music.durationSec !== undefined ? music.tlInSec + music.durationSec : undefined;
 
@@ -287,28 +287,29 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
         </Sequence>
       ))}
 
-      {edl.music && (
+      {edl.music.map((m) => (
         <Sequence
-          from={toFrames(edl.music.tlInSec)}
+          key={m.id}
+          from={toFrames(m.tlInSec)}
           durationInFrames={
-            edl.music.durationSec !== undefined
-              ? Math.max(1, toFrames(edl.music.tlInSec + edl.music.durationSec) - toFrames(edl.music.tlInSec))
+            m.durationSec !== undefined
+              ? Math.max(1, toFrames(m.tlInSec + m.durationSec) - toFrames(m.tlInSec))
               : undefined
           }
-          name="music"
+          name={`music:${m.id}`}
         >
           <Audio
-            src={staticFile(edl.music.src)}
-            volume={musicVolumeAt(edl.music, fps)}
-            trimBefore={toFrames(edl.music.srcInSec)}
+            src={staticFile(m.src)}
+            volume={musicVolumeAt(m, fps)}
+            trimBefore={toFrames(m.srcInSec)}
             // The bed's own natural length may be shorter than
-            // edl.music.durationSec (see assemble.ts's buildMusic) —
-            // looping fills the remainder with a repeat instead of
-            // leaving true silence for however much is left over.
+            // m.durationSec (see assemble.ts's buildMusic) — looping
+            // fills the remainder with a repeat instead of leaving true
+            // silence for however much is left over.
             loop
           />
         </Sequence>
-      )}
+      ))}
     </AbsoluteFill>
   );
 };

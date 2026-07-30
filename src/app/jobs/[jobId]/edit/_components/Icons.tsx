@@ -68,6 +68,12 @@ export const TrashIcon = ({ className }: IconProps) => (
   </svg>
 );
 
+export const PlusIcon = ({ className }: IconProps) => (
+  <svg viewBox="0 0 24 24" fill={base} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" className={className}>
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+
 export const CloseIcon = ({ className }: IconProps) => (
   <svg viewBox="0 0 24 24" fill={base} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" className={className}>
     <path d="M6 6l12 12M18 6 6 18" />

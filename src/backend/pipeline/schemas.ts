@@ -1011,6 +1011,30 @@ export const EdlTransitionSchema = z.object({
   durationSec: z.number().nonnegative(),
 });
 
+export const EdlMusicSchema = z.object({
+  id: z.string(),
+  src: z.string(),
+  volume: z.number().min(0).max(1).default(0.5),
+  /** Where this bed starts on the timeline — movable/trimmable like any
+   *  other clip, independent of the source audio file. */
+  tlInSec: z.number().min(0).default(0),
+  /** Omitted = plays to the end of the timeline. */
+  durationSec: z.number().positive().optional(),
+  /** Where playback starts within the source file — an end-aligned
+   *  placement (see FormatSchema's musicPlacement) skips however much of
+   *  the track's own head doesn't fit before the timeline ends. */
+  srcInSec: z.number().min(0).default(0),
+  fadeInSec: z.number().min(0).default(0),
+  fadeOutSec: z.number().min(0).default(0),
+  /** Volume multiplier applied while ANY duckWindow is active — 1 means
+   *  no ducking. Ramped, not stepped (see EdlVideo.tsx). */
+  duckVolume: z.number().min(0).max(1).default(1),
+  /** Absolute-timeline spans (typically every voice block's own segment)
+   *  this bed should duck under — spoken dialogue winning over the bed,
+   *  ramped in/out rather than cut. */
+  duckWindows: z.array(z.object({ tlInSec: z.number().min(0), tlOutSec: z.number().positive() })).default([]),
+});
+
 export const EdlSchema = z.object({
   jobId: z.string(),
   formatId: z.string(),
@@ -1038,30 +1062,11 @@ export const EdlSchema = z.object({
    *  this one format's own head framing. */
   karaokeTitleBaselineFrac: z.number().min(0).max(1).optional(),
   transitions: z.array(EdlTransitionSchema).default([]),
-  music: z
-    .object({
-      src: z.string(),
-      volume: z.number().min(0).max(1).default(0.5),
-      /** Where the music bed starts on the timeline — movable/trimmable
-       *  like any other clip, independent of the source audio file. */
-      tlInSec: z.number().min(0).default(0),
-      /** Omitted = plays to the end of the timeline. */
-      durationSec: z.number().positive().optional(),
-      /** Where playback starts within the source file — an end-aligned
-       *  placement (see FormatSchema's musicPlacement) skips however much
-       *  of the track's own head doesn't fit before the timeline ends. */
-      srcInSec: z.number().min(0).default(0),
-      fadeInSec: z.number().min(0).default(0),
-      fadeOutSec: z.number().min(0).default(0),
-      /** Volume multiplier applied while ANY duckWindow is active — 1
-       *  means no ducking. Ramped, not stepped (see EdlVideo.tsx). */
-      duckVolume: z.number().min(0).max(1).default(1),
-      /** Absolute-timeline spans (typically every voice block's own
-       *  segment) the music should duck under — spoken dialogue winning
-       *  over the bed, ramped in/out rather than cut. */
-      duckWindows: z.array(z.object({ tlInSec: z.number().min(0), tlOutSec: z.number().positive() })).default([]),
-    })
-    .optional(),
+  /** One or more simultaneous music beds — several can overlap in time
+   *  (e.g. an intro sting layered under the main bed), each independently
+   *  movable/trimmable/mixable, addressed by its own id like every other
+   *  free-floating track. */
+  music: z.array(EdlMusicSchema).default([]),
   /**
    * Staging map: public/-relative src → absolute source path. The render
    * stage copies these into public/ so staticFile can serve them. Purely

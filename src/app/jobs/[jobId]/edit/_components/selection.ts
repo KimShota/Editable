@@ -1,8 +1,8 @@
 export type SelectionTrack = "video" | "overlay" | "sfx" | "transition" | "music" | "captions";
 
-/** For "music" (a single object, not an array) id is the constant below —
- *  there's only ever one, so no real id is needed to address it. */
-export const MUSIC_ID = "music";
+/** What a freshly-uploaded file becomes once wired into the timeline — see
+ *  /api/jobs/[jobId]/timeline/media. */
+export type MediaKind = "music" | "sfx" | "overlayImage" | "overlayVideo" | "video";
 
 /** One or more ids, always on the SAME track — a multi-selection only ever
  *  spans one track at a time (select 3 sfx clips together, not a clip plus

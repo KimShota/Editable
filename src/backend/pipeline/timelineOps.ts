@@ -44,11 +44,15 @@ export const newClipId = (prefix: string): string => `${prefix}-${randomBytes(4)
 const ClipTrackSchema = z.enum(["video", "overlay", "sfx", "captions"]);
 export type ClipTrack = z.infer<typeof ClipTrackSchema>;
 
+/** Tracks that support delete/deleteMany — the four real clips plus
+ *  transition (removed by afterClipId) and music (own id, like sfx). */
+const DeletableTrackSchema = z.enum(["video", "overlay", "sfx", "captions", "transition", "music"]);
+
 export const TimelineOpSchema = z.discriminatedUnion("type", [
   /** Retime a free-floating clip (everything except the video track,
    *  which is always contiguous — repositioning a clip there means
-   *  "reorder", not "move"). Music has exactly one instance, addressed
-   *  by the MUSIC_ID sentinel rather than a real id. */
+   *  "reorder", not "move"). Music can have several simultaneous beds, so
+   *  it's addressed by its own id exactly like overlay/sfx/captions. */
   z.object({
     type: z.literal("move"),
     track: z.enum(["overlay", "sfx", "captions", "music"]),
@@ -75,7 +79,7 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
    *  free-floating-track shift. */
   z.object({
     type: z.literal("moveMany"),
-    track: z.enum(["overlay", "sfx", "captions"]),
+    track: z.enum(["overlay", "sfx", "captions", "music"]),
     ids: z.array(z.string()).min(1),
     deltaSec: z.number(),
   }),
@@ -100,10 +104,11 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
     id: z.string(),
     atSec: z.number().min(0),
   }),
-  /** Remove a clip. Video: ripples the gap closed. */
-  z.object({ type: z.literal("delete"), track: ClipTrackSchema, id: z.string() }),
+  /** Remove a clip. Video: ripples the gap closed. Transition: id is the
+   *  afterClipId it's attached to. */
+  z.object({ type: z.literal("delete"), track: DeletableTrackSchema, id: z.string() }),
   /** Multi-select bulk delete: remove every listed clip in one atomic edit. */
-  z.object({ type: z.literal("deleteMany"), track: ClipTrackSchema, ids: z.array(z.string()).min(1) }),
+  z.object({ type: z.literal("deleteMany"), track: DeletableTrackSchema, ids: z.array(z.string()).min(1) }),
   /** Patch a clip's non-timing properties (component swap, volume,
    *  mute, transition swap). Never touches timing fields — those only
    *  ever move through the ops above, so the contiguity invariant can't
@@ -119,6 +124,46 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
    *  below — a client can't use this to write an arbitrary/malformed
    *  document, only one that was itself once a valid EDL. */
   z.object({ type: z.literal("restore"), edl: z.unknown() }),
+  /** Wire a newly-uploaded file into the timeline as an additional music
+   *  bed (several may play simultaneously — see EdlMusicSchema). `src` is
+   *  a public/-relative path the caller has already registered in
+   *  edl.assets and staged to disk — this op only touches the EDL's own
+   *  data, same division of labor as every other op here. */
+  z.object({
+    type: z.literal("addMusic"),
+    src: z.string(),
+    tlInSec: z.number().min(0).default(0),
+    durationSec: z.number().positive().optional(),
+  }),
+  /** Wire a newly-uploaded file into the timeline as a one-shot sound
+   *  effect at the given time. */
+  z.object({
+    type: z.literal("addSfx"),
+    src: z.string(),
+    tlInSec: z.number().min(0),
+    durationSec: z.number().positive().optional(),
+  }),
+  /** Wire a newly-uploaded image/video file into the timeline as an
+   *  overlay. Box (x/y/width/height) is precomputed by the caller from the
+   *  media's own aspect ratio, same as assemble.ts's defaultOverlayBox. */
+  z.object({
+    type: z.literal("addOverlay"),
+    src: z.string(),
+    component: z.enum(["ImageOverlay", "VideoOverlay"]),
+    tlInSec: z.number().min(0),
+    tlOutSec: z.number().positive(),
+    x: z.number().default(0),
+    y: z.number().default(0),
+    width: z.number().positive().default(1),
+    height: z.number().positive().default(1),
+  }),
+  /** Wire a newly-uploaded video file into the timeline as a new clip
+   *  appended to the end of the (contiguous) video track. */
+  z.object({
+    type: z.literal("addVideo"),
+    src: z.string(),
+    durationSec: z.number().positive(),
+  }),
 ]);
 export type TimelineOp = z.infer<typeof TimelineOpSchema>;
 
@@ -147,7 +192,7 @@ const recomputeVideoTrack = (edl: Edl): void => {
     ...edl.overlays.map((o) => o.tlOutSec),
     ...edl.sfx.map((s) => s.tlInSec + (s.durationSec ?? 0)),
     ...edl.captions.map((c) => c.tlOutSec),
-    ...(edl.music ? [edl.music.tlInSec + (edl.music.durationSec ?? 0)] : []),
+    ...edl.music.map((m) => m.tlInSec + (m.durationSec ?? 0)),
   ];
   edl.durationSec = Math.max(...ends, MIN_CLIP_SEC);
 };
@@ -195,7 +240,12 @@ const resolveCaptionOverlap = (edl: Edl, moved: EdlCaptionGroup): void => {
 /** Shift one clip on a free-floating track by a relative delta — shared by
  *  the single-clip "move" (which derives its own delta from an absolute
  *  target) and the multi-select "moveMany" (which already has one). */
-const shiftFloatingClip = (edl: Edl, track: "overlay" | "sfx" | "captions", id: string, deltaSec: number): void => {
+const shiftFloatingClip = (
+  edl: Edl,
+  track: "overlay" | "sfx" | "captions" | "music",
+  id: string,
+  deltaSec: number,
+): void => {
   if (track === "overlay") {
     const clip = edl.overlays[findIndexOrThrow(edl.overlays, id, "overlay")];
     clip.tlInSec += deltaSec;
@@ -205,6 +255,11 @@ const shiftFloatingClip = (edl: Edl, track: "overlay" | "sfx" | "captions", id: 
   if (track === "sfx") {
     const clip = edl.sfx[findIndexOrThrow(edl.sfx, id, "sfx")];
     clip.tlInSec += deltaSec;
+    return;
+  }
+  if (track === "music") {
+    const m = edl.music[findIndexOrThrow(edl.music, id, "music bed")];
+    m.tlInSec = Math.max(0, m.tlInSec + deltaSec);
     return;
   }
   // captions — a rigid shift: the words move with the group, so the
@@ -221,8 +276,8 @@ const shiftFloatingClip = (edl: Edl, track: "overlay" | "sfx" | "captions", id: 
 
 const applyMove = (edl: Edl, op: Extract<TimelineOp, { type: "move" }>): void => {
   if (op.track === "music") {
-    if (!edl.music) throw new Error("timeline op: job has no music bed to move");
-    edl.music.tlInSec = Math.max(0, op.tlInSec);
+    const m = edl.music[findIndexOrThrow(edl.music, op.id, "music bed")];
+    m.tlInSec = Math.max(0, op.tlInSec);
     return;
   }
   const currentTlInSec =
@@ -273,8 +328,7 @@ const applyTrimEdge = (edl: Edl, op: Extract<TimelineOp, { type: "trimEdge" }>):
     return;
   }
   if (op.track === "music") {
-    if (!edl.music) throw new Error("timeline op: job has no music bed to trim");
-    const m = edl.music;
+    const m = edl.music[findIndexOrThrow(edl.music, op.id, "music bed")];
     const currentEnd = m.tlInSec + (m.durationSec ?? Math.max(op.tlSec, m.tlInSec + MIN_CLIP_SEC));
     if (op.edge === "in") {
       const newIn = clamp(op.tlSec, 0, currentEnd - MIN_CLIP_SEC);
@@ -423,6 +477,17 @@ const applyDelete = (edl: Edl, op: Extract<TimelineOp, { type: "delete" }>): voi
     edl.captions.splice(i, 1);
     return;
   }
+  if (op.track === "transition") {
+    const i = edl.transitions.findIndex((t) => t.afterClipId === op.id);
+    if (i === -1) throw new Error(`timeline op: transition after "${op.id}" not found`);
+    edl.transitions.splice(i, 1);
+    return;
+  }
+  if (op.track === "music") {
+    const i = findIndexOrThrow(edl.music, op.id, "music bed");
+    edl.music.splice(i, 1);
+    return;
+  }
   const i = findIndexOrThrow(edl.sfx, op.id, "sfx");
   edl.sfx.splice(i, 1);
 };
@@ -443,6 +508,14 @@ const applyDeleteMany = (edl: Edl, op: Extract<TimelineOp, { type: "deleteMany" 
   }
   if (op.track === "captions") {
     edl.captions = edl.captions.filter((c) => !ids.has(c.id));
+    return;
+  }
+  if (op.track === "transition") {
+    edl.transitions = edl.transitions.filter((t) => !ids.has(t.afterClipId));
+    return;
+  }
+  if (op.track === "music") {
+    edl.music = edl.music.filter((m) => !ids.has(m.id));
     return;
   }
   edl.sfx = edl.sfx.filter((s) => !ids.has(s.id));
@@ -521,8 +594,68 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
     return;
   }
   // music
-  if (!edl.music) throw new Error("timeline op: job has no music bed to modify");
-  if (typeof op.patch.volume === "number") edl.music.volume = clamp(op.patch.volume, 0, 1);
+  const m = edl.music[findIndexOrThrow(edl.music, op.id!, "music bed")];
+  if (typeof op.patch.volume === "number") m.volume = clamp(op.patch.volume, 0, 1);
+};
+
+const applyAddMusic = (edl: Edl, op: Extract<TimelineOp, { type: "addMusic" }>): void => {
+  edl.music.push({
+    id: newClipId("music"),
+    src: op.src,
+    volume: 0.5,
+    tlInSec: op.tlInSec,
+    durationSec: op.durationSec,
+    srcInSec: 0,
+    fadeInSec: 0,
+    fadeOutSec: 0,
+    duckVolume: 1,
+    duckWindows: [],
+  });
+  recomputeVideoTrack(edl);
+};
+
+const applyAddSfx = (edl: Edl, op: Extract<TimelineOp, { type: "addSfx" }>): void => {
+  edl.sfx.push({
+    id: newClipId("sfx"),
+    src: op.src,
+    tlInSec: op.tlInSec,
+    srcInSec: 0,
+    durationSec: op.durationSec,
+    volume: 1,
+  });
+  recomputeVideoTrack(edl);
+};
+
+const applyAddOverlay = (edl: Edl, op: Extract<TimelineOp, { type: "addOverlay" }>): void => {
+  edl.overlays.push({
+    id: newClipId("overlay"),
+    component: op.component,
+    params: { src: op.src },
+    tlInSec: op.tlInSec,
+    tlOutSec: op.tlOutSec,
+    x: op.x,
+    y: op.y,
+    width: op.width,
+    height: op.height,
+  });
+  recomputeVideoTrack(edl);
+};
+
+const applyAddVideo = (edl: Edl, op: Extract<TimelineOp, { type: "addVideo" }>): void => {
+  const id = newClipId("video");
+  edl.video.push({
+    id,
+    blockId: id,
+    src: op.src,
+    srcInSec: 0,
+    srcOutSec: op.durationSec,
+    srcDurationSec: op.durationSec,
+    tlInSec: 0,
+    tlOutSec: 0,
+    muted: false,
+    volume: 1,
+  });
+  recomputeVideoTrack(edl);
 };
 
 /** Applies one timeline op to an EDL and returns a new, validated document.
@@ -567,6 +700,18 @@ export const applyOp = (edl: Edl, opInput: unknown): Edl => {
       break;
     case "setProp":
       applySetProp(next, op);
+      break;
+    case "addMusic":
+      applyAddMusic(next, op);
+      break;
+    case "addSfx":
+      applyAddSfx(next, op);
+      break;
+    case "addOverlay":
+      applyAddOverlay(next, op);
+      break;
+    case "addVideo":
+      applyAddVideo(next, op);
       break;
   }
 
