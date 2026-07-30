@@ -315,7 +315,18 @@
             "durationSec": 1.8,
             "seed": 0,
             "subShots": [
-              { "kind": "detailStill", "shot": "extreme close-up of eyes, real footage crop", "treatment": "silhouette", "seed": 0, "motion": "realCrop", "realCropAtFrac": 0.75 },
+              {
+                "kind": "detailStill",
+                "shot": "extreme close-up of eyes, generated + graded to reference exposure",
+                "treatment": "silhouette",
+                "seed": 0,
+                "motion": "dop",
+                "motionPrompt": "a slow, subtle blink, eyes flicking slightly toward camera — no other movement",
+                "fullPrompt": "Photorealistic extreme close-up macro portrait detail, cinematic film still. FRAMING: eyebrows at the very top edge of frame, the tip of the nose at the bottom edge — both eyes, the bridge of the nose, and a little cheek. The face FILLS THE ENTIRE FRAME edge to edge. Absolutely no background, no hair, no forehead above the brows, no ears, no hands, no shoulders, no clothing visible. IDENTITY: match this specific person's own eye shape, eyelids, eyebrows, skin tone and skin texture from the attached reference photos. NO EYEGLASSES of any kind — bare eyes, no frames, no lenses, no rims, no nose pads. LIGHTING: one hard single key light from camera-right. The camera-left side of the face falls into deep, near-black shadow. Strong chiaroscuro with a small bright specular catchlight in the lit eye. EXPOSURE: very dark and underexposed overall — deep shadow dominates most of the frame; only a narrow band along the nose ridge and the lit cheekbone is bright. No blown-out highlights, no bright background, no lifted blacks. TEXTURE: skin texture fully preserved — visible pores, fine lines, individual eyelashes, natural skin detail. No smoothing, no beautification, no retouching, no plastic skin. Shallow depth of field, 85mm macro lens, subtle cinematic film grain.",
+                "lumaTarget": { "p50": 15, "p95": 90 },
+                "warmthTarget": 1.43,
+                "warmthLitThreshold": 30
+              },
               { "kind": "detailStill", "shot": "close-up of hands counting a stack of hundred dollar bills, dramatic lighting", "treatment": "silhouette", "seed": 1, "motion": "templateClip", "templateClipPath": "template-clips/cash-shuffle.mp4" },
               { "kind": "detailStill", "shot": "close-up of polished dress shoes on a dark wood floor, dramatic lighting", "treatment": "silhouette", "seed": 2, "motion": "templateClip", "templateClipPath": "template-clips/dress-shoes.mp4" }
             ]

@@ -200,6 +200,37 @@ export const SubShotSpecSchema = z.object({
    *  modelShots.ts, never stored as one, so the format JSON stays
    *  portable across machines/deployments. */
   templateClipPath: z.string().optional(),
+  /** detailStill only — the COMPLETE generation prompt, sent to Gemini
+   *  verbatim instead of wrapping `shot` in the shared environment/
+   *  lighting scaffolding (modelShots.ts's detailPrompt). Needed when a
+   *  shot's own framing/lighting requirements conflict with the style
+   *  profile's own scene description — e.g. an edge-to-edge extreme
+   *  close-up that must show NO background, while the style profile's
+   *  `environment` text describes a full furnished office. `shot` still
+   *  names the QC/contact-sheet label either way. */
+  fullPrompt: z.string().optional(),
+  /** detailStill only — post-generation grade target, measured luma at
+   *  p50/p95 the generated still is graded onto via a solved tone curve
+   *  (same measure-then-solve shape as relight.ts's solveSubjectRelight)
+   *  — a generative model can't reliably hit a specific dark exposure
+   *  from prompt language alone (measured directly: a "very dark,
+   *  underexposed" instruction still returned mean~99/p95~206). */
+  lumaTarget: z.object({ p50: z.number(), p95: z.number() }).optional(),
+  /** detailStill only — target R/B ratio over pixels at/above
+   *  `warmthLitThreshold` luma, solved via a SATURATION reduction, not a
+   *  colorbalance/warmth channel shift: measured directly that a
+   *  colorbalance-based solve visibly tints the SHADOWS teal on a still
+   *  already this dark (shadows sit near black, where a channel shift
+   *  reads as a strong tint rather than a subtle warmth change) — a plain
+   *  saturation scale moves the ratio without touching hue in the dark. */
+  warmthTarget: z.number().optional(),
+  /** detailStill + warmthTarget only — luma floor a pixel must clear to
+   *  count toward the R/B measurement (excludes the shadow majority of a
+   *  chiaroscuro frame, which reads near-neutral and would dilute the
+   *  ratio toward 1:1 regardless of the actual warm key's own color).
+   *  Default 30, matched against the reference reel's own measured warm
+   *  key at this exact threshold. */
+  warmthLitThreshold: z.number().optional(),
 });
 
 export const GenerationSpecSchema = z.object({

@@ -143,6 +143,143 @@ const buildPlateStillImage = (
   }
 };
 
+/** Gemini's image aspect ratio is a fixed enum, not an arbitrary value —
+ *  picks the closest supported ratio to a panel's own (width, height) so
+ *  `imageConfig` pins geometry close to the target instead of leaving it
+ *  to the model's own default (which `resizeCover` would then cover-crop,
+ *  silently discarding whatever composition Gemini was asked for — see
+ *  geminiImage.ts's own generateImage doc comment). */
+const GEMINI_ASPECT_RATIOS: Record<string, number> = {
+  "1:1": 1 / 1, "2:3": 2 / 3, "3:2": 3 / 2, "3:4": 3 / 4, "4:3": 4 / 3,
+  "4:5": 4 / 5, "5:4": 5 / 4, "9:16": 9 / 16, "16:9": 16 / 9, "21:9": 21 / 9,
+};
+const closestGeminiAspectRatio = (width: number, height: number): string => {
+  const target = width / height;
+  let best = "1:1";
+  let bestDelta = Infinity;
+  for (const [name, ratio] of Object.entries(GEMINI_ASPECT_RATIOS)) {
+    const delta = Math.abs(ratio - target);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = name;
+    }
+  }
+  return best;
+};
+
+/** Full-range gray p50/p95 via a raw-pixel histogram — same shape as
+ *  gates.ts's frameLumaStats, standalone here since this file has no
+ *  reason to import a gates-side helper. */
+const grayPercentiles = (imagePath: string, width: number, height: number): { p50: number; p95: number } => {
+  const raw = execFileSync("ffmpeg", ["-v", "error", "-i", imagePath, "-vf", `scale=${width}:${height},format=gray`, "-f", "rawvideo", "-"], {
+    maxBuffer: 1024 * 1024 * 20,
+  });
+  const hist = new Array(256).fill(0);
+  for (const b of raw) hist[b]++;
+  const n = raw.length;
+  const pct = (p: number) => {
+    const target = (n * p) / 100;
+    let c = 0;
+    for (let v = 0; v < 256; v++) {
+      c += hist[v];
+      if (c >= target) return v;
+    }
+    return 255;
+  };
+  return { p50: pct(50), p95: pct(95) };
+};
+
+/** Mean R/B over pixels at/above `litThreshold` luma, full-range RGB. */
+const litWarmth = (imagePath: string, width: number, height: number, litThreshold: number): number => {
+  const raw = execFileSync("ffmpeg", ["-v", "error", "-i", imagePath, "-vf", `scale=${width}:${height},format=rgb24`, "-f", "rawvideo", "-"], {
+    maxBuffer: 1024 * 1024 * 20,
+  });
+  let r = 0;
+  let b = 0;
+  let n = 0;
+  for (let i = 0; i < raw.length; i += 3) {
+    if ((raw[i] + raw[i + 1] + raw[i + 2]) / 3 >= litThreshold) {
+      r += raw[i];
+      b += raw[i + 2];
+      n++;
+    }
+  }
+  return n && b ? r / b : 0;
+};
+
+/**
+ * Grades a generated still onto a measured dark-exposure target — a
+ * detailStill's only way to reliably hit a specific luma distribution,
+ * since prompt language alone measured well short of it directly (a
+ * "very dark, underexposed, hard single key" instruction still returned
+ * mean~99/p95~206 on this format's own eyes panel). Two solves, each the
+ * same measure-then-solve shape as officeCompositeQC.ts's own solvers:
+ *
+ *  1. A 4-point tone curve (`curves=all=`, full-range RGB — NOT
+ *     `lutyuv` under `format=yuv420p`, which operates in LIMITED range
+ *     16-235 and measured every anchor undershooting when the target was
+ *     computed in full range) mapping measured p50/p95 onto
+ *     `lumaTarget`. Re-measures and re-solves once more if the first pass
+ *     didn't land within tolerance, rather than trusting one open-loop
+ *     mapping.
+ *  2. If `warmthTarget` is given, a binary-searched SATURATION reduction
+ *     (not colorbalance — see SubShotSpecSchema's warmthTarget doc
+ *     comment) so the lit-pixel R/B ratio lands on target.
+ *
+ * In-place: overwrites `imagePath`.
+ */
+const solveDetailStillGrade = (
+  imagePath: string,
+  width: number,
+  height: number,
+  lumaTarget: { p50: number; p95: number },
+  warmthTarget: number | undefined,
+  warmthLitThreshold: number,
+): void => {
+  const workDir = workDirFor("detail-grade");
+  try {
+    let current = imagePath;
+    for (let round = 0; round < 2; round++) {
+      const { p50, p95 } = grayPercentiles(current, width, height);
+      if (Math.abs(p50 - lumaTarget.p50) <= 2 && Math.abs(p95 - lumaTarget.p95) <= 4) break;
+      const x1 = p50 / 255;
+      const y1 = lumaTarget.p50 / 255;
+      const x2 = p95 / 255;
+      const y2 = lumaTarget.p95 / 255;
+      if (!(x1 > 0.01 && x2 > x1 + 0.03 && x2 < 0.99)) break; // degenerate input distribution — don't hand ffmpeg a non-monotonic curve
+      const curve = `curves=all='0/0 ${x1.toFixed(4)}/${y1.toFixed(4)} ${x2.toFixed(4)}/${y2.toFixed(4)} 1/1'`;
+      const next = path.join(workDir, `luma-${round}.png`);
+      execFileSync("ffmpeg", ["-y", "-v", "error", "-i", current, "-vf", curve, next]);
+      current = next;
+    }
+
+    if (warmthTarget !== undefined) {
+      const baseline = litWarmth(current, width, height, warmthLitThreshold);
+      if (baseline > 0 && Math.abs(baseline - warmthTarget) > 0.03) {
+        // R/B increases monotonically with saturation (measured directly:
+        // sweeping 1.0 -> 0.25 took a still's own lit-pixel R/B from 4.76
+        // down to 1.47) — plain binary search over [0,1].
+        let lo = 0;
+        let hi = 1;
+        for (let iter = 0; iter < 6; iter++) {
+          const mid = (lo + hi) / 2;
+          const probe = path.join(workDir, `sat-${iter}.png`);
+          execFileSync("ffmpeg", ["-y", "-v", "error", "-i", current, "-vf", `eq=saturation=${mid.toFixed(4)}`, probe]);
+          if (litWarmth(probe, width, height, warmthLitThreshold) > warmthTarget) hi = mid;
+          else lo = mid;
+        }
+        const graded = path.join(workDir, "warmth-final.png");
+        execFileSync("ffmpeg", ["-y", "-v", "error", "-i", current, "-vf", `eq=saturation=${((lo + hi) / 2).toFixed(4)}`, graded]);
+        current = graded;
+      }
+    }
+
+    if (current !== imagePath) fs.copyFileSync(current, imagePath);
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+};
+
 const detailPrompt = (req: GenerationRequest, shot: string): string => {
   const { environment, lighting } = req.styleProfile;
   return (
@@ -162,30 +299,41 @@ const detailPrompt = (req: GenerationRequest, shot: string): string => {
  *  the whole build. Not the real prop shot, but always SOMETHING valid. */
 const buildDetailStillImage = async (
   req: GenerationRequest,
-  shot: string,
-  seed: number,
+  sub: {
+    shot: string;
+    seed: number;
+    fullPrompt?: string;
+    lumaTarget?: { p50: number; p95: number };
+    warmthTarget?: number;
+    warmthLitThreshold?: number;
+  },
   width: number,
   height: number,
   outImagePath: string,
 ): Promise<{ tier: "gemini" | "composite" }> => {
   try {
-    const bytes = await generateImage(detailPrompt(req, shot), req.identityImages, 3);
+    const prompt = sub.fullPrompt ?? detailPrompt(req, sub.shot);
+    const aspectRatio = closestGeminiAspectRatio(width, height);
+    const bytes = await generateImage(prompt, req.identityImages, 3, { aspectRatio, imageSize: "2K" });
     const workDir = workDirFor("detail");
     try {
       const rawPath = path.join(workDir, "raw.png");
       fs.writeFileSync(rawPath, bytes);
       resizeCover(rawPath, width, height, outImagePath);
+      if (sub.lumaTarget) {
+        solveDetailStillGrade(outImagePath, width, height, sub.lumaTarget, sub.warmthTarget, sub.warmthLitThreshold ?? 30);
+      }
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }
     return { tier: "gemini" };
   } catch (err) {
-    console.warn(`modelShots: detailStill "${shot}" Gemini generation failed, falling back to a photo composite — ${(err as Error).message}`);
+    console.warn(`modelShots: detailStill "${sub.shot}" Gemini generation failed, falling back to a photo composite — ${(err as Error).message}`);
     // seed varies the fallback pick across sub-shots — without it every
     // failed detailStill in a triptych/montageReel would fall back to the
     // exact same photo, showing 3 identical panels instead of 3 distinct
     // (if degraded) ones.
-    buildPlateStillImage(req, { plate: "studio-cyc", treatment: "silhouette", poseTag: "closeup", seed }, width, height, outImagePath);
+    buildPlateStillImage(req, { plate: "studio-cyc", treatment: "silhouette", poseTag: "closeup", seed: sub.seed }, width, height, outImagePath);
     return { tier: "composite" };
   }
 };
@@ -279,7 +427,7 @@ const buildSubShotImage = async (
     return { tier: "composite" };
   }
   if (sub.kind === "detailStill") {
-    const { tier } = await buildDetailStillImage(req, sub.shot, sub.seed, width, height, outImagePath);
+    const { tier } = await buildDetailStillImage(req, sub, width, height, outImagePath);
     persistMember();
     return { tier };
   }
@@ -466,9 +614,18 @@ const buildTriptychPanelClip = async (
         ]);
         return { flag, tier };
       } catch (err) {
-        console.warn(`modelShots: triptych DoP animation failed for "${sub.shot}", falling back to a still push — ${(err as Error).message}`);
-        animateStillToClip(stillPath, { durationSec, width, height: panelHeight, fps: req.fps, outPath: outClipPath });
-        return { flag, tier };
+        // Loud, not a silent Ken-Burns degrade: a still-with-push measures
+        // WAY under gates.ts's own top(eyes)/mid(cash) motion floor
+        // (measured directly: ~0.2-1.0 against a required >=2.0/>=8.0) —
+        // this panel's motion is load-bearing for the gate, not cosmetic,
+        // so a DoP failure here has to surface as a build failure with a
+        // clear cause, not degrade into a confusing LATER gate failure
+        // that looks unrelated to what actually broke.
+        throw new Error(
+          `modelShots: triptych DoP animation failed for "${sub.shot}" — refusing to silently fall back to a still push, ` +
+            `which would fail this panel's own motion-signature gate instead (see gates.ts's TRIPTYCH_PANEL_BANDS). ` +
+            `Retry, or change this sub-shot's motion off "dop". Original error: ${(err as Error).message}`,
+        );
       }
     }
 
@@ -579,7 +736,7 @@ export const modelShotsGenerationProvider: GenerationProvider = {
         const workDir = workDirFor("detail-top");
         try {
           const stillPath = path.join(workDir, "still.png");
-          await buildDetailStillImage(req, req.shot, req.seed, req.width, req.height, stillPath);
+          await buildDetailStillImage(req, { shot: req.shot, seed: req.seed }, req.width, req.height, stillPath);
           animateStillToClip(stillPath, { durationSec: req.durationSec, width: req.width, height: req.height, fps: req.fps, outPath: req.outPath });
         } finally {
           fs.rmSync(workDir, { recursive: true, force: true });
