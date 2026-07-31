@@ -18,7 +18,7 @@ import {
   Word,
 } from "./types";
 import { EdlSchema } from "./schemas";
-import { anchoredTimeSec, clamp, concatenateTakes } from "./timing";
+import { anchoredTimeSec, assertCaptionGroupCoversWords, clamp, concatenateTakes } from "./timing";
 import { audioOnsetSec } from "./trim";
 import { publicJobPrefix, formatStylesDir, formatAssetsDir } from "./paths";
 import { loadStyleProfile } from "./generation/styleProfile";
@@ -45,6 +45,26 @@ const CAPTION_TAIL_SEC = 0.15;
  *  flash-frame group that the "extend to next" pass can't always rescue
  *  (a block's LAST group has no next group to extend into). */
 const MIN_WORD_DURATION_SEC = 0.08;
+/** karaokeTitle-specific floor, well above MIN_WORD_DURATION_SEC — this
+ *  variant shows exactly one word at a time, full-screen, with its own
+ *  punch-in spring (see KaraokeTitleLayer.tsx); MIN_WORD_DURATION_SEC's
+ *  ~2 frames is plenty for a lowerThird word (still visible as part of
+ *  the line regardless), but for karaokeTitle it means the word is gone
+ *  before the punch-in ever finishes animating in — visually indistinguishable
+ *  from not rendering at all. A whisper zero-duration timestamp ("job" in
+ *  one job's own transcript measured startSec===endSec exactly) floored to
+ *  just MIN_WORD_DURATION_SEC reproduces exactly that: a real word, technically
+ *  on screen, that no viewer at normal playback speed ever perceives. */
+const MIN_KARAOKE_WORD_DURATION_SEC = 0.28;
+/** Ceiling on how much of a karaokeTitle line's own runtime any single
+ *  word's RAW duration can claim before the floor above is computed — the
+ *  same whisper glitch that zeroes one word's timestamp typically inflates
+ *  its NEIGHBOR (the silence/pause that should've been "job"'s got glued
+ *  onto "your" instead, measured 0.89s for one word in one job's own
+ *  transcript). Without this cap, that inflated neighbor alone can consume
+ *  enough of the block's own runtime that no floor, however small, leaves
+ *  room for the genuinely-short word next to it — see the bisection below. */
+const MAX_KARAOKE_WORD_DURATION_SEC = 0.5;
 /** A caption group still shorter than this after grouping/extension gets
  *  merged into its neighbor rather than rendered — a bug here once
  *  shipped a zero-duration group that Captions.tsx's half-open
@@ -534,20 +554,87 @@ export const assemble = (
         // it full-screen, one at a time. No multi-word grouping/merging
         // needed here (that machinery exists to keep a lowerThird LINE
         // readable — karaokeTitle only ever shows one word).
-        const karaokeWords = words.map((w) => {
-          const tlStartSec = tlInSec + w.startSec;
-          const tlEndSec = Math.max(tlInSec + w.endSec, tlStartSec + MIN_WORD_DURATION_SEC);
-          return { text: w.text, tlStartSec, tlEndSec, emphasis: isEmphasized(w) };
-        });
+        // Word end is floored to MIN_KARAOKE_WORD_DURATION_SEC AND capped
+        // to the block's own end — without the cap, a whisper timestamp
+        // that overruns the block (or the +CAPTION_TAIL_SEC below) could
+        // leave the group's own tlOutSec (itself capped to tlOutSec) short
+        // of this word's span, which is exactly the "word outside its own
+        // group's window" bug KaraokeTitleLayer.tsx silently drops — see
+        // assertCaptionGroupCoversWords. Built sequentially (not a plain
+        // .map()), each word's start clamped to at least the PREVIOUS
+        // word's own (possibly floor-extended) end: computing every word's
+        // start/end independently let one word's floor-extension overlap
+        // the next word's own raw start (two consecutive near-zero-duration
+        // whisper timestamps both claiming the same instant), and
+        // KaraokeTitleLayer's "first word whose window contains tSec" pick
+        // silently hid whichever of the two came second in the array.
+        // Cascading instead pushes the following word later, keeping every
+        // word's own floor intact and never double-booking a moment.
+        //
+        // A run of several near-zero-duration words in a row (this exact
+        // line's own whisper transcript had two back to back) can cascade
+        // enough lost ground that the very LAST word — whichever one
+        // happens to hit the tlOutSec cap — ends up squeezed instead,
+        // reproducing the identical bug on a word that was never short in
+        // the first place. So the floor isn't just MIN_KARAOKE_WORD_DURATION_SEC
+        // outright: it's the largest uniform floor (down to the absolute
+        // MIN_WORD_DURATION_SEC) whose total, summed against every word's
+        // own RAW duration, still fits in the room actually available
+        // before tlOutSec — solved directly (bisection; the total is
+        // monotonic in the floor) rather than reactively, so no word ever
+        // needs the tlOutSec clamp in the first place.
+        const buildKaraokeWords = (floorSec: number): EdlCaptionGroup["words"] => {
+          const out: EdlCaptionGroup["words"] = [];
+          let prevEnd: number | undefined;
+          for (const w of words) {
+            // Gapless after the first word: capping a bloated neighbor's
+            // duration (MAX_KARAOKE_WORD_DURATION_SEC) reclaims time by
+            // ending it early, and starting the NEXT word at its own raw
+            // timestamp instead of right there would just relocate the
+            // reclaimed time into a blank hole — no word on screen at all
+            // — rather than actually giving it to the words that needed
+            // it. karaokeTitle's whole design is continuous one-at-a-time
+            // coverage; a natural pause in speech shouldn't read as a
+            // dropped-title glitch either.
+            const tlStartSec = prevEnd === undefined ? tlInSec + w.startSec : prevEnd;
+            const tlEndSec = Math.min(
+              Math.max(tlInSec + w.endSec, tlStartSec + floorSec),
+              tlStartSec + MAX_KARAOKE_WORD_DURATION_SEC,
+              tlOutSec,
+            );
+            out.push({ text: w.text, tlStartSec, tlEndSec, emphasis: isEmphasized(w) });
+            prevEnd = tlEndSec;
+          }
+          return out;
+        };
+        let floorSec = MIN_KARAOKE_WORD_DURATION_SEC;
+        if (words.length > 0) {
+          const rawDurSec = words.map((w) => Math.min(Math.max(MIN_WORD_DURATION_SEC, w.endSec - w.startSec), MAX_KARAOKE_WORD_DURATION_SEC));
+          const totalAtFloor = (f: number): number => rawDurSec.reduce((sum, d) => sum + Math.max(d, f), 0);
+          const availableSec = tlOutSec - (tlInSec + words[0].startSec);
+          if (totalAtFloor(floorSec) > availableSec) {
+            let lo = MIN_WORD_DURATION_SEC;
+            let hi = floorSec;
+            for (let i = 0; i < 30; i++) {
+              const mid = (lo + hi) / 2;
+              if (totalAtFloor(mid) <= availableSec) lo = mid;
+              else hi = mid;
+            }
+            floorSec = lo;
+          }
+        }
+        const karaokeWords = buildKaraokeWords(floorSec);
         if (karaokeWords.length > 0) {
-          captions.push({
+          const group: EdlCaptionGroup = {
             id: `caption-${captions.length}`,
             words: karaokeWords,
             tlInSec: karaokeWords[0].tlStartSec,
             tlOutSec: Math.min(karaokeWords[karaokeWords.length - 1].tlEndSec + CAPTION_TAIL_SEC, tlOutSec),
             variant: "karaokeTitle",
             theme,
-          });
+          };
+          assertCaptionGroupCoversWords(group);
+          captions.push(group);
         }
       } else {
         // Every captioned block ALWAYS gets ordinary multi-word lowerThird
@@ -558,7 +645,10 @@ export const assemble = (
         let group: EdlCaptionGroup | null = null;
         for (const w of words) {
           const tlStartSec = tlInSec + w.startSec;
-          const tlEndSec = Math.max(tlInSec + w.endSec, tlStartSec + MIN_WORD_DURATION_SEC);
+          // Capped to the block's own end for the same reason as
+          // karaokeTitle's word loop above — an uncapped word end can
+          // outrun the group's own (block-capped) tlOutSec.
+          const tlEndSec = Math.min(Math.max(tlInSec + w.endSec, tlStartSec + MIN_WORD_DURATION_SEC), tlOutSec);
           const lastEnd = group?.words[group.words.length - 1]?.tlEndSec ?? -Infinity;
           const startNew =
             !group ||
@@ -575,25 +665,39 @@ export const assemble = (
         // over — restricted to this block's own lowerThird groups, so a
         // bigTitle group pushed below (independent timing/lifetime) can't
         // get pulled into this chain or stretch a lowerThird line short.
+        // Math.max, not a plain overwrite: consecutive groups' word spans
+        // can already abut or slightly overlap (whisper's own per-word
+        // timestamps aren't perfectly gap-free), and this pass is only
+        // meant to CLOSE a gap, never to shrink a group's end below where
+        // its own last word already extends to — a plain overwrite did
+        // exactly that, clipping the group's display short of its own
+        // words (the karaoke word-drop bug's lowerThird counterpart).
         const lowerThirdGroups = captions.filter((g) => g.tlInSec >= tlInSec && g.variant === "lowerThird");
         for (let i = 0; i < lowerThirdGroups.length - 1; i++) {
-          lowerThirdGroups[i].tlOutSec = lowerThirdGroups[i + 1].tlInSec;
+          lowerThirdGroups[i].tlOutSec = Math.max(lowerThirdGroups[i].tlOutSec, lowerThirdGroups[i + 1].tlInSec);
         }
         // A group STILL shorter than the floor (the "extend to next" pass
         // can't rescue a block's own last group) gets merged into its
         // neighbor rather than rendered — see MIN_GROUP_DURATION_SEC. Merge
         // backward when possible (keeps reading order stable); forward only
-        // for a block's very first group, which has no predecessor.
+        // for a block's very first group, which has no predecessor. Words
+        // are re-sorted by their own start time after merging rather than
+        // simply appended, since a forward merge (target = the group AFTER
+        // g) would otherwise splice g's earlier words in after target's
+        // later ones, reading out of order.
         for (let i = 0; i < lowerThirdGroups.length; i++) {
           const g = lowerThirdGroups[i];
           if (g.tlOutSec - g.tlInSec >= MIN_GROUP_DURATION_SEC) continue;
           const target = i > 0 ? lowerThirdGroups[i - 1] : lowerThirdGroups[i + 1];
           if (!target) continue; // this block's only group — nothing to merge into, leave it
-          target.words.push(...g.words);
+          target.words = [...target.words, ...g.words].sort((a, b) => a.tlStartSec - b.tlStartSec);
           target.tlInSec = Math.min(target.tlInSec, g.tlInSec);
           target.tlOutSec = Math.max(target.tlOutSec, g.tlOutSec);
           const idx = captions.indexOf(g);
           if (idx !== -1) captions.splice(idx, 1);
+        }
+        for (const g of captions.filter((c) => c.tlInSec >= tlInSec && c.variant === "lowerThird")) {
+          assertCaptionGroupCoversWords(g);
         }
 
         // bigTitle (additive): one full-screen card per picked keyword, held
@@ -613,15 +717,17 @@ export const assemble = (
           const picked = pickKeywordWords(candidateWords, config.maxWords);
           for (const w of picked) {
             const tlStartSec = tlInSec + w.startSec;
-            const tlEndSec = Math.max(tlInSec + w.endSec, tlStartSec + MIN_BIGTITLE_DURATION_SEC);
-            captions.push({
+            const tlEndSec = Math.min(Math.max(tlInSec + w.endSec, tlStartSec + MIN_BIGTITLE_DURATION_SEC), tlOutSec);
+            const group: EdlCaptionGroup = {
               id: `caption-${captions.length}`,
               words: [{ text: w.text, tlStartSec, tlEndSec, emphasis: true }],
               tlInSec: tlStartSec,
               tlOutSec: Math.min(tlEndSec, tlOutSec),
               variant: "bigTitle",
               theme,
-            });
+            };
+            assertCaptionGroupCoversWords(group);
+            captions.push(group);
           }
         }
       }
@@ -831,6 +937,11 @@ export const assemble = (
     assets,
     diagnostics,
   });
+
+  // Final, whole-document belt-and-suspenders check — every per-block pass
+  // above already asserts as it goes, but this catches anything a future
+  // pass adds without needing to remember to assert inline too.
+  for (const g of edl.captions) assertCaptionGroupCoversWords(g);
 
   return edl;
 };

@@ -15,10 +15,12 @@ import { repoRoot, artifactsDir, outDir } from "@backend/pipeline/paths";
  * described in the product plan.
  */
 
+type FailedGate = { name: string; measured: string };
+
 type RenderStatus =
   | { status: "idle" }
   | { status: "rendering"; startedAt: string; percent: number }
-  | { status: "done"; startedAt: string; finishedAt: string; outUrl: string }
+  | { status: "done"; startedAt: string; finishedAt: string; outUrl: string; failedGates?: FailedGate[] }
   | { status: "error"; startedAt: string; finishedAt: string; error: string };
 
 const statusPath = (jobId: string) => path.join(artifactsDir(jobId), "render-status.json");
@@ -84,7 +86,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ jobId:
 
   const child = spawn(
     "npm",
-    ["run", "pipeline", "--", "--job", jobDir(jobId), "--only", "render"],
+    ["run", "pipeline", "--", "--job", jobDir(jobId), "--only", "render", "--soft-gates"],
     { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] },
   );
   let stderrTail = "";
@@ -101,7 +103,22 @@ export async function POST(_req: Request, { params }: { params: Promise<{ jobId:
   child.on("close", (code) => {
     const finishedAt = new Date().toISOString();
     if (code === 0 && fs.existsSync(path.join(outDir, `${jobId}.mp4`))) {
-      writeStatus(jobId, { status: "done", startedAt, finishedAt, outUrl: `/api/media/out/${jobId}.mp4` });
+      // --soft-gates above means a failed acceptance gate never fails this
+      // process — the video still gets shown and is downloadable, with the
+      // failing checks surfaced so the user (not the pipeline) decides
+      // whether to keep it or discard and re-render.
+      const gatesFile = path.join(artifactsDir(jobId), "gates.json");
+      let failedGates: FailedGate[] | undefined;
+      if (fs.existsSync(gatesFile)) {
+        try {
+          const gates = JSON.parse(fs.readFileSync(gatesFile, "utf8")) as Array<{ name: string; pass: boolean | null; measured: string }>;
+          const failed = gates.filter((g) => g.pass === false).map((g) => ({ name: g.name, measured: g.measured }));
+          if (failed.length > 0) failedGates = failed;
+        } catch {
+          // malformed gates.json shouldn't block showing the render
+        }
+      }
+      writeStatus(jobId, { status: "done", startedAt, finishedAt, outUrl: `/api/media/out/${jobId}.mp4`, ...(failedGates ? { failedGates } : {}) });
     } else {
       writeStatus(jobId, { status: "error", startedAt, finishedAt, error: stderrTail || `render exited with code ${code}` });
     }
@@ -124,4 +141,25 @@ export async function GET(_req: Request, { params }: { params: Promise<{ jobId: 
       ? { status: "done", startedAt: "", finishedAt: "", outUrl: `/api/media/out/${jobId}.mp4` }
       : { status: "idle" },
   );
+}
+
+/**
+ * Discards a rendered video the user didn't like — e.g. one kept despite a
+ * failed acceptance gate (see the "done" status's failedGates). Deletes the
+ * mp4 and resets status to idle so the render button reads as un-rendered;
+ * it does not touch edl.json/gates.json, so a fresh render is a plain re-run.
+ */
+export async function DELETE(_req: Request, { params }: { params: Promise<{ jobId: string }> }) {
+  const { jobId } = await params;
+  if (!jobExists(jobId)) {
+    return NextResponse.json({ error: "job not found" }, { status: 404 });
+  }
+  const existing = readStatus(jobId);
+  if (existing?.status === "rendering") {
+    return NextResponse.json({ error: "cannot discard while rendering" }, { status: 409 });
+  }
+  const mp4Path = path.join(outDir, `${jobId}.mp4`);
+  if (fs.existsSync(mp4Path)) fs.rmSync(mp4Path);
+  if (fs.existsSync(statusPath(jobId))) fs.rmSync(statusPath(jobId));
+  return NextResponse.json({ status: "idle" });
 }

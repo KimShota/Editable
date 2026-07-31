@@ -93,3 +93,34 @@ export const anchoredTimeSec = (
   const base = at.anchor === "blockStart" ? 0 : blockDurationSec;
   return clamp(base + at.offsetSec, 0, blockDurationSec);
 };
+
+/** Throws if a caption group's own [tlInSec, tlOutSec) window doesn't fully
+ *  contain every one of its words' [tlStartSec, tlEndSec) spans. Both
+ *  render paths depend on this: KaraokeTitleLayer.tsx only considers a word
+ *  "active" when the playhead is inside BOTH its own group's window and
+ *  the word's own window, so a word whose span pokes outside its group's
+ *  window can never become active — it silently never appears, however it
+ *  was spoken. lowerThird doesn't drop the word outright, but the same gap
+ *  means the word can go a while displayed with no active-word highlight,
+ *  or the whole line can vanish before its last word finishes.
+ *
+ *  Call this at every point that can set/move a group's tlInSec/tlOutSec
+ *  independent of the words inside it (assemble.ts's per-block caption
+ *  construction, timelineOps.ts's trimEdge) — anything that lets the two
+ *  drift apart again reproduces the exact bug this guards against. */
+export const assertCaptionGroupCoversWords = (group: {
+  id: string;
+  tlInSec: number;
+  tlOutSec: number;
+  words: { tlStartSec: number; tlEndSec: number }[];
+}): void => {
+  if (group.words.length === 0) return;
+  const EPS = 1e-6;
+  const firstStart = group.words[0].tlStartSec;
+  const lastEnd = group.words[group.words.length - 1].tlEndSec;
+  if (group.tlInSec > firstStart + EPS || group.tlOutSec < lastEnd - EPS) {
+    throw new Error(
+      `caption group "${group.id}" window ${group.tlInSec.toFixed(3)}-${group.tlOutSec.toFixed(3)}s doesn't cover its own words' span ${firstStart.toFixed(3)}-${lastEnd.toFixed(3)}s`,
+    );
+  }
+};

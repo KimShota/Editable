@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { Edl, EdlCaptionGroup, EdlOverlay, EdlSfx, EdlVideoSegment } from "./types";
 import { EdlSchema } from "./schemas";
+import { assertCaptionGroupCoversWords } from "./timing";
 
 /**
  * Module 8 — Timeline ops.
@@ -323,8 +324,18 @@ const applyTrimEdge = (edl: Edl, op: Extract<TimelineOp, { type: "trimEdge" }>):
   }
   if (op.track === "captions") {
     const clip = edl.captions[findIndexOrThrow(edl.captions, op.id, "caption group")];
-    if (op.edge === "in") clip.tlInSec = clamp(op.tlSec, 0, clip.tlOutSec - MIN_CLIP_SEC);
-    else clip.tlOutSec = Math.max(op.tlSec, clip.tlInSec + MIN_CLIP_SEC);
+    // The edge can trim SLACK (the lead-in / CAPTION_TAIL_SEC lingering
+    // room assemble.ts left around the words) but can never drag past the
+    // group's own words — doing so used to desync the group window from
+    // the word windows it's supposed to contain, which is what made a
+    // word (karaokeTitle) or the whole line (lowerThird) silently stop
+    // rendering despite never itself being touched. See
+    // assertCaptionGroupCoversWords.
+    const firstWordStart = clip.words[0].tlStartSec;
+    const lastWordEnd = clip.words[clip.words.length - 1].tlEndSec;
+    if (op.edge === "in") clip.tlInSec = clamp(op.tlSec, 0, Math.min(clip.tlOutSec - MIN_CLIP_SEC, firstWordStart));
+    else clip.tlOutSec = Math.max(op.tlSec, clip.tlInSec + MIN_CLIP_SEC, lastWordEnd);
+    assertCaptionGroupCoversWords(clip);
     return;
   }
   if (op.track === "music") {

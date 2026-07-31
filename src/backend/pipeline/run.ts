@@ -32,7 +32,7 @@ import { artifactsDir } from "./paths";
 /**
  * The pipeline orchestrator.
  *
- *   npm run pipeline -- --job jobs/demo [--only <stage>] [--resolver <name>] [--generator <name>]
+ *   npm run pipeline -- --job jobs/demo [--only <stage>] [--resolver <name>] [--generator <name>] [--soft-gates]
  *
  * Stages: intake → generate → transcribe → trim → matte → composite →
  * roles → assemble → render. Each stage writes its artifact to
@@ -64,14 +64,18 @@ const STAGES = ["intake", "generate", "transcribe", "trim", "matte", "composite"
 type Stage = (typeof STAGES)[number];
 
 const parseArgs = (argv: string[]) => {
-  const args: { job?: string; only?: Stage; resolver: ResolverChoice; generator: GeneratorChoice } = {
+  const args: { job?: string; only?: Stage; resolver: ResolverChoice; generator: GeneratorChoice; softGates: boolean } = {
     resolver: "auto",
     generator: "auto",
+    softGates: false,
   };
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case "--job":
         args.job = argv[++i];
+        break;
+      case "--soft-gates":
+        args.softGates = true;
         break;
       case "--only": {
         const stage = argv[++i] as Stage;
@@ -103,10 +107,10 @@ const parseArgs = (argv: string[]) => {
   }
   if (!args.job) {
     throw new Error(
-      "usage: npm run pipeline -- --job <jobDir> [--only <stage>] [--resolver <name>] [--generator <name>]",
+      "usage: npm run pipeline -- --job <jobDir> [--only <stage>] [--resolver <name>] [--generator <name>] [--soft-gates]",
     );
   }
-  return args as { job: string; only?: Stage; resolver: ResolverChoice; generator: GeneratorChoice };
+  return args as { job: string; only?: Stage; resolver: ResolverChoice; generator: GeneratorChoice; softGates: boolean };
 };
 
 const main = async () => {
@@ -247,6 +251,21 @@ const main = async () => {
     write("filled", filled);
     write("transcript", transcript);
     write("trim", trims);
+  } else {
+    // composite didn't run this invocation (e.g. --only assemble/--only
+    // render) — restore its bindings the same way "generate"'s own restore
+    // above does. filled.json on disk is ALWAYS the pure, pre-composite
+    // bindings (see the "generate" comment above); without this, a later
+    // stage would silently assemble/render every backgroundReplace block
+    // against the raw, un-composited camera take instead of its generated
+    // backdrop. Cheap once matte.json exists: backgroundReplace blocks
+    // route through the matte stage's own persisted subclip path, not a
+    // fresh ffmpeg cut, so this is a withCache() hit reusing the existing
+    // *-bg.mp4 files, not a real recompute.
+    const restored = await replaceBackgrounds(format, filled, trims, transcript, matteArtifact);
+    filled = restored.filled;
+    trims = restored.trims;
+    transcript = restored.transcript;
   }
   if (args.only === "composite") return;
 
@@ -281,8 +300,16 @@ const main = async () => {
   const failed = gateResults.filter((r) => r.pass === false);
   console.log(`\nacceptance gates: ${gateResults.length - failed.length - gateResults.filter((r) => r.pass === null).length} passed, ${failed.length} failed`);
   for (const r of failed) console.log(`  ✖ ${r.name} — ${r.measured}`);
-  if (failed.length > 0) {
+  if (failed.length > 0 && !args.softGates) {
     throw new Error(`${failed.length} acceptance gate(s) failed (see artifacts/${jobId}/gates.json) — ${failed.map((r) => r.name).join("; ")}`);
+  }
+  if (failed.length > 0) {
+    // --soft-gates (used by the render API route): a failed gate doesn't
+    // mean the render is broken, just that it missed a house-style target —
+    // the video still plays and is worth showing a human rather than
+    // discarding sight-unseen. The CLI stays strict by default since there's
+    // no human in the loop to make that call on an unattended/batch run.
+    console.log(`  (--soft-gates: not failing the run — video kept at out/${jobId}.mp4, gates.json has the details)`);
   }
 };
 

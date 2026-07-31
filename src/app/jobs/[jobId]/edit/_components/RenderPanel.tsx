@@ -2,16 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 
+type FailedGate = { name: string; measured: string };
+
 type RenderStatus =
   | { status: "idle" }
   | { status: "rendering"; startedAt: string; percent: number }
-  | { status: "done"; startedAt: string; finishedAt: string; outUrl: string }
+  | { status: "done"; startedAt: string; finishedAt: string; outUrl: string; failedGates?: FailedGate[] }
   | { status: "error"; startedAt: string; finishedAt: string; error: string };
 
 const POLL_MS = 2500;
 
 export function RenderPanel({ jobId }: { jobId: string }) {
   const [status, setStatus] = useState<RenderStatus>({ status: "idle" });
+  const [discarding, setDiscarding] = useState(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const poll = async () => {
@@ -41,6 +44,17 @@ export function RenderPanel({ jobId }: { jobId: string }) {
     }
   };
 
+  const discard = async () => {
+    setDiscarding(true);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/render`, { method: "DELETE" });
+      const data: RenderStatus = await res.json();
+      setStatus(data);
+    } finally {
+      setDiscarding(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-[color:var(--ed-border-strong)] bg-[color:var(--ed-panel)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
       <div className="flex items-center justify-between gap-3">
@@ -66,14 +80,42 @@ export function RenderPanel({ jobId }: { jobId: string }) {
       )}
       {status.status === "done" && (
         <div className="mt-4">
+          {status.failedGates && status.failedGates.length > 0 && (
+            <div className="mb-3 rounded-lg border border-[color:var(--ed-danger)]/40 bg-[color:var(--ed-danger)]/10 p-3">
+              <p className="text-sm font-semibold text-[color:var(--ed-danger)]">
+                {status.failedGates.length} quality check{status.failedGates.length > 1 ? "s" : ""} flagged this render
+              </p>
+              <ul className="mt-1 space-y-0.5 text-xs text-[color:var(--ed-danger)]/90">
+                {status.failedGates.map((g) => (
+                  <li key={g.name}>
+                    {g.name} — {g.measured}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-[color:var(--ed-ink)]/70">
+                The video still plays fine — take a look and decide whether it's good enough to keep.
+              </p>
+            </div>
+          )}
           <video src={status.outUrl} controls className="w-full rounded-lg" />
-          <a
-            href={status.outUrl}
-            download
-            className="mt-3 inline-block text-sm text-[color:var(--ed-accent)] hover:underline"
-          >
-            Download MP4
-          </a>
+          <div className="mt-3 flex items-center gap-4">
+            <a
+              href={status.outUrl}
+              download
+              className="text-sm text-[color:var(--ed-accent)] hover:underline"
+            >
+              Download MP4
+            </a>
+            {status.failedGates && status.failedGates.length > 0 && (
+              <button
+                onClick={discard}
+                disabled={discarding}
+                className="text-sm text-[color:var(--ed-danger)] hover:underline disabled:opacity-40"
+              >
+                {discarding ? "Discarding…" : "Discard render"}
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
