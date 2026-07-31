@@ -76,3 +76,11 @@ export const deleteLibraryAsset = (category: LibraryCategory, filename: string):
   const filePath = path.join(libraryDir(category), filename);
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 };
+
+/** Copies an asset within its category, reusing saveLibraryAsset's -2, -3, ... de-dupe. */
+export const duplicateLibraryAsset = (category: LibraryCategory, filename: string): LibraryAsset => {
+  if (!isValidFilename(filename)) throw new Error(`invalid filename "${filename}"`);
+  const filePath = path.join(libraryDir(category), filename);
+  if (!fs.existsSync(filePath)) throw new Error(`asset "${filename}" not found in ${category}`);
+  return saveLibraryAsset(category, filename, fs.readFileSync(filePath));
+};

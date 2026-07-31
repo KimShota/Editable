@@ -17,7 +17,7 @@ import { render, stageAssets } from "./render";
 import { runGates } from "./gates";
 import { artifactsDir } from "./paths";
 import { Edl, FilledFormat, Format, MatteArtifact, Transcript, TrimPoints } from "./types";
-import { EdlSchema } from "./schemas";
+import { EdlSchema, MatteArtifactSchema } from "./schemas";
 
 /**
  * Programmatic entry points for the same six-stage pipeline `run.ts` drives
@@ -181,7 +181,23 @@ export const reassembleJob = async (jobDir: string, jobId: string): Promise<Edl>
   const trims = readArtifact("trim");
   const resolved = readArtifact("roles");
 
-  const edl = assemble(format, filled, transcript, trims, resolved);
+  // Fresh intake()+generate() above only restores generation-flagged
+  // bindings (beat/broll clips) — blocks flagged backgroundReplace/
+  // punchInTailSec/plateComposite (schemas.ts's BlockSchema doc comment)
+  // need replaceBackgrounds run again too, or assemble sees the raw,
+  // un-composited camera take for those blocks (see backgroundReplace.ts's
+  // own doc comment). matte.json already has the persisted subclip/mask
+  // paths from the original build, so this is a withCache() hit reusing
+  // the existing *-bg.mp4 files, not a real recompute — same "cheap restore"
+  // contract as the inserts.json reuse above. Old jobs built before the
+  // matte stage existed have no matte.json; treat that as "nothing flagged".
+  const matteFile = path.join(dir, "matte.json");
+  const matteArtifact: MatteArtifact = fs.existsSync(matteFile)
+    ? MatteArtifactSchema.parse(readArtifact("matte"))
+    : { formatId: format.id, blocks: [] };
+  const replaced = await replaceBackgrounds(format, filled, trims, transcript, matteArtifact);
+
+  const edl = assemble(format, replaced.filled, replaced.transcript, replaced.trims, resolved);
   writeArtifact(jobId, "edl", edl);
   stageAssets(edl);
   return edl;

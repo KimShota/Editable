@@ -7,7 +7,7 @@ import { TimelineClip } from "./TimelineClip";
 import { assignLanes, laneCount } from "./lanes";
 import { isSelected, Selection, SelectionTrack, toggleSelect } from "./selection";
 import { buildMajorLadder, chooseTickScale, formatTick } from "./tickScale";
-import { FitIcon, ScissorsIcon, TrashIcon, ZoomInIcon, ZoomOutIcon } from "./Icons";
+import { FitIcon, MagnetIcon, ScissorsIcon, TrashIcon, ZoomInIcon, ZoomOutIcon } from "./Icons";
 
 /** One hue family (indigo → violet → purple) so tracks read as a system;
  *  transitions get the one intentional exception (amber) since they're a
@@ -31,6 +31,11 @@ const LANE_HEIGHT = 56;
 /** Below this drag distance, a marquee gesture is just a click (deselect),
  *  not an intentional rubber-band selection. */
 const MARQUEE_THRESHOLD_PX = 4;
+/** Free-move video reordering: fraction of the dragged clip's own width
+ *  that's credited toward crossing a neighbor before the cursor gets
+ *  there, so a modest drag reorders instead of snapping back to the same
+ *  slot. See commitVideoMove. */
+const FREE_MOVE_BIAS = 0.65;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
@@ -427,6 +432,15 @@ export function Timeline({
 }) {
   const [pxPerSec, setPxPerSec] = useState(70);
   const [containerWidth, setContainerWidth] = useState(800);
+  // The video track is always kept contiguous (see recomputeVideoTrack in
+  // timelineOps.ts) — dragging a clip never opens a gap, it only reorders
+  // it among its neighbors. When this is on, that reorder only fires once
+  // the dragged clip's center passes a neighbor's center (roughly a
+  // clip-width of drag, which reads as "it snapped back" for smaller
+  // nudges). Off, FREE_MOVE_BIAS pulls that threshold in — see
+  // commitVideoMove — so a smaller, still-deliberate drag is enough to
+  // commit the move.
+  const [snapEnabled, setSnapEnabled] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingScrollLeft = useRef<number | null>(null);
 
@@ -620,13 +634,20 @@ export function Timeline({
     (clipId: string, deltaSec: number) => {
       const clip = edl.video.find((v) => v.id === clipId);
       if (!clip) return;
-      const newCenter = clip.tlInSec + (clip.tlOutSec - clip.tlInSec) / 2 + deltaSec;
+      const width = clip.tlOutSec - clip.tlInSec;
+      // In free-move mode, push the comparison point further along in the
+      // drag direction than the cursor actually traveled — shrinking how
+      // far a clip has to move before it's judged to have passed a
+      // neighbor, without changing the underlying "insert nearest by
+      // center" rule.
+      const bias = snapEnabled ? 0 : Math.sign(deltaSec) * width * FREE_MOVE_BIAS;
+      const newCenter = clip.tlInSec + width / 2 + deltaSec + bias;
       const toIndex = edl.video.filter(
         (other) => other.id !== clipId && other.tlInSec + (other.tlOutSec - other.tlInSec) / 2 < newCenter,
       ).length;
       onOp({ type: "reorder", id: clipId, toIndex });
     },
-    [edl.video, onOp],
+    [edl.video, onOp, snapEnabled],
   );
 
   const commitVideoTrim = useCallback(
@@ -785,6 +806,14 @@ export function Timeline({
           </button>
           <button onClick={deleteSelection} disabled={!canDeleteSelection} title="Delete selected clip(s)" className={toolbarBtnClass}>
             <TrashIcon className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setSnapEnabled((v) => !v)}
+            aria-pressed={snapEnabled}
+            title={snapEnabled ? "Snap: clips align together while dragging" : "Free move: clips reorder with a lighter touch"}
+            className={`${toolbarBtnClass} ${snapEnabled ? "bg-[color:var(--ed-accent-dim)] text-[color:var(--ed-accent)] hover:text-[color:var(--ed-accent)]" : ""}`}
+          >
+            <MagnetIcon className="h-4 w-4" />
           </button>
         </div>
 

@@ -26,4 +26,4 @@ jobs/*
 !jobs/demo
 !jobs/five-codes
 !jobs/five-codes-demo
-library
+/library

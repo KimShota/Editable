@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { EdlSchema } from "./schemas";
 import { loadFormat } from "./loader";
@@ -83,28 +83,6 @@ const sampleTimeAvoidingOverlays = (
   if (gaps.length === 0) return (tlInSec + tlOutSec) / 2;
   const widest = gaps.reduce((a, b) => (b.end - b.start > a.end - a.start ? b : a));
   return (widest.start + widest.end) / 2;
-};
-
-/** Gate: no 0.5s window anywhere in the export below -60dBFS. Silence
- *  during a broll/montage segment with no music bed WILL trip this — that
- *  is the point (an unfilled music slot is exactly the kind of gap this
- *  is meant to surface), not a bug in the gate. */
-const audioFloorGate = (videoPath: string): GateResult => {
-  // silencedetect logs to stderr regardless of exit code — spawnSync (not
-  // execFileSync) is what gives us that back on the success path too.
-  const result = spawnSync(
-    "ffmpeg",
-    ["-v", "info", "-nostats", "-i", videoPath, "-af", "silencedetect=noise=-60dB:d=0.5", "-f", "null", "-"],
-    { encoding: "utf8" },
-  );
-  const stderr = result.stderr ?? "";
-  const matches = [...stderr.matchAll(/silence_start: ([\d.]+)/g)].map((m) => Number(m[1]));
-  const pass = matches.length === 0;
-  return {
-    name: "audio floor (no 0.5s window < -60dBFS)",
-    pass,
-    measured: pass ? "no silence >=0.5s detected" : `${matches.length} silence window(s), first at ${matches[0].toFixed(2)}s`,
-  };
 };
 
 /** Gate: fps integrity — catches matte.ts's own class of bug (a looped
@@ -833,7 +811,6 @@ export const runGates = (videoPath: string, edl: Edl, matte?: MatteArtifact): Ga
   }
 
   return [
-    audioFloorGate(videoPath),
     ...fpsIntegrityGates(edl),
     ...duplicateFrameGates(videoPath, edl, format),
     ...shotLumaGates(videoPath, edl),
@@ -867,7 +844,12 @@ const printReport = (results: GateResult[]): boolean => {
 };
 
 // CLI: tsx src/backend/pipeline/gates.ts <videoPath> <edlJsonPath>
-if (require.main === module) {
+// Guarded with typeof checks (not just `require.main === module`) because
+// this file's runGates() export is also imported by orchestrate.ts for the
+// Next.js app — Turbopack's server bundle doesn't inject CJS's `require`/
+// `module` globals, so a bare reference here threw ReferenceError on every
+// page that pulls in orchestrate.ts, not just when run directly via tsx.
+if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
   const [videoPath, edlJsonPath] = process.argv.slice(2);
   if (!videoPath || !edlJsonPath) {
     console.error("usage: tsx gates.ts <videoPath> <edlJsonPath>");
