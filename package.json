@@ -8,6 +8,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
     "@higgsfield/client": "^0.2.1",
+    "@neondatabase/serverless": "^1.1.0",
     "@remotion/cli": "4.0.482",
     "@remotion/gif": "^4.0.482",
     "@remotion/player": "^4.0.482",
@@ -39,6 +40,7 @@
     "pipeline": "tsx src/backend/pipeline/run.ts",
     "matte:proof": "tsx src/backend/pipeline/tools/matteProof.ts",
     "author": "tsx src/backend/authoring/run.ts",
+    "waitlist:export": "tsx src/backend/tools/waitlistExport.ts",
     "dev": "remotion studio src/backend/index.ts",
     "build": "remotion bundle src/backend/index.ts",
     "upgrade": "remotion upgrade",

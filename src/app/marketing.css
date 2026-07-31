@@ -239,6 +239,11 @@
 .marketing .cta__form button:hover { transform: scale(1.04); }
 .marketing .cta__done { margin-top: 26px; color: var(--accent); opacity: 0; transition: opacity 0.5s; font-family: var(--display); }
 .marketing .cta__done.is-visible { opacity: 1; }
+.marketing .cta__done--error { color: #ff6b6b; }
+.marketing .cta__form input.cta__hp {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 
 .marketing .footer {
   position: relative; z-index: 1;
