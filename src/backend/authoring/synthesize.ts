@@ -89,6 +89,7 @@ Every "voice" block's main clip slot must instruct the user to say a literal mar
 ANCHOR — two kinds, only inside "voice" blocks:
   LITERAL (near-certain, no LLM; marks block structure and captures the user's own variable words):
     { "id": string, "kind": "literal", "phrases": [string, ...],  // 1+ ways a user might actually phrase the fixed instruction line, e.g. ["Number one is", "First is"]
+      // When "capture" is true, EVERY phrase must contain ONLY the fixed marker words — never the variable words that follow, not even as an example. Listing "For research" beside "For" when "research" is what gets captured makes the phrase swallow the content and the capture come back empty, silently dropping every event timed off this anchor.
       "capture": boolean,        // true if the words right after the phrase are content to reuse (e.g. the user's own name for "code 1")
       "captureUntil": string,     // OPTIONAL: a fixed phrase that ends the capture
       "fallback": { "anchor": "blockStart" | "blockEnd", "offsetSec": number } }

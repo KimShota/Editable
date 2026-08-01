@@ -105,67 +105,74 @@ export type LiteralMatch = {
   capturedText?: string;
 };
 
-/** Best-scoring phrasing that actually occurs in `words`, or null if none
- *  of the accepted phrasings match anywhere. Ties (equal confidence) prefer
- *  whichever occurs earliest, matching a single-phrase anchor's old
- *  behavior of finding the earliest occurrence. */
-const findBestPhrasing = (
-  phrases: string[],
-  words: Word[],
-): { at: number; tokens: string[]; confidence: number } | null => {
-  let best: { at: number; tokens: string[]; confidence: number } | null = null;
+type Phrasing = { at: number; tokens: string[]; confidence: number };
+
+/** Every accepted phrasing that occurs in `words`, best first: highest
+ *  confidence, then earliest occurrence, then the order they were listed
+ *  in the format — the same preference a single best-match pick used to
+ *  apply, just kept as a ranked list so a phrasing that turns out to be
+ *  unusable can fall through to the next one. */
+const findPhrasings = (phrases: string[], words: Word[]): Phrasing[] => {
+  const found: Phrasing[] = [];
   for (const phrase of phrases) {
     const tokens = tokenize(phrase);
     if (tokens.length === 0) continue;
     const at = findPhrase(words, tokens);
     if (at === -1) continue;
-    const confidence = windowScore(words, at, tokens);
-    if (!best || confidence > best.confidence || (confidence === best.confidence && at < best.at)) {
-      best = { at, tokens, confidence };
-    }
+    found.push({ at, tokens, confidence: windowScore(words, at, tokens) });
   }
-  return best;
+  return found.sort((a, b) => b.confidence - a.confidence || a.at - b.at);
+};
+
+/** Words spoken after the phrase, up to the next pause, sentence break,
+ *  `captureUntil` continuation, or the hard word cap. */
+const collectCapture = (words: Word[], from: number, untilTokens: string[] | null): Word[] => {
+  const captured: Word[] = [];
+  for (let j = from; j < words.length; j++) {
+    if (captured.length >= MAX_CAPTURE_WORDS) break;
+    if (untilTokens && windowScore(words, j, untilTokens) >= MIN_SIMILARITY) break;
+    const prev = words[j - 1];
+    if (captured.length > 0 && endsWithSentenceBreak(prev.text)) break;
+    if (words[j].startSec - prev.endSec > CAPTURE_GAP_SEC) break;
+    captured.push(words[j]);
+    if (endsWithSentenceBreak(words[j].text)) break;
+  }
+  return captured;
 };
 
 export const matchLiteralAnchor = (
   anchor: LiteralAnchor,
   words: Word[],
 ): LiteralMatch | null => {
-  const found = findBestPhrasing(anchor.phrases, words);
-  if (!found) return null;
-  const { at, tokens, confidence } = found;
+  const untilTokens = anchor.captureUntil ? tokenize(anchor.captureUntil) : null;
 
-  const phraseWords = words.slice(at, at + tokens.length);
-  let last = at + tokens.length - 1;
-  const phraseEndSec = words[last].endSec;
-  const captured: Word[] = [];
+  for (const { at, tokens, confidence } of findPhrasings(anchor.phrases, words)) {
+    const captured = anchor.capture ? collectCapture(words, at + tokens.length, untilTokens) : [];
 
-  if (anchor.capture) {
-    const untilTokens = anchor.captureUntil ? tokenize(anchor.captureUntil) : null;
-    for (let j = at + tokens.length; j < words.length; j++) {
-      if (captured.length >= MAX_CAPTURE_WORDS) break;
-      if (untilTokens && windowScore(words, j, untilTokens) >= MIN_SIMILARITY) break;
-      const prev = words[j - 1];
-      if (captured.length > 0 && endsWithSentenceBreak(prev.text)) break;
-      if (words[j].startSec - prev.endSec > CAPTURE_GAP_SEC) break;
-      captured.push(words[j]);
-      last = j;
-      if (endsWithSentenceBreak(words[j].text)) break;
-    }
-    if (captured.length === 0) return null;
+    // A capture anchor's phrases are meant to be the FIXED marker only, but
+    // an authored format can list a variant that also spells out the
+    // variable words ("For research" alongside "For", when "research" is
+    // exactly what should be captured). That variant consumes the content
+    // and leaves nothing behind — so fall through to the next-best phrasing
+    // instead of failing the anchor outright, which would silently drop
+    // every overlay timed off it.
+    if (anchor.capture && captured.length === 0) continue;
+
+    const last = at + tokens.length - 1 + captured.length;
+    return {
+      startSec: words[at].startSec,
+      endSec: words[last].endSec,
+      phraseEndSec: words[at + tokens.length - 1].endSec,
+      captureStartSec: captured.length > 0 ? captured[0].startSec : undefined,
+      confidence,
+      quote: words.slice(at, last + 1).map((w) => w.text).join(" "),
+      capturedText: anchor.capture
+        ? captured.map((w) => cleanCaptured(w.text)).filter((t) => t.length > 0).join(" ")
+        : undefined,
+    };
   }
 
-  return {
-    startSec: phraseWords[0].startSec,
-    endSec: words[last].endSec,
-    phraseEndSec,
-    captureStartSec: captured.length > 0 ? captured[0].startSec : undefined,
-    confidence,
-    quote: words.slice(at, last + 1).map((w) => w.text).join(" "),
-    capturedText: anchor.capture
-      ? captured.map((w) => cleanCaptured(w.text)).filter((t) => t.length > 0).join(" ")
-      : undefined,
-  };
+  return null;
 };
 
 /**

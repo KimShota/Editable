@@ -379,8 +379,16 @@ export function ResourcesBoard({
                 )}
                 {buildError && <p className="text-xs text-red-400">{buildError}</p>}
               </div>
-              <Button onClick={() => continueToEditor()} disabled={!ready || building}>
-                {building ? "Building…" : "Continue to editor"}
+              {/* Once the diagnostics panel is already on screen the warnings
+                  have been seen, so this proceeds instead of rebuilding into
+                  the same early-return — otherwise the primary CTA looks
+                  broken: it spins, re-lists the same skips, and never
+                  navigates. "Fix and rebuild" clears them to re-arm it. */}
+              <Button
+                onClick={() => continueToEditor({ force: diagnostics !== null })}
+                disabled={!ready || building}
+              >
+                {building ? "Building…" : diagnostics ? "Continue anyway" : "Continue to editor"}
               </Button>
             </div>
           </>
