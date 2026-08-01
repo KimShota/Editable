@@ -159,7 +159,9 @@ export default function Home() {
           <a href="#formats">Formats</a>
         </div>
         <div className="nav__actions">
-          <Link className="nav__launch" href="/templates">Launch app</Link>
+          {process.env.NEXT_PUBLIC_APP_ENABLED !== "false" && (
+            <Link className="nav__launch" href="/templates">Launch app</Link>
+          )}
           <a className="nav__cta" href="#waitlist">Get early access</a>
         </div>
       </nav>
