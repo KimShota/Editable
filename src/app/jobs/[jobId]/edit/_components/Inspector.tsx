@@ -407,7 +407,11 @@ export function Inspector({
   if (selection.track === "captions") {
     const group = edl.captions.find((c) => c.id === id);
     if (!group) return null;
-    const canSplit = currentTimeSec > group.tlInSec + 0.1 && currentTimeSec < group.tlOutSec - 0.1;
+    // A split always lands on a word boundary (see applySplit), so the only
+    // group that genuinely can't be split is a one-word one — the playhead's
+    // exact position no longer decides it.
+    const canSplit = group.words.length >= 2;
+    const isPositioned = group.x !== undefined && group.y !== undefined;
     return (
       <div className="flex h-full flex-col">
         {header("Caption group", `${group.tlInSec.toFixed(2)}s – ${group.tlOutSec.toFixed(2)}s`)}
@@ -432,14 +436,28 @@ export function Inspector({
             mis-transcription). Adding or removing words spreads the new text evenly across the group&apos;s span
             instead.
           </p>
+          <Field label="Position">
+            <p className="text-xs text-[color:var(--ed-ink-dim)]">
+              {isPositioned
+                ? `Moved by hand to ${(group.x! * 100).toFixed(0)}%, ${(group.y! * 100).toFixed(0)}% of the frame. Drag it on the preview to adjust.`
+                : "Placed automatically by this caption's style. Drag it on the preview to put it exactly where you want."}
+            </p>
+          </Field>
           <div className={actionsClass}>
+            <button
+              disabled={!isPositioned}
+              onClick={() => onOp({ type: "setProp", track: "captions", id: group.id, patch: { x: null, y: null } })}
+              className={secondaryButtonClass}
+            >
+              Reset position
+            </button>
             <button
               disabled={!canSplit}
               onClick={() => onOp({ type: "split", track: "captions", id: group.id, atSec: currentTimeSec })}
               className={secondaryButtonClass}
             >
               <ScissorsIcon className="h-4 w-4" />
-              Split at playhead
+              Split at nearest word
             </button>
             <button
               onClick={() => onOp({ type: "delete", track: "captions", id: group.id })}

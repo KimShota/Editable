@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { Edl } from "@backend/pipeline/types";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { Edl, EdlCaptionGroup } from "@backend/pipeline/types";
 import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import { Selection, toggleSelect } from "./selection";
 
@@ -90,6 +90,119 @@ const useNaturalAspectRatio = (src: string | undefined, isVideo: boolean): numbe
   return ratio;
 };
 
+/**
+ * The selected caption group's own move box on the preview.
+ *
+ * Move-only, deliberately: a caption's size comes from its text, theme and
+ * variant (Captions.tsx), so a resize handle here would have nothing
+ * well-defined to write back — unlike an overlay, which owns its box.
+ *
+ * The box is MEASURED from the caption node the Player actually rendered
+ * (Captions.tsx tags each group with data-caption-group) rather than
+ * re-derived from font metrics in the editor. Re-deriving would mean a
+ * second copy of the renderer's layout math — font stack, per-theme size,
+ * word margins, wrapping — that silently drifts from the real thing the
+ * first time either side changes. Measuring can't drift.
+ */
+const CaptionMoveBox = ({
+  group,
+  containerRef,
+  onOp,
+}: {
+  group: EdlCaptionGroup;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  onOp: (op: TimelineOp) => void;
+}) => {
+  const [box, setBox] = useState<Box | null>(null);
+  const [delta, setDelta] = useState<{ dx: number; dy: number } | null>(null);
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
+
+  // Re-measured every frame: the active-word highlight scales words as the
+  // playhead moves, so the line's real bounds change continuously and a
+  // one-shot measurement would leave the box lagging behind the text. The
+  // equality check keeps that from turning into a render every frame — the
+  // state only actually changes when the measured geometry does.
+  useLayoutEffect(() => {
+    let raf = 0;
+    const measure = () => {
+      raf = requestAnimationFrame(measure);
+      const container = containerRef.current;
+      const node = container?.parentElement?.querySelector(`[data-caption-group="${group.id}"]`);
+      if (!container || !node) {
+        setBox((prev) => (prev === null ? prev : null));
+        return;
+      }
+      const base = container.getBoundingClientRect();
+      if (base.width === 0 || base.height === 0) return;
+      const rect = node.getBoundingClientRect();
+      const next: Box = {
+        x: (rect.left - base.left) / base.width,
+        y: (rect.top - base.top) / base.height,
+        width: rect.width / base.width,
+        height: rect.height / base.height,
+      };
+      setBox((prev) =>
+        prev &&
+        Math.abs(prev.x - next.x) < 1e-4 &&
+        Math.abs(prev.y - next.y) < 1e-4 &&
+        Math.abs(prev.width - next.width) < 1e-4 &&
+        Math.abs(prev.height - next.height) < 1e-4
+          ? prev
+          : next,
+      );
+    };
+    raf = requestAnimationFrame(measure);
+    return () => cancelAnimationFrame(raf);
+  }, [group.id, containerRef]);
+
+  if (!box) return null;
+
+  const dx = delta?.dx ?? 0;
+  const dy = delta?.dy ?? 0;
+
+  return (
+    <div
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        (e.target as Element).setPointerCapture(e.pointerId);
+        dragStart.current = { x: e.clientX, y: e.clientY };
+        setDelta({ dx: 0, dy: 0 });
+      }}
+      onPointerMove={(e) => {
+        const start = dragStart.current;
+        const container = containerRef.current;
+        if (!start || !container) return;
+        const base = container.getBoundingClientRect();
+        setDelta({ dx: (e.clientX - start.x) / base.width, dy: (e.clientY - start.y) / base.height });
+      }}
+      onPointerUp={() => {
+        // Commit the box's CENTER — the anchor Captions.tsx positions a
+        // hand-placed group from — and only for a drag that actually
+        // moved, so a stray click doesn't pin a caption that was happily
+        // laying out automatically.
+        if (dragStart.current && delta && (delta.dx !== 0 || delta.dy !== 0)) {
+          onOp({
+            type: "setProp",
+            track: "captions",
+            id: group.id,
+            patch: { x: box.x + box.width / 2 + delta.dx, y: box.y + box.height / 2 + delta.dy },
+          });
+        }
+        dragStart.current = null;
+        setDelta(null);
+      }}
+      style={{
+        position: "absolute",
+        left: `${(box.x + dx) * 100}%`,
+        top: `${(box.y + dy) * 100}%`,
+        width: `${box.width * 100}%`,
+        height: `${box.height * 100}%`,
+      }}
+      className="pointer-events-auto cursor-grab border-2 border-dashed border-[color:var(--ed-accent)] active:cursor-grabbing"
+    />
+  );
+};
+
 export function OverlayCanvas({
   edl,
   selection,
@@ -106,6 +219,15 @@ export function OverlayCanvas({
   const selectedIds = selection?.track === "overlay" ? selection.ids : [];
   const isMulti = selectedIds.length > 1;
   const singleOverlay = selectedIds.length === 1 ? edl.overlays.find((o) => o.id === selectedIds[0]) : undefined;
+
+  // A single selected caption group, and only while it's actually on screen
+  // — there's nothing to measure or drag at a time the group doesn't render.
+  const selectedCaption =
+    selection?.track === "captions" && selection.ids.length === 1
+      ? edl.captions.find(
+          (c) => c.id === selection.ids[0] && currentTimeSec >= c.tlInSec && currentTimeSec < c.tlOutSec,
+        )
+      : undefined;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -207,6 +329,15 @@ export function OverlayCanvas({
     (e.target as Element).setPointerCapture(e.pointerId);
     setDrag({ kind: "groupMove", startClientX: e.clientX, startClientY: e.clientY });
   };
+
+  if (selectedCaption) {
+    return (
+      <div ref={containerRef} className="pointer-events-none absolute inset-0">
+        {othersVisible.map(renderClickableOverlay)}
+        <CaptionMoveBox group={selectedCaption} containerRef={containerRef} onOp={onOp} />
+      </div>
+    );
+  }
 
   if (isMulti) {
     return (

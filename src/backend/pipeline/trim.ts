@@ -18,7 +18,7 @@ import {
 /**
  * Module 4 — Trim.
  *
- * Two passes, in order:
+ * Three passes, in order:
  *   1. DEAD AIR — for each take, finds the true speech region(s) from
  *      ffmpeg's silence detection (audio-grounded, not whisper's word
  *      timestamps — whisper's word-level alignment is unreliable right at
@@ -26,7 +26,18 @@ import {
  *      into an adjacent word's timestamp by seconds, occasionally past the
  *      clip's own duration). Head and tail dead air is cut regardless of
  *      what whisper thinks the first/last word's time is.
- *   2. FILLER — a leading or trailing chunk of REAL speech, separated from
+ *   2. NON-SPEECH EDGE — a sigh, breath, or throat-clear at a take's very
+ *      edge is audible (so pass 1 keeps it — it isn't silence) but carries
+ *      no words (so whisper never transcribed it there). Neither the
+ *      dead-air pass above nor the filler pass below can see this on their
+ *      own: dead air only looks at silence, filler only looks at
+ *      transcribed words. This pass looks at the acoustic profile of the
+ *      wordless span itself — quieter and noisier (higher zero-crossing
+ *      rate, i.e. no voiced low-frequency periodicity) than the speech
+ *      right next to it — and only cuts when that profile actually reads
+ *      as non-speech, never just because a gap exists (whisper can
+ *      legitimately miss a real word right at a clip's edge).
+ *   3. FILLER — a leading or trailing chunk of REAL speech, separated from
  *      the rest by a pause long enough to read as structural (not just a
  *      breath), gets judged: is it part of delivering what the slot asked
  *      for, or something said before/after that ("okay cool um", a false
@@ -35,7 +46,9 @@ import {
  *      resolver. Either way, only the ANSWER (keep/drop this chunk) comes
  *      from that judgment — the actual cut always lands on the real,
  *      audio-grounded chunk boundary, never on a whisper timestamp.
- *      Never touches the middle of a take, only its two outer edges.
+ *
+ * All three passes only ever move a take's two outer edges inward — the
+ * middle of a take is never touched.
  *
  * Silent b-roll blocks pass through roughly as filmed (v1 decision), capped
  * at the format's brollDurationSec.
@@ -71,6 +84,31 @@ const FILLER_WORDS = new Set([
   "okay", "ok", "kay", "cool", "so", "yeah", "yep", "yup",
   "alright", "right", "like", "well", "anyway", "anyways",
 ]);
+
+/** How much wordless-but-audible span at a take's very edge is worth
+ *  checking for a sigh/breath/throat-clear — shorter than this is likely
+ *  just silencedetect noise right at the padding boundary, not a real
+ *  event worth analyzing. */
+const MIN_NONSPEECH_SEC = 0.2;
+/** Above this, a wordless edge span reads as real content (an intro sound,
+ *  something happening on camera) rather than a single breath/sigh, which
+ *  is brief by nature — leave it alone rather than guess. */
+const MAX_NONSPEECH_SEC = 2.5;
+/** Length of the adjoining-speech reference window a candidate span's
+ *  acoustic profile is judged against — long enough to average out one
+ *  word's own attack/decay, short enough to stay "this speaker, right
+ *  now" rather than the whole take. */
+const NONSPEECH_REF_SEC = 0.3;
+/** A candidate span must be at least this many dB quieter than the
+ *  adjoining speech to read as non-speech — a sigh is breathy, not a
+ *  shout. Guards the loudness half of the judgment; a merely-quiet word
+ *  still fails the noisiness check below. */
+const NONSPEECH_RMS_MARGIN_DB = 2;
+/** A candidate span's zero-crossing rate (proxy for "broadband turbulent
+ *  air, no dominant voiced period") must be at least this many times the
+ *  adjoining speech's own ZCR — a vowel sound has a much lower ZCR than
+ *  breath noise. */
+const NONSPEECH_ZCR_RATIO = 1.3;
 
 type SilenceInterval = { startSec: number; endSec: number };
 /** A maximal span of real (non-silent) audio. */
@@ -277,6 +315,130 @@ const trimOneTake = (
   return { trim: { srcInSec, srcOutSec }, regions, clipDurationSec: clipDuration };
 };
 
+/** Raw mono PCM samples for one span of the clip, resampled to 16kHz —
+ *  cheap, and plenty of resolution for the energy/zero-crossing checks
+ *  below. Returns an empty array if ffmpeg fails for any reason (missing
+ *  file, zero-length span) — callers treat that as "can't tell," not "is
+ *  non-speech," matching this module's conservative default elsewhere. */
+const readPcmMono = (absPath: string, startSec: number, endSec: number): Int16Array => {
+  const durationSec = endSec - startSec;
+  if (durationSec <= 0) return new Int16Array(0);
+  try {
+    const out = spawnSync("ffmpeg", [
+      "-v", "error",
+      "-ss", startSec.toFixed(3),
+      "-t", durationSec.toFixed(3),
+      "-i", absPath,
+      "-ac", "1",
+      "-ar", "16000",
+      "-f", "s16le",
+      "-",
+    ]).stdout as Buffer | null;
+    if (!out || out.length < 2) return new Int16Array(0);
+    return new Int16Array(out.buffer, out.byteOffset, Math.floor(out.length / 2));
+  } catch {
+    return new Int16Array(0);
+  }
+};
+
+const rmsDb = (samples: Int16Array): number => {
+  if (samples.length === 0) return -Infinity;
+  let sumSq = 0;
+  for (let i = 0; i < samples.length; i++) sumSq += samples[i] * samples[i];
+  const rms = Math.sqrt(sumSq / samples.length) / 32768;
+  return rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+};
+
+/** Fraction of adjacent sample pairs that cross zero — low for a voiced
+ *  vowel (dominated by a low fundamental), high for breathy/turbulent
+ *  noise with no dominant low-frequency period. A cheap, pitch-detector-
+ *  free stand-in for "is this voiced." */
+const zeroCrossingRate = (samples: Int16Array): number => {
+  if (samples.length < 2) return 0;
+  let crossings = 0;
+  for (let i = 1; i < samples.length; i++) {
+    if (samples[i - 1] >= 0 !== samples[i] >= 0) crossings++;
+  }
+  return crossings / (samples.length - 1);
+};
+
+/** True only when BOTH acoustic signals agree the candidate span is a
+ *  non-speech vocal noise (sigh/breath/throat-clear) rather than real
+ *  speech: quieter than the adjoining speech AND acoustically noisier
+ *  (higher zero-crossing rate) than it. Requiring both guards against
+ *  cutting a merely-quiet trailing word (fails the ZCR check) or a loud
+ *  breath (fails the loudness check) on either signal alone. */
+const looksLikeNonSpeechAcoustically = (
+  absPath: string,
+  candidateStartSec: number,
+  candidateEndSec: number,
+  speechRefStartSec: number,
+  speechRefEndSec: number,
+): boolean => {
+  const candidate = readPcmMono(absPath, candidateStartSec, candidateEndSec);
+  const speechRef = readPcmMono(absPath, speechRefStartSec, speechRefEndSec);
+  if (candidate.length === 0 || speechRef.length === 0) return false;
+
+  const quieterThanSpeech = rmsDb(candidate) <= rmsDb(speechRef) - NONSPEECH_RMS_MARGIN_DB;
+
+  const speechZcr = zeroCrossingRate(speechRef);
+  const noisierThanSpeech = speechZcr > 0 && zeroCrossingRate(candidate) >= speechZcr * NONSPEECH_ZCR_RATIO;
+
+  return quieterThanSpeech && noisierThanSpeech;
+};
+
+/** Narrows a take's base (dead-air-only) trim by dropping a leading and/or
+ *  trailing span of AUDIBLE, WORDLESS audio — a sigh, breath, or throat-
+ *  clear. Only cuts when the span's acoustic profile actually looks
+ *  non-speech (see looksLikeNonSpeechAcoustically) — a wordless gap alone
+ *  isn't enough, since whisper can legitimately miss a real word right at
+ *  a clip's edge. Like trimFiller below, only ever moves the two outer
+ *  edges inward. */
+const trimNonSpeechEdge = (
+  base: TakeTrim,
+  regions: SpeechRegion[],
+  words: Word[],
+  absPath: string,
+  label: string,
+  diagnostics: string[],
+): TakeTrim => {
+  if (words.length === 0 || regions.length === 0) return base;
+
+  let srcInSec = base.srcInSec;
+  let srcOutSec = base.srcOutSec;
+
+  const audioStart = regions[0].startSec;
+  const audioEnd = regions[regions.length - 1].endSec;
+  const firstWordStart = Math.max(audioStart, Math.min(...words.map((w) => w.startSec)));
+  const lastWordEnd = Math.min(audioEnd, Math.max(...words.map((w) => w.endSec)));
+
+  const leadingGap = firstWordStart - audioStart;
+  if (leadingGap >= MIN_NONSPEECH_SEC && leadingGap <= MAX_NONSPEECH_SEC) {
+    const refEnd = Math.min(firstWordStart + NONSPEECH_REF_SEC, audioEnd, lastWordEnd);
+    if (
+      refEnd > firstWordStart &&
+      looksLikeNonSpeechAcoustically(absPath, audioStart, firstWordStart, firstWordStart, refEnd)
+    ) {
+      srcInSec = Math.min(Math.max(srcInSec, firstWordStart - PAD_SEC), srcOutSec - 0.1);
+      diagnostics.push(`trimmed leading non-speech audio (sigh/breath) from ${label}`);
+    }
+  }
+
+  const trailingGap = audioEnd - lastWordEnd;
+  if (trailingGap >= MIN_NONSPEECH_SEC && trailingGap <= MAX_NONSPEECH_SEC) {
+    const refStart = Math.max(lastWordEnd - NONSPEECH_REF_SEC, audioStart, firstWordStart);
+    if (
+      lastWordEnd > refStart &&
+      looksLikeNonSpeechAcoustically(absPath, lastWordEnd, audioEnd, refStart, lastWordEnd)
+    ) {
+      srcOutSec = Math.max(Math.min(srcOutSec, lastWordEnd + PAD_SEC), srcInSec + 0.1);
+      diagnostics.push(`trimmed trailing non-speech audio (sigh/breath) from ${label}`);
+    }
+  }
+
+  return { srcInSec, srcOutSec };
+};
+
 /** Narrows a take's base (dead-air-only) trim by dropping a leading and/or
  *  trailing chunk judged to be filler. Only ever moves the two outer
  *  edges inward — the middle of a take is never touched. */
@@ -407,9 +569,13 @@ export const trim = async (
       const { trim: base, regions, clipDurationSec } = trimOneTake(file, words);
       const label =
         takeOrder.length > 1 ? `block "${block.id}" take ${pos + 1}/${takeOrder.length}` : `block "${block.id}"`;
+      const deSighed = trimNonSpeechEdge(base, regions, words, file.absPath, label, diagnostics);
+      const remainingRegions = regions.filter(
+        (r) => r.endSec > deSighed.srcInSec && r.startSec < deSighed.srcOutSec,
+      );
       const narrowed = await trimFiller(
-        base,
-        regions,
+        deSighed,
+        remainingRegions,
         clipDurationSec,
         words,
         anchors,

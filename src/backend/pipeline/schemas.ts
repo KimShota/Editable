@@ -1051,6 +1051,17 @@ export const EdlCaptionGroupSchema = z.object({
    *  theme when the block doesn't override it — see BlockSchema's doc
    *  comment. Captions.tsx picks its color/weight/casing from this. */
   theme: z.string().optional(),
+  /** Where this group sits on the frame — the CENTER of the caption block,
+   *  in frame fractions — set by dragging it on the editor canvas.
+   *
+   *  Absent (the normal case) means "wherever this variant/theme puts it",
+   *  i.e. Captions.tsx's own automatic placement. That distinction is the
+   *  point: an untouched caption keeps tracking the format's look if the
+   *  format's own caption placement later changes, and only a group the
+   *  user actually moved is pinned. Both axes are set and cleared
+   *  together — a half-positioned group has no meaningful placement. */
+  x: z.number().optional(),
+  y: z.number().optional(),
 });
 
 export const EdlTransitionSchema = z.object({

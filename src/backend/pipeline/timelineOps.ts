@@ -324,17 +324,38 @@ const applyTrimEdge = (edl: Edl, op: Extract<TimelineOp, { type: "trimEdge" }>):
   }
   if (op.track === "captions") {
     const clip = edl.captions[findIndexOrThrow(edl.captions, op.id, "caption group")];
-    // The edge can trim SLACK (the lead-in / CAPTION_TAIL_SEC lingering
-    // room assemble.ts left around the words) but can never drag past the
-    // group's own words — doing so used to desync the group window from
-    // the word windows it's supposed to contain, which is what made a
-    // word (karaokeTitle) or the whole line (lowerThird) silently stop
-    // rendering despite never itself being touched. See
-    // assertCaptionGroupCoversWords.
-    const firstWordStart = clip.words[0].tlStartSec;
-    const lastWordEnd = clip.words[clip.words.length - 1].tlEndSec;
-    if (op.edge === "in") clip.tlInSec = clamp(op.tlSec, 0, Math.min(clip.tlOutSec - MIN_CLIP_SEC, firstWordStart));
-    else clip.tlOutSec = Math.max(op.tlSec, clip.tlInSec + MIN_CLIP_SEC, lastWordEnd);
+    // A caption's window must always cover its own words
+    // (assertCaptionGroupCoversWords) or a word silently stops rendering.
+    // That used to be enforced by CLAMPING the edge to the first/last
+    // word, which made the edge immovable for the common case: assemble()
+    // lays most groups' tlIn/tlOut exactly ON the first and last word, so
+    // there is no slack to give and the drag did nothing at all.
+    //
+    // So dragging past a word now DROPS the words that fall outside the
+    // new window and clips the straddling one back to the edge — the same
+    // thing trimming a video clip does to footage, and what `split`
+    // already does to a group's words. The invariant then holds by
+    // construction instead of by refusal.
+    const words = clip.words;
+    if (op.edge === "in") {
+      // Never past the last word's own end: a group must keep >= 1 word.
+      const newIn = clamp(
+        op.tlSec,
+        0,
+        Math.min(clip.tlOutSec - MIN_CLIP_SEC, words[words.length - 1].tlEndSec - MIN_CLIP_SEC),
+      );
+      const kept = words.filter((w) => w.tlEndSec > newIn);
+      clip.words = kept.map((w, i) => (i === 0 ? { ...w, tlStartSec: Math.max(w.tlStartSec, newIn) } : w));
+      clip.tlInSec = Math.min(newIn, clip.words[0].tlStartSec);
+    } else {
+      // Symmetrically, never before the first word's own start.
+      const newOut = Math.max(op.tlSec, clip.tlInSec + MIN_CLIP_SEC, words[0].tlStartSec + MIN_CLIP_SEC);
+      const kept = words.filter((w) => w.tlStartSec < newOut);
+      clip.words = kept.map((w, i) =>
+        i === kept.length - 1 ? { ...w, tlEndSec: Math.min(w.tlEndSec, newOut) } : w,
+      );
+      clip.tlOutSec = Math.max(newOut, clip.words[clip.words.length - 1].tlEndSec);
+    }
     assertCaptionGroupCoversWords(clip);
     return;
   }
@@ -431,21 +452,58 @@ const applySplit = (edl: Edl, op: Extract<TimelineOp, { type: "split" }>): void 
   if (op.track === "captions") {
     const i = findIndexOrThrow(edl.captions, op.id, "caption group");
     const clip = edl.captions[i];
-    if (op.atSec <= clip.tlInSec + MIN_CLIP_SEC || op.atSec >= clip.tlOutSec - MIN_CLIP_SEC) {
-      throw new Error("timeline op: split point too close to a clip edge");
+    if (clip.words.length < 2) {
+      throw new Error("timeline op: a one-word caption group has nothing to split");
     }
-    const firstWords = clip.words.filter((w) => w.tlStartSec < op.atSec);
-    const secondWords = clip.words.filter((w) => w.tlStartSec >= op.atSec);
-    if (firstWords.length === 0 || secondWords.length === 0) {
-      throw new Error("timeline op: split point doesn't fall between two words");
+    // The cut has to land on a word boundary: each half's window must
+    // cover its own words (assertCaptionGroupCoversWords) and words butt
+    // up against each other, so there's no valid window edge INSIDE a
+    // word. This used to reject any playhead that wasn't already between
+    // two words — which is most of a group, since a playhead sitting
+    // anywhere inside the last word left the second half wordless. Snap
+    // to the nearest boundary instead: the user gets the split they asked
+    // for, at the closest place it can legally go.
+    //
+    // A boundary sitting exactly on the group's own edge is skipped: real
+    // transcripts do contain zero-duration words (whisper occasionally
+    // emits one), and cutting there would leave a half with no duration
+    // at all. Only interior boundaries can produce two real groups.
+    const EPS = 1e-6;
+    const cuts = clip.words
+      .map((w, j) => ({ j, at: w.tlStartSec }))
+      .filter(({ j, at }) => j > 0 && at > clip.tlInSec + EPS && at < clip.tlOutSec - EPS);
+    if (cuts.length === 0) {
+      throw new Error("timeline op: this caption group has no word boundary inside it to split on");
     }
+    let cut = cuts[0].j;
+    for (const c of cuts) {
+      if (Math.abs(c.at - op.atSec) < Math.abs(clip.words[cut].tlStartSec - op.atSec)) cut = c.j;
+    }
+    const boundarySec = clip.words[cut].tlStartSec;
+    // Real transcripts occasionally have words whose spans OVERLAP, so the
+    // word before the cut can end after the word at the cut begins. Letting
+    // the first half stretch to cover it would push its window past the
+    // second half's start, and two caption groups may never overlap — the
+    // renderer shows the first match for a given moment, so the second
+    // would silently not appear (the same failure resolveCaptionOverlap
+    // exists to prevent). Clipping that one word back to the boundary
+    // costs a few hundredths of a second of highlight and keeps both
+    // halves well-formed, which is the same trade trimming an edge makes.
+    const firstWords = clip.words.slice(0, cut);
+    const lastOfFirst = firstWords[firstWords.length - 1];
+    firstWords[firstWords.length - 1] = {
+      ...lastOfFirst,
+      tlEndSec: Math.max(Math.min(lastOfFirst.tlEndSec, boundarySec), lastOfFirst.tlStartSec),
+    };
     const second: EdlCaptionGroup = {
       ...clip,
       id: newClipId(`${clip.id}-split`),
-      words: secondWords,
-      tlInSec: op.atSec,
+      words: clip.words.slice(cut),
+      tlInSec: boundarySec,
     };
-    const first: EdlCaptionGroup = { ...clip, words: firstWords, tlOutSec: op.atSec };
+    const first: EdlCaptionGroup = { ...clip, words: firstWords, tlOutSec: boundarySec };
+    assertCaptionGroupCoversWords(first);
+    assertCaptionGroupCoversWords(second);
     edl.captions.splice(i, 1, first, second);
     return;
   }
@@ -601,6 +659,20 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
     // re-validated by EdlSchema.parse at the end of applyOp either way.
     if (Array.isArray(op.patch.words) && op.patch.words.length > 0) {
       clip.words = op.patch.words as typeof clip.words;
+    }
+    // Canvas drag: the group's own on-screen position (see
+    // EdlCaptionGroupSchema). An explicit null on either axis means "put
+    // this back on automatic placement" — checked separately from a
+    // MISSING key, since `patch` only ever carries the fields the client
+    // actually meant to change, so absent must keep the current value.
+    if (op.patch.x === null || op.patch.y === null) {
+      delete clip.x;
+      delete clip.y;
+    } else if (typeof op.patch.x === "number" && typeof op.patch.y === "number") {
+      // Clamped so a caption can never be dragged fully off-frame into a
+      // position it can't be grabbed back from.
+      clip.x = clamp(op.patch.x, 0, 1);
+      clip.y = clamp(op.patch.y, 0, 1);
     }
     return;
   }

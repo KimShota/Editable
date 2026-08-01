@@ -40,6 +40,38 @@ import { ensureDisplayFonts } from "../fonts";
 const HIGHLIGHT = "#FFD400";
 const OUTRO_YELLOW = "#FFD400";
 
+/** Side gutters each variant's AUTOMATIC layout keeps, in composition px.
+ *  A hand-positioned group is given the same content width these produce,
+ *  so dragging a caption never changes how its text wraps. */
+const LOWER_THIRD_GUTTER_PX = 48;
+const BIG_TITLE_GUTTER_PX = 40;
+
+/** A group the user dragged on the editor canvas carries its own center
+ *  point (see EdlCaptionGroupSchema); everything else lays out
+ *  automatically. Both axes are written together, so testing one is
+ *  enough, but both are read to keep the type narrowing honest. */
+const positionOf = (group: EdlCaptionGroup): { x: number; y: number } | null =>
+  group.x !== undefined && group.y !== undefined ? { x: group.x, y: group.y } : null;
+
+/** Absolutely-positioned wrapper centered on the group's own point — the
+ *  one shape both caption variants share when hand-positioned.
+ *
+ *  `contentWidthPx` is set EXPLICITLY rather than as a max-width: an
+ *  absolutely-positioned box with `left: x%` and no `right` shrink-to-fits
+ *  against only the space from x to the frame's right edge, so a caption
+ *  pinned near the middle would wrap at half the width it used to — the
+ *  same text re-flowing onto two lines purely because it was dragged. An
+ *  explicit width matching the variant's own automatic content width
+ *  makes wrapping identical before and after a move. */
+const pinnedStyle = (at: { x: number; y: number }, contentWidthPx: number): React.CSSProperties => ({
+  position: "absolute",
+  left: `${at.x * 100}%`,
+  top: `${at.y * 100}%`,
+  transform: "translate(-50%, -50%)",
+  width: contentWidthPx,
+  textAlign: "center",
+});
+
 const BigTitleCard: React.FC<{ group: EdlCaptionGroup }> = ({ group }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
@@ -50,11 +82,17 @@ const BigTitleCard: React.FC<{ group: EdlCaptionGroup }> = ({ group }) => {
   const scale = interpolate(progress, [0, 1], [1.35, 1]);
   const text = group.words[0].text;
   const fontSize = fitDidoneFontSize(text, width, height);
+  const at = positionOf(group);
 
   return (
-    <AbsoluteFill style={{ justifyContent: "center", alignItems: "center", padding: 40 }}>
+    <AbsoluteFill style={at ? undefined : { justifyContent: "center", alignItems: "center", padding: 40 }}>
       <div
+        // Measured by the editor's OverlayCanvas to draw this group's drag
+        // box against the REAL rendered text — see its own doc comment for
+        // why it measures instead of re-deriving the geometry.
+        data-caption-group={group.id}
         style={{
+          ...(at ? pinnedStyle(at, width - BIG_TITLE_GUTTER_PX * 2) : null),
           fontFamily: PLAYFAIR_DISPLAY_STACK,
           fontWeight: 900,
           fontSize,
@@ -65,7 +103,9 @@ const BigTitleCard: React.FC<{ group: EdlCaptionGroup }> = ({ group }) => {
           textTransform: "uppercase",
           whiteSpace: "nowrap",
           opacity: progress,
-          transform: `scale(${scale})`,
+          // A pinned card centers itself with its own translate, so the
+          // entrance punch-in has to compose with it rather than replace it.
+          transform: at ? `translate(-50%, -50%) scale(${scale})` : `scale(${scale})`,
         }}
       >
         {text}
@@ -80,7 +120,7 @@ const LowerThirdLine: React.FC<{ group: EdlCaptionGroup; position: string; theme
   theme,
 }) => {
   const frame = useCurrentFrame();
-  const { fps, height } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
   const tSec = frame / fps;
 
   const isKumar = theme === "kumar";
@@ -88,18 +128,27 @@ const LowerThirdLine: React.FC<{ group: EdlCaptionGroup; position: string; theme
   // Kumar's own captions sit noticeably higher than a typical lower-third
   // (mid-frame, over the subject's chest, not hugging the bottom edge).
   const paddingBottomFrac = position === "center" ? 0 : isKumar ? 0.42 : 0.24;
+  const at = positionOf(group);
 
   return (
     <AbsoluteFill
-      style={{
-        justifyContent: position === "center" ? "center" : "flex-end",
-        alignItems: "center",
-        paddingBottom: position === "center" ? 0 : height * paddingBottomFrac,
-        paddingLeft: 48,
-        paddingRight: 48,
-      }}
+      style={
+        at
+          ? undefined
+          : {
+              justifyContent: position === "center" ? "center" : "flex-end",
+              alignItems: "center",
+              paddingBottom: position === "center" ? 0 : height * paddingBottomFrac,
+              paddingLeft: LOWER_THIRD_GUTTER_PX,
+              paddingRight: LOWER_THIRD_GUTTER_PX,
+            }
+      }
     >
-      <div style={{ textAlign: "center" }}>
+      <div
+        // See BigTitleCard's own note — measured by the editor canvas.
+        data-caption-group={group.id}
+        style={at ? pinnedStyle(at, width - LOWER_THIRD_GUTTER_PX * 2) : { textAlign: "center" }}
+      >
         {group.words.map((w, i) => {
           const isActive = tSec >= w.tlStartSec && tSec < w.tlEndSec;
           const isKeywordHit = isActive && w.emphasis;
