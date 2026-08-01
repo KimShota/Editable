@@ -34,6 +34,12 @@ export const ShotSchema = z.object({
   frame: z.string(),
 });
 
+export const DenseFrameSchema = z.object({
+  atSec: z.number().min(0),
+  /** authoringDir(draftId)-relative path, e.g. "frames/dense_003.jpg". */
+  frame: z.string(),
+});
+
 export const AnalysisSchema = z.object({
   sourceUrl: z.string(),
   durationSec: z.number().positive(),
@@ -43,6 +49,34 @@ export const AnalysisSchema = z.object({
   words: z.array(WordSchema),
   /** Scene-change-detected shot boundaries with one sampled frame each. */
   shots: z.array(ShotSchema),
+  /** Denser visual sampling than one-frame-per-shot — catches choreography
+   *  that happens WITHIN a single shot (overlay pop-ins, blur->reveal,
+   *  label recolors), which a continuous-take reel's sparse shot list can't
+   *  see at all. See analyze.ts's doc comment for how these are chosen. */
+  denseFrames: z.array(DenseFrameSchema),
+});
+
+export const VerifyBlockResultSchema = z.object({
+  blockId: z.string(),
+  /** Mean structural similarity (0-1) between the self-verified render and
+   *  the reference over this block's own span. Absent when the block
+   *  couldn't be measured at all — see `skipped`. */
+  ssim: z.number().optional(),
+  /** Why this block wasn't self-verified (e.g. no matching anchor found in
+   *  the reference, or it's a broll block — see verify.ts's doc comment
+   *  for the current v1 scope). Absent when `ssim` is present. */
+  skipped: z.string().optional(),
+});
+
+export const VerifyResultSchema = z.object({
+  draftId: z.string(),
+  createdAt: z.string(),
+  /** MINIMUM ssim across every measured (non-skipped) block — deliberately
+   *  the min, not the mean, so one badly-placed card can't be averaged
+   *  away by several accurate ones. Absent when nothing could be measured. */
+  overallScore: z.number().optional(),
+  blocks: z.array(VerifyBlockResultSchema),
+  diagnostics: z.array(z.string()),
 });
 
 export const DraftSchema = z.object({

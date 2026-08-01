@@ -2,10 +2,11 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { AnalysisSchema, DraftSchema, IngestResultSchema } from "./schemas";
+import { AnalysisSchema, DraftSchema, IngestResultSchema, VerifyResultSchema } from "./schemas";
 import { ingestFromUrl, newDraftId } from "./ingest";
 import { analyze } from "./analyze";
 import { synthesize } from "./synthesize";
+import { verify } from "./verify";
 import { authoringDir } from "../pipeline/paths";
 
 /**
@@ -15,14 +16,16 @@ import { authoringDir } from "../pipeline/paths";
  *
  *   npm run author -- --url <reelUrl> [--draft <draftId>] [--only <stage>]
  *
- * Stages: ingest → analyze → synthesize. Each writes its artifact to
- * authoring/<draftId>/ — same "inspect the artifact, not the video" idea
+ * Stages: ingest → analyze → synthesize → verify. Each writes its artifact
+ * to authoring/<draftId>/ — same "inspect the artifact, not the video" idea
  * as the render pipeline. --only reruns a single stage against whatever's
  * already on disk (ingest itself is never skippable — it IS the source of
- * the draftId when one isn't given).
+ * the draftId when one isn't given). "verify" self-checks the draft
+ * against its own reference clip (see verify.ts) — it can be skipped or
+ * re-run independently of "synthesize" via --only, same as any other stage.
  */
 
-const STAGES = ["ingest", "analyze", "synthesize"] as const;
+const STAGES = ["ingest", "analyze", "synthesize", "verify"] as const;
 type Stage = (typeof STAGES)[number];
 
 const parseArgs = (argv: string[]) => {
@@ -49,13 +52,13 @@ const parseArgs = (argv: string[]) => {
   }
   if (!args.url && !args.draft) {
     throw new Error(
-      "usage: npm run author -- --url <reelUrl> [--draft <draftId>] [--only ingest|analyze|synthesize]\n" +
+      "usage: npm run author -- --url <reelUrl> [--draft <draftId>] [--only ingest|analyze|synthesize|verify]\n" +
         "  (--draft without --url resumes an existing draft; --only needs an existing --draft)",
     );
   }
   // "ingest" is the entry stage — it CREATES the draft, so `--only ingest`
-  // needs no pre-existing --draft. "analyze"/"synthesize" resume from an
-  // earlier stage's artifact and have nothing to read without one.
+  // needs no pre-existing --draft. "analyze"/"synthesize"/"verify" resume
+  // from an earlier stage's artifact and have nothing to read without one.
   if (args.only && args.only !== "ingest" && !args.draft) {
     throw new Error(`--only ${args.only} requires --draft <draftId> (nothing to resume from otherwise)`);
   }
@@ -99,7 +102,7 @@ const main = async () => {
     : read("analysis", AnalysisSchema);
   if (wants("analyze")) {
     write("analysis", analysis);
-    console.log(`    ${analysis.words.length} words, ${analysis.shots.length} shots`);
+    console.log(`    ${analysis.words.length} words, ${analysis.shots.length} shots, ${analysis.denseFrames.length} dense frames`);
   }
   if (args.only === "analyze") return;
 
@@ -107,6 +110,17 @@ const main = async () => {
   if (wants("synthesize")) {
     write("draft", draft);
     console.log(`    "${draft.format.name}" (${draft.format.blocks.length} blocks) — ${draft.rationale}`);
+  }
+  if (args.only === "synthesize") return;
+
+  const verifyResult = wants("verify")
+    ? await verify(draftId, draft, analysis, ingested.sourcePath)
+    : read("verify", VerifyResultSchema);
+  if (wants("verify")) {
+    write("verify", verifyResult);
+    const scoreText = verifyResult.overallScore !== undefined ? verifyResult.overallScore.toFixed(3) : "n/a";
+    const measured = verifyResult.blocks.filter((b) => typeof b.ssim === "number").length;
+    console.log(`    overall score: ${scoreText} (${measured}/${verifyResult.blocks.length} blocks measured)`);
   }
 };
 

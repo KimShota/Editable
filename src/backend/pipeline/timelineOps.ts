@@ -648,6 +648,7 @@ const applyAddOverlay = (edl: Edl, op: Extract<TimelineOp, { type: "addOverlay" 
     y: op.y,
     width: op.width,
     height: op.height,
+    states: [],
   });
   recomputeVideoTrack(edl);
 };

@@ -486,12 +486,33 @@ export const assemble = (
           );
           continue;
         }
-        const defaultBox = defaultOverlayBox(
-          resolvedRef.component,
-          resolvedRef.params,
-          resolvedRef.mediaWidth,
-          resolvedRef.mediaHeight,
-        );
+        // An authored layout (the reference's own edit decision — e.g.
+        // three cards side by side) wins outright; otherwise fall back to
+        // the aspect-fit centered guess, exactly as before.
+        const box =
+          event.layout ??
+          defaultOverlayBox(resolvedRef.component, resolvedRef.params, resolvedRef.mediaWidth, resolvedRef.mediaHeight);
+
+        // Mid-lifetime state changes (e.g. blur->reveal, label recolor) —
+        // resolved through the SAME slot-indirection/timing machinery as
+        // the event's own base params/timing, just applied per-state. A
+        // state that can't resolve (unfilled slot) is dropped individually
+        // rather than cancelling the whole overlay.
+        const resolvedStates: { atSec: number; params: Record<string, unknown> }[] = [];
+        for (const state of event.states) {
+          const stateRef: ComponentRef = { component: ref.component, params: state.params };
+          const resolvedStateParams = resolveComponentParams(stateRef, textAnchorBlockId);
+          if ("skipReason" in resolvedStateParams) {
+            diagnostics.push(
+              `skipped a state on "${event.id}" in block "${block.id}" — ${resolvedStateParams.skipReason}`,
+            );
+            continue;
+          }
+          const stateAtSec = clamp(tlInSec + timingSec(state.trigger, block.id, blockDurationSec), atSec, endSec);
+          resolvedStates.push({ atSec: stateAtSec, params: resolvedStateParams.params });
+        }
+        resolvedStates.sort((a, b) => a.atSec - b.atSec);
+
         overlays.push({
           id: event.id,
           component: resolvedRef.component,
@@ -502,7 +523,8 @@ export const assemble = (
           // defaultOverlayBox); anything else (text, composite cards)
           // defaults full-frame as before. Either way, the editor's canvas
           // drag/resize is what the user narrows/moves it with afterward.
-          ...defaultBox,
+          ...box,
+          states: resolvedStates,
         });
       } else {
         const volume = resolvedRef.params.volume;
@@ -753,6 +775,7 @@ export const assemble = (
             tlInSec: tlInSec + atSec,
             tlOutSec: tlInSec + endSec,
             ...defaultOverlayBox("CutawayOverlay", {}, ecuAsset.width, ecuAsset.height),
+            states: [],
           });
         }
       }

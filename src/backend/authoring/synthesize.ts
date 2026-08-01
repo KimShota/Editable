@@ -4,7 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { authoringDir } from "../pipeline/paths";
 import { DraftSchema } from "./schemas";
-import { Analysis, Draft, Shot } from "./types";
+import { Analysis, Draft } from "./types";
 
 /**
  * Module A3 — Synthesize.
@@ -28,8 +28,12 @@ import { Analysis, Draft, Shot } from "./types";
 
 const DEFAULT_MODEL = "claude-opus-4-8";
 /** Bounds the multimodal call's cost/context against a long or fast-cut
- *  source — analyze() already caps at 40 shots; this caps further. */
-const MAX_FRAMES = 20;
+ *  source. Higher than analyze()'s old 20-shot-frame cap because the
+ *  candidate pool now includes analyze()'s denser sampling (frames caught
+ *  WITHIN a shot, not just at cuts) — a continuous-take reel with only 1-2
+ *  shots still needs enough frames to see overlay/label/blur choreography
+ *  that never coincides with a scene change. */
+const MAX_FRAMES = 40;
 const MAX_REPAIR_ROUNDS = 2;
 /** Shared by adaptive thinking and the output JSON — a full multi-block
  *  format (many slots/anchors/events) can run past 8000 tokens combined,
@@ -37,11 +41,33 @@ const MAX_REPAIR_ROUNDS = 2;
  *  instead of a clear "ran out of budget" one. */
 const MAX_TOKENS = 24000;
 
-/** Downsample evenly (not truncate) so late-video shots aren't dropped. */
-const selectFramesForSynthesis = (shots: Shot[]): Shot[] => {
-  if (shots.length <= MAX_FRAMES) return shots;
-  const stride = shots.length / MAX_FRAMES;
-  return Array.from({ length: MAX_FRAMES }, (_, i) => shots[Math.floor(i * stride)]);
+/** One frame worth showing the model, normalized from either a Shot
+ *  (labeled by its shot index/span) or a DenseFrame (labeled by timestamp
+ *  only) into one chronological list. */
+type SampledFrame = { atSec: number; frame: string; label: string };
+
+/** Merges shot-midpoint frames with analyze()'s denser sampling into one
+ *  chronological, deduped list, then downsamples evenly (not truncated) to
+ *  MAX_FRAMES so late-video material isn't silently dropped. */
+const selectFramesForSynthesis = (analysis: Analysis): SampledFrame[] => {
+  const shotFrames: SampledFrame[] = analysis.shots.map((s) => ({
+    atSec: (s.startSec + s.endSec) / 2,
+    frame: s.frame,
+    label: `Frame for shot ${s.index} (${s.startSec.toFixed(2)}s-${s.endSec.toFixed(2)}s):`,
+  }));
+  const denseFrames: SampledFrame[] = analysis.denseFrames.map((d) => ({
+    atSec: d.atSec,
+    frame: d.frame,
+    label: `Frame at ${d.atSec.toFixed(2)}s:`,
+  }));
+  const merged = [...shotFrames, ...denseFrames].sort((a, b) => a.atSec - b.atSec);
+  // A dense sample can land right on a shot's own midpoint — keep just one
+  // (shotFrames were spread first, so a tie keeps the shot-labeled entry,
+  // which is marginally more informative).
+  const deduped = merged.filter((f, i) => i === 0 || f.atSec - merged[i - 1].atSec > 0.05);
+  if (deduped.length <= MAX_FRAMES) return deduped;
+  const stride = deduped.length / MAX_FRAMES;
+  return Array.from({ length: MAX_FRAMES }, (_, i) => deduped[Math.floor(i * stride)]);
 };
 
 /**
@@ -104,12 +130,16 @@ EVENT (an overlay or sound effect that fires during a block; "id" must be unique
   "component": { "component": COMPONENT_NAME, "params": { ... } },
   "timing": TIMING,
   "durationSec": number,   // OPTIONAL — omit for an overlay that stays up until the block ends
-  "until": TIMING          // OPTIONAL — alternative to durationSec: ends exactly when another anchor/role fires
+  "until": TIMING,         // OPTIONAL — alternative to durationSec: ends exactly when another anchor/role fires
+  "layout": { "x": number, "y": number, "width": number, "height": number },  // OPTIONAL, overlays only — the on-canvas box as a FRACTION of the frame (0-1), MEASURED from the frames you were shown. Omit only when the reference truly centers the element with nothing else on screen at the same time. See the mandatory rule below.
+  "states": [ { "trigger": TIMING, "params": { ... } }, ... ]  // OPTIONAL, overlays only — additional param values that REPLACE this event's own params at a LATER moment in its lifetime (same component, no remount) — e.g. a card that starts blurred/white-labeled and becomes sharp/colored the instant the speaker names it. Each "trigger" is a TIMING (fixed or role — NOT sequence) tying the change to a specific word/anchor, exactly like the event's own "timing".
 }
+
+MANDATORY RULE — distinct simultaneous elements need distinct "layout": when the reference shows more than one image/card/element on screen AT THE SAME TIME in FIXED, DISTINCT positions (e.g. three logo cards side by side, a badge in a corner while another element is centered), EVERY one of those events MUST get its own "layout" box measured from the frame. Giving two simultaneous events the same box (or omitting "layout" on both) is a modeling mistake — they will render stacked on top of each other and unreadable. Only omit "layout" for an element that is truly alone on screen and should simply auto-center.
 
 COMPONENT_NAME — a CLOSED list; using anything else means the overlay silently never renders:
   overlays: "TextOverlay" (params: "textSlot" OR "textAnchor"+"textTemplate", "variant": "hook"|"resolve"|"title"|"description"|"cta", "fontSize"?),
-            "ImageOverlay" (params: "imageSlot": <a slot name of mediaType "image">),
+            "ImageOverlay" (params: "imageSlot": <a slot name of mediaType "image">, "label"? <a short text tag rendered ABOVE the image, e.g. "BAD"/"GOOD"/"GREAT">, "labelColor"? <hex color, sampled from the frame>, "blurred"? <true = renders as a blurred placeholder, for a card that starts blurred and is later revealed via a "states" entry setting "blurred": false>),
             "VideoOverlay" (params: "videoSlot": <a slot name of mediaType "video"> — a concurrent screen-recording/b-roll layered OVER the talking clip, muted),
             "StickerTitle" (params: "textAnchor"+"textTemplate" containing "{captured}", "fontSize"? — a rotated sticky-note title card),
             "SkillCard" (params: "textAnchor", "imageSlot"? — a named-thing card with a preview image below it)
@@ -130,32 +160,36 @@ Rules that WILL be checked and must hold:
 - every anchor "id" is unique within its block; every event "id" is unique across the whole format
 - a semantic anchor's "window.afterAnchor"/"beforeAnchor" must each name a LITERAL anchor id in the SAME block (never itself, never a semantic anchor, never cross-block)
 - every event's "timing.roleId" (and "until.roleId" if present) must name a real anchor id in that same block
+- every "states[].trigger.roleId" (when its "kind" is "role") must also name a real anchor id in that same block; "states[].trigger.kind" may never be "sequence"
 - "broll" blocks have no "anchors" and no "captions": true
 - only use the exact component names listed above, spelled exactly that way`;
 
-const buildSynthesisPrompt = (analysis: Analysis, selectedShots: Shot[]): string => {
+const buildSynthesisPrompt = (analysis: Analysis, selectedFrames: SampledFrame[]): string => {
   const wordLines = analysis.words
     .map((w) => `${w.startSec.toFixed(2)}-${w.endSec.toFixed(2)} ${JSON.stringify(w.text)}`)
     .join("\n");
   const shotLines = analysis.shots
     .map((s) => `shot ${s.index}: ${s.startSec.toFixed(2)}s-${s.endSec.toFixed(2)}s`)
     .join("\n");
-  const sampledNote =
-    selectedShots.length < analysis.shots.length
-      ? ` (a representative sample of ${selectedShots.length} is attached as images below, in order)`
-      : " (attached as images below, in order)";
+  const totalCandidates = analysis.shots.length + analysis.denseFrames.length;
+  const framesNote =
+    selectedFrames.length < totalCandidates
+      ? ` (downsampled evenly from ${totalCandidates} candidates)`
+      : "";
 
-  return `You are reverse-engineering a short-form vertical video (${analysis.durationSec.toFixed(1)}s, ${analysis.width}x${analysis.height}) into a reusable FORMAT for "Editable", a video-templating engine. A format captures a proven structure — the beats, the timing, the overlay/sfx moments — as data, so a different creator can film their OWN content into the same slots and get a similarly-paced video out, without inventing the structure themselves.
+  return `You are reverse-engineering a short-form vertical video (${analysis.durationSec.toFixed(1)}s, ${analysis.width}x${analysis.height}) into a reusable FORMAT for "Editable", a video-templating engine. A format captures a proven structure — the beats, the timing, the overlay/sfx moments, AND their exact on-screen positions/animations — as data, so a different creator can film their OWN content into the same slots and get a video out that looks EXACTLY like this reference, just with their own footage.
 
 ${FORMAT_CONTRACT}
 
 TRANSCRIPT — one word per line, start-end seconds relative to the clip:
 ${wordLines || "(no speech detected — this may be a silent/music-driven format; author it with mostly \"broll\" blocks)"}
 
-SHOTS — ${analysis.shots.length} scene-cut boundaries detected${sampledNote}:
+SHOTS — ${analysis.shots.length} scene-cut boundaries detected:
 ${shotLines}
 
-Study the transcript for the spoken structure (a hook line, then each beat, then a call to action) and the frames for ANY on-screen text, memes, screen-recordings, title cards, or overlays and when they appear relative to the shots/transcript — that visual layer is exactly what "events" should capture.
+FRAMES — ${selectedFrames.length} frames attached below, in chronological order${framesNote}. These are sampled MUCH more densely than the shot list above specifically so you can see choreography that happens WITHIN a single shot — a card popping in, a blurred placeholder becoming sharp, a label changing color — not just at hard cuts. Study consecutive frames for exactly this: when an element FIRST appears, where it sits (measure its box as a fraction of the frame for "layout"), and any moment its look changes (blur/color/label) that "states" should capture, tied to the word being spoken at that instant.
+
+Study the transcript for the spoken structure (a hook line, then each beat, then a call to action) and the frames for ANY on-screen text, memes, screen-recordings, title cards, or overlays, exactly where they sit on screen, and when/how they appear or change relative to the shots/transcript — that visual layer is exactly what "events" (and their "layout"/"states") should capture.
 
 Respond with ONLY the JSON object described above — no markdown code fences, no other text before or after it.`;
 };
@@ -199,24 +233,21 @@ export const synthesize = async (draftId: string, analysis: Analysis): Promise<D
   const model = process.env.EDITABLE_LLM_MODEL || DEFAULT_MODEL;
   const dir = authoringDir(draftId);
 
-  const selectedShots = selectFramesForSynthesis(analysis.shots);
-  const imageBlocks: Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam> = selectedShots.flatMap(
-    (shot) => {
-      const framePath = path.join(dir, shot.frame);
+  const selectedFrames = selectFramesForSynthesis(analysis);
+  const imageBlocks: Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam> = selectedFrames.flatMap(
+    (f) => {
+      const framePath = path.join(dir, f.frame);
       if (!fs.existsSync(framePath)) return [];
       const data = fs.readFileSync(framePath).toString("base64");
       return [
-        {
-          type: "text",
-          text: `Frame for shot ${shot.index} (${shot.startSec.toFixed(2)}s-${shot.endSec.toFixed(2)}s):`,
-        },
+        { type: "text", text: f.label },
         { type: "image", source: { type: "base64", media_type: "image/jpeg", data } },
       ];
     },
   );
 
   let content: Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam> = [
-    { type: "text", text: buildSynthesisPrompt(analysis, selectedShots) },
+    { type: "text", text: buildSynthesisPrompt(analysis, selectedFrames) },
     ...imageBlocks,
   ];
 

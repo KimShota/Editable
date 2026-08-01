@@ -167,6 +167,44 @@ const Segment: React.FC<{
   );
 };
 
+/** One overlay's own lifetime — a plain function of (frame, overlay), same
+ *  requirement every other per-frame render here already meets. Needs its
+ *  own component (not inline JSX inside .map()) purely so it can call
+ *  useCurrentFrame()/useVideoConfig() per React's hook rules, same reason
+ *  Segment/FgLayer are their own components above. Merges overlay.params
+ *  with every state whose atSec has passed (assemble.ts pre-sorts
+ *  ascending; later states win) — mirrors Captions.tsx's own absolute-time
+ *  window lookup. overlay.states is always [] for a format that doesn't
+ *  author any, so this is a no-op loop and params===overlay.params for
+ *  every overlay that exists today. */
+const OverlayInstance: React.FC<{ overlay: Edl["overlays"][number] }> = ({ overlay }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const tSec = overlay.tlInSec + frame / fps;
+  let params = overlay.params;
+  for (const s of overlay.states) {
+    if (tSec >= s.atSec) params = { ...params, ...s.params };
+  }
+  const Component = OVERLAY_COMPONENTS[overlay.component];
+  if (!Component) {
+    console.warn(`EdlVideo: unknown overlay component "${overlay.component}"`);
+    return null;
+  }
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: `${overlay.x * 100}%`,
+        top: `${overlay.y * 100}%`,
+        width: `${overlay.width * 100}%`,
+        height: `${overlay.height * 100}%`,
+      }}
+    >
+      <Component {...params} />
+    </div>
+  );
+};
+
 /** CSS approximation of the StyleProfile grade (see schemas.ts's GradeSchema
  *  doc comment) — cheap, GPU-free color-matching applied uniformly across
  *  every video segment (real footage and generated inserts alike), unlike
@@ -236,33 +274,16 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
           </Sequence>
         ))}
 
-      {edl.overlays.map((overlay) => {
-        const Component = OVERLAY_COMPONENTS[overlay.component];
-        if (!Component) {
-          console.warn(`EdlVideo: unknown overlay component "${overlay.component}"`);
-          return null;
-        }
-        return (
-          <Sequence
-            key={overlay.id}
-            from={toFrames(overlay.tlInSec)}
-            durationInFrames={toFrames(overlay.tlOutSec) - toFrames(overlay.tlInSec)}
-            name={`overlay:${overlay.id}`}
-          >
-            <div
-              style={{
-                position: "absolute",
-                left: `${overlay.x * 100}%`,
-                top: `${overlay.y * 100}%`,
-                width: `${overlay.width * 100}%`,
-                height: `${overlay.height * 100}%`,
-              }}
-            >
-              <Component {...overlay.params} />
-            </div>
-          </Sequence>
-        );
-      })}
+      {edl.overlays.map((overlay) => (
+        <Sequence
+          key={overlay.id}
+          from={toFrames(overlay.tlInSec)}
+          durationInFrames={toFrames(overlay.tlOutSec) - toFrames(overlay.tlInSec)}
+          name={`overlay:${overlay.id}`}
+        >
+          <OverlayInstance overlay={overlay} />
+        </Sequence>
+      ))}
 
       {edl.captions.length > 0 && (
         <Captions

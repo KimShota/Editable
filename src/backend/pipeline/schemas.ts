@@ -313,6 +313,32 @@ export const EventTimingSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+/** Fixed on-canvas geometry authored for ONE overlay event — a fraction of
+ *  the frame, same convention as EdlOverlaySchema's own x/y/width/height.
+ *  Present = the reference's OWN edit decided this box (e.g. three rank
+ *  cards side by side, not stacked) — assemble.ts uses it INSTEAD OF
+ *  defaultOverlayBox's auto-fit centered guess. Absent = today's exact
+ *  behavior, zero regression for any format that doesn't author it. */
+export const EventLayoutSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number().positive(),
+  height: z.number().positive(),
+});
+
+/** One additional param-patch applied partway through an event's own
+ *  lifetime — e.g. a card that starts `{blurred:true}` and becomes
+ *  `{blurred:false, labelColor:"#16a34a"}` the moment the speaker names it.
+ *  `trigger` reuses the EXACT SAME Timing vocabulary an event's own
+ *  `timing` already uses (fixed/role only — "sequence" has no meaning for
+ *  a single mid-lifetime change, rejected in FormatSchema's superRefine).
+ *  `params` goes through the same slot-indirection (imageSlot/textAnchor/
+ *  etc) as any event's base params — see assemble.ts. */
+export const FormatEventStateSchema = z.object({
+  trigger: EventTimingSchema,
+  params: z.record(z.string(), z.unknown()),
+});
+
 /** An overlay or sound-effect event authored in the format. */
 export const FormatEventSchema = z.object({
   id: z.string(),
@@ -327,6 +353,10 @@ export const FormatEventSchema = z.object({
    * Takes precedence over durationSec.
    */
   until: EventTimingSchema.optional(),
+  /** See EventLayoutSchema. Overlay events only — meaningless for sfx. */
+  layout: EventLayoutSchema.optional(),
+  /** See FormatEventStateSchema. Overlay events only — meaningless for sfx. */
+  states: z.array(FormatEventStateSchema).default([]),
 });
 
 // ---------------------------------------------------------------------------
@@ -721,6 +751,21 @@ export const FormatSchema = z
             message: `event "${event.id}": unknown "until" anchor "${event.until.roleId}" in block "${block.id}"`,
           });
         }
+        for (const state of event.states) {
+          if (state.trigger.kind === "sequence") {
+            ctx.addIssue({
+              code: "custom",
+              message: `event "${event.id}": a state's trigger cannot be "sequence" (no sibling-count semantics for a mid-event change)`,
+            });
+            continue;
+          }
+          if (state.trigger.kind === "role" && !anchorIds.has(state.trigger.roleId)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `event "${event.id}": unknown anchor "${state.trigger.roleId}" in a state trigger, block "${block.id}"`,
+            });
+          }
+        }
       }
     }
 
@@ -951,6 +996,18 @@ export const EdlOverlaySchema = z.object({
   y: z.number().default(0),
   width: z.number().positive().default(1),
   height: z.number().positive().default(1),
+  /** Resolved (absolute-time) form of FormatEventStateSchema — ascending by
+   *  atSec (assemble.ts sorts before pushing). EdlVideo.tsx merges these
+   *  into `params` at render time (later atSec wins) as the current frame's
+   *  tSec passes each one. Empty = today's exact behavior everywhere. */
+  states: z
+    .array(
+      z.object({
+        atSec: z.number(),
+        params: z.record(z.string(), z.unknown()).default({}),
+      }),
+    )
+    .default([]),
 });
 
 export const EdlSfxSchema = z.object({

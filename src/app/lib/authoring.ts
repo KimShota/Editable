@@ -2,8 +2,8 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { DraftSchema } from "@backend/authoring/schemas";
-import { Draft } from "@backend/authoring/types";
+import { DraftSchema, VerifyResultSchema } from "@backend/authoring/schemas";
+import { Draft, VerifyResult } from "@backend/authoring/types";
 import { authoringDir, repoRoot } from "@backend/pipeline/paths";
 
 /**
@@ -20,7 +20,7 @@ const isValidDraftId = (draftId: string): boolean => /^[a-zA-Z0-9._-]+$/.test(dr
 export const draftExists = (draftId: string): boolean =>
   isValidDraftId(draftId) && fs.existsSync(authoringDir(draftId));
 
-export type AuthoringStage = "ingest" | "analyze" | "synthesize";
+export type AuthoringStage = "ingest" | "analyze" | "synthesize" | "verify";
 
 export type AuthoringStatus =
   | { status: "idle" }
@@ -52,6 +52,15 @@ export const readDraft = (draftId: string): Draft => {
     throw new Error(`draft.json for "${draftId}" failed validation:\n${z.prettifyError(parsed.error)}`);
   }
   return parsed.data;
+};
+
+const verifyJsonPath = (draftId: string): string => path.join(authoringDir(draftId), "verify.json");
+
+export const readVerifyResult = (draftId: string): VerifyResult | undefined => {
+  const file = verifyJsonPath(draftId);
+  if (!fs.existsSync(file)) return undefined;
+  const parsed = VerifyResultSchema.safeParse(JSON.parse(fs.readFileSync(file, "utf8")));
+  return parsed.success ? parsed.data : undefined;
 };
 
 const ingestSourceUrl = (draftId: string): string => {

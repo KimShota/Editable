@@ -1,0 +1,1476 @@
+{
+  "id": "tier-ranked-tools-per-usecase",
+  "name": "BAD / GOOD / GREAT [Tools] For Every [Use Case]",
+  "niche": "any niche where options can be ranked worst-to-best across several use cases (AI tools, apps, gear, tactics)",
+  "description": "For each use case the creator ranks three options worst-to-best while three top-of-frame cards (BAD/GOOD/GREAT) reveal their logos one at a time in sync with the speech, then a Follow + comment-keyword CTA.",
+  "fps": 30,
+  "width": 720,
+  "height": 1280,
+  "captionStyle": {
+    "component": "Captions",
+    "params": {
+      "position": "lowerThird"
+    }
+  },
+  "musicVolume": 0.5,
+  "sharedSlots": [
+    {
+      "name": "cardPop",
+      "mediaType": "audio",
+      "required": false,
+      "instructions": "A short, clean 'pop'/'whoosh' UI sound that fires each time a ranking card reveals its logo. Keep it snappy (<250ms) so three can fire in quick succession."
+    }
+  ],
+  "blocks": [
+    {
+      "id": "usecase-research",
+      "title": "Use Case 1 (Hook)",
+      "kind": "voice",
+      "videoSlot": "clip1",
+      "slots": [
+        {
+          "name": "clip1",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Talking-head, centered, looking at camera with empty space above your head. Open by naming the first use case as a question, e.g. 'For research?', then rank three options worst-to-best: 'this is bad, this is okay, this one's amazing.' Point up-left, up-center, up-right in time with each so the cards feel tied to your gesture."
+        },
+        {
+          "name": "badImg1",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the WORST/most basic option for this use case on a clean white rounded card (e.g. the outdated default everyone already uses)."
+        },
+        {
+          "name": "goodImg1",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GOOD/mainstream option for this use case on a clean white rounded card."
+        },
+        {
+          "name": "greatImg1",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GREAT/secret best option for this use case on a clean white rounded card — this is the payoff pick."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "cat",
+          "kind": "literal",
+          "phrases": [
+            "For"
+          ],
+          "capture": true,
+          "captureUntil": "this",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "research-bad-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "badImg1",
+              "label": "BAD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.075,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 0.9
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#C0453A"
+              }
+            }
+          ]
+        },
+        {
+          "id": "research-good-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "goodImg1",
+              "label": "GOOD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.375,
+            "y": 0.075,
+            "width": 0.27,
+            "height": 0.145
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 1.75
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#E0A81E"
+              }
+            }
+          ]
+        },
+        {
+          "id": "research-great-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "greatImg1",
+              "label": "GREAT",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.665,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 2.7
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#3BA55D"
+              }
+            }
+          ]
+        },
+        {
+          "id": "research-bad-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 0.9
+          },
+          "states": []
+        },
+        {
+          "id": "research-good-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 1.75
+          },
+          "states": []
+        },
+        {
+          "id": "research-great-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 2.7
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "usecase-2",
+      "title": "Use Case 2",
+      "kind": "voice",
+      "videoSlot": "clip2",
+      "slots": [
+        {
+          "name": "clip2",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Same framing. Name the second use case as a question, e.g. 'For writing?', then rank worst-to-best: 'this is bad, this is good, this one's great.'"
+        },
+        {
+          "name": "badImg2",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the WORST option for this use case on a white rounded card."
+        },
+        {
+          "name": "goodImg2",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GOOD option for this use case on a white rounded card."
+        },
+        {
+          "name": "greatImg2",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GREAT best option for this use case on a white rounded card."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "cat",
+          "kind": "literal",
+          "phrases": [
+            "For"
+          ],
+          "capture": true,
+          "captureUntil": "this",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "uc2-bad-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "badImg2",
+              "label": "BAD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.075,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 0.75
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#C0453A"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc2-good-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "goodImg2",
+              "label": "GOOD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.375,
+            "y": 0.075,
+            "width": 0.27,
+            "height": 0.145
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 1.4
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#E0A81E"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc2-great-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "greatImg2",
+              "label": "GREAT",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.665,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 2.2
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#3BA55D"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc2-bad-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 0.75
+          },
+          "states": []
+        },
+        {
+          "id": "uc2-good-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 1.4
+          },
+          "states": []
+        },
+        {
+          "id": "uc2-great-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 2.2
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "usecase-3",
+      "title": "Use Case 3",
+      "kind": "voice",
+      "videoSlot": "clip3",
+      "slots": [
+        {
+          "name": "clip3",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Same framing. Name the third use case as a question, e.g. 'For coding?', then rank worst-to-best: 'this is terrible, this is good, this one's insane.'"
+        },
+        {
+          "name": "badImg3",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the WORST option for this use case on a white rounded card."
+        },
+        {
+          "name": "goodImg3",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GOOD option for this use case on a white rounded card."
+        },
+        {
+          "name": "greatImg3",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GREAT best option for this use case on a white rounded card."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "cat",
+          "kind": "literal",
+          "phrases": [
+            "For"
+          ],
+          "capture": true,
+          "captureUntil": "this",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "uc3-bad-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "badImg3",
+              "label": "BAD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.075,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 0.7
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#C0453A"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc3-good-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "goodImg3",
+              "label": "GOOD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.375,
+            "y": 0.075,
+            "width": 0.27,
+            "height": 0.145
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 1.8
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#E0A81E"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc3-great-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "greatImg3",
+              "label": "GREAT",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.665,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 2.65
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#3BA55D"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc3-bad-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 0.7
+          },
+          "states": []
+        },
+        {
+          "id": "uc3-good-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 1.8
+          },
+          "states": []
+        },
+        {
+          "id": "uc3-great-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 2.65
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "usecase-4",
+      "title": "Use Case 4",
+      "kind": "voice",
+      "videoSlot": "clip4",
+      "slots": [
+        {
+          "name": "clip4",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Same framing. Name the fourth use case as a question, e.g. 'For content creation?', then rank worst-to-best: 'this is trash, this one's decent, this one will make you go viral.'"
+        },
+        {
+          "name": "badImg4",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the WORST option for this use case on a white rounded card."
+        },
+        {
+          "name": "goodImg4",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GOOD option for this use case on a white rounded card."
+        },
+        {
+          "name": "greatImg4",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GREAT best option for this use case on a white rounded card."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "cat",
+          "kind": "literal",
+          "phrases": [
+            "For"
+          ],
+          "capture": true,
+          "captureUntil": "this",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "uc4-bad-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "badImg4",
+              "label": "BAD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.075,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 1.05
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#C0453A"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc4-good-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "goodImg4",
+              "label": "GOOD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.375,
+            "y": 0.075,
+            "width": 0.27,
+            "height": 0.145
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 1.8
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#E0A81E"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc4-great-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "greatImg4",
+              "label": "GREAT",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.665,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 2.7
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#3BA55D"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc4-bad-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 1.05
+          },
+          "states": []
+        },
+        {
+          "id": "uc4-good-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 1.8
+          },
+          "states": []
+        },
+        {
+          "id": "uc4-great-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 2.7
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "usecase-5",
+      "title": "Use Case 5",
+      "kind": "voice",
+      "videoSlot": "clip5",
+      "slots": [
+        {
+          "name": "clip5",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Same framing. Name the fifth use case as a question, e.g. 'For building websites and apps?', then rank worst-to-best: 'this is terrible, this is okay, this one is insane.'"
+        },
+        {
+          "name": "badImg5",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the WORST option for this use case on a white rounded card."
+        },
+        {
+          "name": "goodImg5",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GOOD option for this use case on a white rounded card."
+        },
+        {
+          "name": "greatImg5",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GREAT best option for this use case on a white rounded card."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "cat",
+          "kind": "literal",
+          "phrases": [
+            "For"
+          ],
+          "capture": true,
+          "captureUntil": "this",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "uc5-bad-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "badImg5",
+              "label": "BAD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.075,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 1.3
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#C0453A"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc5-good-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "goodImg5",
+              "label": "GOOD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.375,
+            "y": 0.075,
+            "width": 0.27,
+            "height": 0.145
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 2.3
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#E0A81E"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc5-great-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "greatImg5",
+              "label": "GREAT",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.665,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 3.3
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#3BA55D"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc5-bad-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 1.3
+          },
+          "states": []
+        },
+        {
+          "id": "uc5-good-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 2.3
+          },
+          "states": []
+        },
+        {
+          "id": "uc5-great-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 3.3
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "usecase-6",
+      "title": "Use Case 6 (Payoff)",
+      "kind": "voice",
+      "videoSlot": "clip6",
+      "slots": [
+        {
+          "name": "clip6",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Same framing. Name the final, highest-stakes use case as a question, e.g. 'For making money with AI?', then rank worst-to-best with an emphatic finish: 'this is terrible, this one's good, but this one will make you rich.'"
+        },
+        {
+          "name": "badImg6",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the WORST option for this use case on a white rounded card."
+        },
+        {
+          "name": "goodImg6",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GOOD option for this use case on a white rounded card."
+        },
+        {
+          "name": "greatImg6",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Logo of the GREAT best option for this use case on a white rounded card — your strongest recommendation."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "cat",
+          "kind": "literal",
+          "phrases": [
+            "For"
+          ],
+          "capture": true,
+          "captureUntil": "this",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "uc6-bad-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "badImg6",
+              "label": "BAD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.075,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 1.3
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#C0453A"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc6-good-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "goodImg6",
+              "label": "GOOD",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.375,
+            "y": 0.075,
+            "width": 0.27,
+            "height": 0.145
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 2.4
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#E0A81E"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc6-great-card",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "greatImg6",
+              "label": "GREAT",
+              "labelColor": "#9AA0A6",
+              "blurred": true
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.665,
+            "y": 0.115,
+            "width": 0.26,
+            "height": 0.135
+          },
+          "states": [
+            {
+              "trigger": {
+                "kind": "role",
+                "roleId": "cat",
+                "edge": "start",
+                "offsetSec": 3.5
+              },
+              "params": {
+                "blurred": false,
+                "labelColor": "#3BA55D"
+              }
+            }
+          ]
+        },
+        {
+          "id": "uc6-bad-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 1.3
+          },
+          "states": []
+        },
+        {
+          "id": "uc6-good-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 2.4
+          },
+          "states": []
+        },
+        {
+          "id": "uc6-great-pop",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "cardPop",
+              "volume": 0.5
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cat",
+            "edge": "start",
+            "offsetSec": 3.5
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "cta",
+      "title": "CTA",
+      "kind": "voice",
+      "videoSlot": "clip7",
+      "slots": [
+        {
+          "name": "clip7",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Hard cut to a clean talking-head with no cards above your head. Deliver the CTA: 'Follow me and comment [keyword], and I'll send you [your lead magnet].' Keep hands gesturing naturally."
+        },
+        {
+          "name": "followText",
+          "mediaType": "text",
+          "required": false,
+          "instructions": "Leave as 'Follow' — this recreates the platform Follow button that taps itself in the reference."
+        },
+        {
+          "name": "followingText",
+          "mediaType": "text",
+          "required": false,
+          "instructions": "Leave as 'Following' — this is the post-tap state the button switches to."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "followCue",
+          "kind": "literal",
+          "phrases": [
+            "Follow me",
+            "Follow"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        },
+        {
+          "id": "commentCue",
+          "kind": "literal",
+          "phrases": [
+            "comment",
+            "and comment"
+          ],
+          "capture": true,
+          "captureUntil": "and",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 1
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "cta-follow-btn",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "followText",
+              "variant": "cta"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "followCue",
+            "edge": "start",
+            "offsetSec": 0.2
+          },
+          "durationSec": 1.6,
+          "layout": {
+            "x": 0.29,
+            "y": 0.135,
+            "width": 0.42,
+            "height": 0.08
+          },
+          "states": []
+        },
+        {
+          "id": "cta-following-btn",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "followingText",
+              "variant": "cta"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "followCue",
+            "edge": "start",
+            "offsetSec": 1.8
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.135,
+            "width": 0.42,
+            "height": 0.08
+          },
+          "states": []
+        }
+      ]
+    }
+  ]
+}

@@ -13,7 +13,7 @@ import { draftFormatExists, writeAuthoringStatus, AuthoringStage } from "../../l
  * comfortable to hold open as a single request.
  */
 
-const STAGE_LINE = /^ {2}✔ (ingest|analyze|synthesize)/;
+const STAGE_LINE = /^ {2}✔ (ingest|analyze|synthesize|verify)/;
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);

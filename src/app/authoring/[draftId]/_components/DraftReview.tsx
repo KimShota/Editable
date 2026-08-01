@@ -3,20 +3,25 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Format } from "@backend/pipeline/types";
+import type { VerifyResult } from "@backend/authoring/types";
 import { Button, Card, Pill } from "../../../_components/ui";
 
 type AuthoringStatus =
   | { status: "idle" }
-  | { status: "running"; stage: "ingest" | "analyze" | "synthesize"; startedAt: string }
+  | { status: "running"; stage: "ingest" | "analyze" | "synthesize" | "verify"; startedAt: string }
   | { status: "done"; startedAt: string; finishedAt: string }
   | { status: "error"; startedAt: string; finishedAt: string; error: string };
 
-type StatusResponse = AuthoringStatus & { draft?: { rationale: string; sourceUrl: string; format: Format } };
+type StatusResponse = AuthoringStatus & {
+  draft?: { rationale: string; sourceUrl: string; format: Format };
+  verify?: VerifyResult;
+};
 
 const STAGE_LABEL: Record<string, string> = {
   ingest: "Downloading the reel…",
   analyze: "Transcribing and sampling frames…",
   synthesize: "Reverse-engineering the structure (this is the slow one)…",
+  verify: "Self-checking the draft against the reference (rendering + comparing)…",
 };
 
 const POLL_MS = 2000;
@@ -76,7 +81,9 @@ export function DraftReview({ draftId }: { draftId: string }) {
 
   if (!format) return <p className="text-[color:var(--ink-dim)]">Loading draft…</p>;
 
-  return <ReviewForm draftId={draftId} format={format} setFormat={setFormat} rationale={rationale} />;
+  return (
+    <ReviewForm draftId={draftId} format={format} setFormat={setFormat} rationale={rationale} verify={resp.verify} />
+  );
 }
 
 function ReviewForm({
@@ -84,11 +91,13 @@ function ReviewForm({
   format,
   setFormat,
   rationale,
+  verify,
 }: {
   draftId: string;
   format: Format;
   setFormat: (f: Format) => void;
   rationale: string;
+  verify?: VerifyResult;
 }) {
   const router = useRouter();
   const [showRaw, setShowRaw] = useState(false);
@@ -150,6 +159,8 @@ function ReviewForm({
         <p className="mb-1 text-[11px] tracking-[0.2em] text-[color:var(--accent)] uppercase">What we found</p>
         <p className="text-sm leading-relaxed text-[color:var(--ink-dim)]">{rationale}</p>
       </Card>
+
+      {verify && <VerifyCard verify={verify} />}
 
       <Card className="flex flex-col gap-4 p-6">
         <Field label="Format id (kebab-case, must be unique)" value={format.id} onChange={(v) => patchField("id", v)} />
@@ -267,6 +278,55 @@ function ReviewForm({
         </Button>
       </div>
     </div>
+  );
+}
+
+/** Shows the self-verification score (see verify.ts) — a render of the
+ *  draft against the reference clip's OWN footage, frame-compared back
+ *  against the reference itself. This is a measured signal, not a
+ *  pass/fail gate: no threshold is asserted here (see verify.ts's own doc
+ *  comment on why one isn't hardcoded yet) — the reviewer reads the score
+ *  and per-block breakdown and decides whether to trust the draft, without
+ *  needing to manually reposition/resize/retime anything themselves. */
+function VerifyCard({ verify }: { verify: VerifyResult }) {
+  return (
+    <Card className="p-6">
+      <div className="mb-2 flex items-center gap-2">
+        <p className="text-[11px] tracking-[0.2em] text-[color:var(--accent)] uppercase">Self-verification</p>
+        {verify.overallScore !== undefined && <Pill>min SSIM {verify.overallScore.toFixed(3)}</Pill>}
+      </div>
+      <p className="mb-3 text-xs text-[color:var(--ink-dim)]">
+        Rendered this draft using the reference reel&apos;s own footage as the &quot;user&quot;, then compared it back
+        against the reference frame-by-frame — a check that the choreography (positions, timing, reveals) actually
+        reproduces, not just a human eyeballing it.
+      </p>
+      <ul className="flex flex-col gap-1">
+        {verify.blocks.map((b) => (
+          <li key={b.blockId} className="flex items-center gap-2 text-xs">
+            <span className="font-mono text-[color:var(--ink)]">{b.blockId}</span>
+            {b.ssim !== undefined ? (
+              <span className="text-[color:var(--ink-dim)]">ssim {b.ssim.toFixed(3)}</span>
+            ) : (
+              <span className="text-[color:var(--ink-faint)]">skipped — {b.skipped}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {verify.diagnostics.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs text-[color:var(--ink-dim)]">
+            {verify.diagnostics.length} diagnostic{verify.diagnostics.length === 1 ? "" : "s"}
+          </summary>
+          <ul className="mt-2 flex flex-col gap-1">
+            {verify.diagnostics.map((d, i) => (
+              <li key={i} className="text-[11px] text-[color:var(--ink-faint)]">
+                {d}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </Card>
   );
 }
 

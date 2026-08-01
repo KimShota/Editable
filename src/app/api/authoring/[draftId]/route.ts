@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { draftExists, draftFormatExists, readAuthoringStatus, readDraft } from "../../../lib/authoring";
+import { draftExists, draftFormatExists, readAuthoringStatus, readDraft, readVerifyResult } from "../../../lib/authoring";
 
 /** Polled by the review UI while authoring runs; once done, also carries
  *  the draft itself so the client doesn't need a second round-trip. */
@@ -10,5 +10,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ draftId
   }
   const status = readAuthoringStatus(draftId);
   const draft = draftFormatExists(draftId) ? readDraft(draftId) : undefined;
-  return NextResponse.json({ ...status, draft });
+  const verify = readVerifyResult(draftId);
+  return NextResponse.json({ ...status, draft, verify });
 }

@@ -99,14 +99,24 @@
           "component": {
             "component": "ImageOverlay",
             "params": {
-              "imageSlot": "c1_bad"
+              "imageSlot": "c1_bad",
+              "label": "BAD",
+              "labelColor": "#ffffff",
+              "blurred": true
             }
           },
           "timing": {
             "kind": "fixed",
             "anchor": "blockStart",
             "offsetSec": 0.1
-          }
+          },
+          "layout": { "x": 0.09, "y": 0.17, "width": 0.25, "height": 0.14 },
+          "states": [
+            {
+              "trigger": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 1.3 },
+              "params": { "labelColor": "#ef4444", "blurred": false }
+            }
+          ]
         },
         {
           "id": "e1-good",
@@ -114,14 +124,24 @@
           "component": {
             "component": "ImageOverlay",
             "params": {
-              "imageSlot": "c1_good"
+              "imageSlot": "c1_good",
+              "label": "GOOD",
+              "labelColor": "#ffffff",
+              "blurred": true
             }
           },
           "timing": {
             "kind": "fixed",
             "anchor": "blockStart",
             "offsetSec": 0.1
-          }
+          },
+          "layout": { "x": 0.375, "y": 0.125, "width": 0.25, "height": 0.16 },
+          "states": [
+            {
+              "trigger": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 2.2 },
+              "params": { "labelColor": "#eab308", "blurred": false }
+            }
+          ]
         },
         {
           "id": "e1-great",
@@ -129,14 +149,24 @@
           "component": {
             "component": "ImageOverlay",
             "params": {
-              "imageSlot": "c1_great"
+              "imageSlot": "c1_great",
+              "label": "GREAT",
+              "labelColor": "#ffffff",
+              "blurred": true
             }
           },
           "timing": {
             "kind": "fixed",
             "anchor": "blockStart",
             "offsetSec": 0.1
-          }
+          },
+          "layout": { "x": 0.66, "y": 0.17, "width": 0.25, "height": 0.14 },
+          "states": [
+            {
+              "trigger": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 3.1 },
+              "params": { "labelColor": "#22c55e", "blurred": false }
+            }
+          ]
         },
         {
           "id": "e1-pop",
