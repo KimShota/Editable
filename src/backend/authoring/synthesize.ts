@@ -31,7 +31,11 @@ const DEFAULT_MODEL = "claude-opus-4-8";
  *  source — analyze() already caps at 40 shots; this caps further. */
 const MAX_FRAMES = 20;
 const MAX_REPAIR_ROUNDS = 2;
-const MAX_TOKENS = 8000;
+/** Shared by adaptive thinking and the output JSON — a full multi-block
+ *  format (many slots/anchors/events) can run past 8000 tokens combined,
+ *  which truncates the JSON mid-array and fails with a raw parse error
+ *  instead of a clear "ran out of budget" one. */
+const MAX_TOKENS = 24000;
 
 /** Downsample evenly (not truncate) so late-video shots aren't dropped. */
 const selectFramesForSynthesis = (shots: Shot[]): Shot[] => {
@@ -217,12 +221,17 @@ export const synthesize = async (draftId: string, analysis: Analysis): Promise<D
 
   for (let attempt = 0; attempt <= MAX_REPAIR_ROUNDS; attempt++) {
     const isLastAttempt = attempt === MAX_REPAIR_ROUNDS;
-    const response = await client.messages.create({
-      model,
-      max_tokens: MAX_TOKENS,
-      thinking: { type: "adaptive" },
-      messages: [{ role: "user", content }],
-    });
+    // Streamed, not create(): the SDK requires it once a request may run
+    // past 10 minutes, which a MAX_TOKENS-sized adaptive-thinking response
+    // from a slower model can.
+    const response = await client.messages
+      .stream({
+        model,
+        max_tokens: MAX_TOKENS,
+        thinking: { type: "adaptive" },
+        messages: [{ role: "user", content }],
+      })
+      .finalMessage();
     const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
     if (!textBlock) {
       if (isLastAttempt) throw new Error("synthesize: model response had no text content");
@@ -230,6 +239,22 @@ export const synthesize = async (draftId: string, analysis: Analysis): Promise<D
       continue;
     }
     const rawText = textBlock.text;
+
+    if (response.stop_reason === "max_tokens") {
+      if (isLastAttempt) {
+        throw new Error(
+          `synthesize: response was cut off at the ${MAX_TOKENS}-token budget before the JSON finished — ` +
+            "the format was too large to fit alongside the model's reasoning.",
+        );
+      }
+      content = [
+        {
+          type: "text",
+          text: "Your previous response was cut off before the JSON finished (ran out of output budget). Respond again with ONLY the complete JSON object, keeping it as concise as possible — trim rationale length and any verbose instructions text if needed, but keep every required field.",
+        },
+      ];
+      continue;
+    }
 
     let rawParsed: unknown;
     try {
