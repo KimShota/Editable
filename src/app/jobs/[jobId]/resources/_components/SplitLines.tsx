@@ -17,7 +17,8 @@ type TakeSplitBlock = {
    *  TakeSplit.clipPath doc comment. */
   clipPath?: string;
 };
-type SplitState = { durationSec: number; blocks: TakeSplitBlock[] };
+type SplitWord = { text: string; startSec: number; endSec: number };
+type SplitState = { durationSec: number; blocks: TakeSplitBlock[]; words: SplitWord[] };
 
 /** Converts between COMBINED-file time (what every span's srcInSec/
  *  srcOutSec is always in, regardless of clip count) and one original
@@ -105,6 +106,17 @@ type PanelSegment = {
   block: { id: string; title: string };
   globalIndex: number;
   span: TakeSplitBlock;
+  /** What whisper actually transcribed inside this segment's own span —
+   *  NOT the full canonical script line (block.title), which is the same
+   *  text in every panel a block appears in and so can't tell two panels
+   *  apart on its own. A multi-clip take splits one line's words across
+   *  several clips (see splitTake.ts's splitMultiClipTake), so the same
+   *  line can read "Writing emails," in one panel and "Claude." in
+   *  another — showing what THIS clip actually says is what makes that
+   *  visible instead of both panels looking like duplicates of each
+   *  other. Empty for a confidence-0 placeholder span with no matched
+   *  words at all. */
+  heardText: string;
 };
 
 /**
@@ -264,9 +276,14 @@ function ClipPanel({
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/15 text-xs font-bold text-[color:var(--ink-dim)]">
                   {seg.globalIndex + 1}
                 </span>
-                <p className="text-sm text-[color:var(--ink)]">{seg.block.title}</p>
+                <div className="flex min-w-0 flex-col">
+                  <p className="text-sm text-[color:var(--ink)]">
+                    {seg.heardText || <span className="italic text-[color:var(--ink-dim)]">(no words detected)</span>}
+                  </p>
+                  <p className="truncate text-xs text-[color:var(--ink-dim)]">full line: {seg.block.title}</p>
+                </div>
                 {span.confidence < NEEDS_LOOK_THRESHOLD && <Pill>needs a look</Pill>}
-                <span className="ml-auto text-xs text-[color:var(--ink-dim)]">
+                <span className="ml-auto shrink-0 text-xs text-[color:var(--ink-dim)]">
                   {span.srcInSec.toFixed(1)}s – {span.srcOutSec.toFixed(1)}s · {duration.toFixed(1)}s
                 </span>
               </div>
@@ -437,8 +454,17 @@ export function SplitLines({
       if (!clipPath) continue;
       const block = voiceBlocks.find((b) => b.id === span.blockId);
       if (!block) continue;
+      const heardText = split.words
+        .filter((w) => w.startSec >= span.srcInSec && w.startSec < span.srcOutSec)
+        .map((w) => w.text)
+        .join(" ");
       if (!byClip.has(clipPath)) byClip.set(clipPath, []);
-      byClip.get(clipPath)!.push({ block: { id: block.id, title: lineFor(block.id) ?? block.title }, globalIndex: blockIndex.get(block.id) ?? 0, span });
+      byClip.get(clipPath)!.push({
+        block: { id: block.id, title: lineFor(block.id) ?? block.title },
+        globalIndex: blockIndex.get(block.id) ?? 0,
+        span,
+        heardText,
+      });
     }
     return clipWindows
       .filter((w) => byClip.has(w.path))

@@ -3,11 +3,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { publicDir } from "@backend/pipeline/paths";
 
-/** The two subdirectories an EDL src can point into under a job's public
- *  dir: user-uploaded footage, and clips synthesized by the generate stage
- *  (see generate.ts's `generatedDir`) — both staged to public/ the same
- *  way, so the preview proxy must resolve either. */
-const ALLOWED_SUBDIRS = ["assets", "generated"];
+/** The subdirectories an EDL src can point into under a job's public dir:
+ *  user-uploaded footage, clips synthesized by the generate stage (see
+ *  generate.ts's `generatedDir`), and a multi-clip speaking take's derived,
+ *  combined file (see prepareTake.ts's `ensureTakePrep` — the ONLY thing
+ *  ever written under "derived") — all staged to public/ the same way, so
+ *  the preview proxy must resolve any of them. Missing "derived" here left
+ *  every segment of a multi-clip take 404ing through the proxy (valid
+ *  path, just rejected by this allowlist), which the browser then reports
+ *  as a generic "error while playing the video" — no video element ever
+ *  gets a real video to decode. */
+const ALLOWED_SUBDIRS = ["assets", "generated", "derived"];
 
 /**
  * Resolves a public/-relative asset src as it appears in an EDL (e.g.
