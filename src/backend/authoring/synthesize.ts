@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { authoringDir } from "../pipeline/paths";
+import { listFormats, loadFormat } from "../pipeline/loader";
 import { DraftSchema } from "./schemas";
 import { Analysis, Draft } from "./types";
 
@@ -40,6 +41,22 @@ const MAX_REPAIR_ROUNDS = 2;
  *  which truncates the JSON mid-array and fails with a raw parse error
  *  instead of a clear "ran out of budget" one. */
 const MAX_TOKENS = 24000;
+
+/** Every niche already in use across formats/*.json, for the synthesis
+ *  prompt to reuse instead of minting a near-duplicate (e.g. "Fitness"
+ *  alongside an existing "Gym"). Skips any format that fails to load
+ *  rather than failing synthesis over an unrelated broken file. */
+const getExistingNiches = (): string[] => {
+  const niches = new Set<string>();
+  for (const id of listFormats()) {
+    try {
+      niches.add(loadFormat(id).niche);
+    } catch {
+      // unrelated format is broken/mid-edit — irrelevant to niche reuse
+    }
+  }
+  return Array.from(niches).sort();
+};
 
 /** One frame worth showing the model, normalized from either a Shot
  *  (labeled by its shot index/span) or a DenseFrame (labeled by timestamp
@@ -86,7 +103,7 @@ FORMAT is a reusable, fill-in-the-blank template for THIS pipeline (not a descri
 {
   "id": string,               // kebab-case slug, unique-sounding
   "name": string,              // e.g. "5 Secret [Tool] Codes" — bracket the part that varies by niche
-  "niche": string,              // who/what this format suits, e.g. "any tool with power-user tricks"
+  "niche": string,              // ONE WORD (e.g. "Gym", "Neuroscience", "Travel", "Work") — reuse an EXISTING niche listed below if it correlates, only mint a new one-word niche if none genuinely fit
   "description": string,        // 1-3 sentences: the structural pattern, for format pickers
   "fps": 30,
   "width": <source width>, "height": <source height>,   // match the analyzed video exactly
@@ -164,7 +181,11 @@ Rules that WILL be checked and must hold:
 - "broll" blocks have no "anchors" and no "captions": true
 - only use the exact component names listed above, spelled exactly that way`;
 
-const buildSynthesisPrompt = (analysis: Analysis, selectedFrames: SampledFrame[]): string => {
+const buildSynthesisPrompt = (
+  analysis: Analysis,
+  selectedFrames: SampledFrame[],
+  existingNiches: string[],
+): string => {
   const wordLines = analysis.words
     .map((w) => `${w.startSec.toFixed(2)}-${w.endSec.toFixed(2)} ${JSON.stringify(w.text)}`)
     .join("\n");
@@ -177,9 +198,16 @@ const buildSynthesisPrompt = (analysis: Analysis, selectedFrames: SampledFrame[]
       ? ` (downsampled evenly from ${totalCandidates} candidates)`
       : "";
 
+  const nicheNote =
+    existingNiches.length > 0
+      ? `EXISTING NICHES — reuse one of these for the format's "niche" field if it genuinely correlates with this reel's subject; only invent a new niche if none of them fit:\n${existingNiches.join(", ")}\nA new niche must still be a SINGLE WORD, simple and generic (e.g. "Gym", "Neuroscience", "Travel", "Work") — not a phrase.`
+      : `No existing niches yet — pick a SINGLE WORD, simple and generic niche (e.g. "Gym", "Neuroscience", "Travel", "Work").`;
+
   return `You are reverse-engineering a short-form vertical video (${analysis.durationSec.toFixed(1)}s, ${analysis.width}x${analysis.height}) into a reusable FORMAT for "Editable", a video-templating engine. A format captures a proven structure — the beats, the timing, the overlay/sfx moments, AND their exact on-screen positions/animations — as data, so a different creator can film their OWN content into the same slots and get a video out that looks EXACTLY like this reference, just with their own footage.
 
 ${FORMAT_CONTRACT}
+
+${nicheNote}
 
 TRANSCRIPT — one word per line, start-end seconds relative to the clip:
 ${wordLines || "(no speech detected — this may be a silent/music-driven format; author it with mostly \"broll\" blocks)"}
@@ -247,7 +275,7 @@ export const synthesize = async (draftId: string, analysis: Analysis): Promise<D
   );
 
   let content: Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam> = [
-    { type: "text", text: buildSynthesisPrompt(analysis, selectedFrames) },
+    { type: "text", text: buildSynthesisPrompt(analysis, selectedFrames, getExistingNiches()) },
     ...imageBlocks,
   ];
 

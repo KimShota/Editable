@@ -1,0 +1,1157 @@
+{
+  "id": "one-tool-per-task-rapidfire",
+  "name": "Best [AI Tool] for Every Task",
+  "niche": "AI",
+  "description": "A fast talking-head list where the creator names a use-case then the AI tool for it, and that tool's app icon plus a yellow name label pop in below the chin. Repeats for many task→tool pairs, then ends on a follow CTA with a Follow button.",
+  "fps": 30,
+  "width": 720,
+  "height": 1280,
+  "captionStyle": {
+    "component": "Captions",
+    "params": {
+      "position": "lowerThird"
+    }
+  },
+  "musicVolume": 0.5,
+  "sharedSlots": [],
+  "blocks": [
+    {
+      "id": "hook-item",
+      "title": "Hook / First Tool",
+      "kind": "voice",
+      "videoSlot": "hookClip",
+      "slots": [
+        {
+          "name": "hookClip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Sit centered, eye-level, plain interview background. Open cold with your first use-case then the tool, phrased with a marker word, e.g. 'Writing emails? I use Claude.' Keep it snappy — under 2 seconds — and dive straight in with no intro."
+        },
+        {
+          "name": "hookIcon",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Square app icon / logo of the tool you name here, on transparent or its native background, so it can pop below your chin."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "tool",
+          "kind": "literal",
+          "phrases": [
+            "use",
+            "I use",
+            "try",
+            "go with",
+            "reach for"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.6
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "hook-label",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "tool",
+              "textTemplate": "{captured}",
+              "variant": "hook"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.55,
+            "width": 0.42,
+            "height": 0.065
+          },
+          "states": []
+        },
+        {
+          "id": "hook-icon",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "hookIcon"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.34,
+            "y": 0.615,
+            "width": 0.32,
+            "height": 0.18
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "item-2",
+      "title": "Tool 2",
+      "kind": "voice",
+      "videoSlot": "clip2",
+      "slots": [
+        {
+          "name": "clip2",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "State your second use-case then the tool with a marker word, e.g. 'Brainstorming ideas, I use ChatGPT.' Keep the same cadence as item one."
+        },
+        {
+          "name": "icon2",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Square app icon / logo of the tool named in this line."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "tool",
+          "kind": "literal",
+          "phrases": [
+            "use",
+            "I use",
+            "try",
+            "go with",
+            "reach for"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.4
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "item2-label",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "tool",
+              "textTemplate": "{captured}",
+              "variant": "title"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.55,
+            "width": 0.42,
+            "height": 0.065
+          },
+          "states": []
+        },
+        {
+          "id": "item2-icon",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "icon2"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.34,
+            "y": 0.615,
+            "width": 0.32,
+            "height": 0.18
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "item-3",
+      "title": "Tool 3",
+      "kind": "voice",
+      "videoSlot": "clip3",
+      "slots": [
+        {
+          "name": "clip3",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "State your third use-case then the tool with a marker word, e.g. 'Deep research, I use Perplexity.'"
+        },
+        {
+          "name": "icon3",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Square app icon / logo of the tool named in this line."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "tool",
+          "kind": "literal",
+          "phrases": [
+            "use",
+            "I use",
+            "try",
+            "go with",
+            "reach for"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.4
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "item3-label",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "tool",
+              "textTemplate": "{captured}",
+              "variant": "title"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.55,
+            "width": 0.42,
+            "height": 0.065
+          },
+          "states": []
+        },
+        {
+          "id": "item3-icon",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "icon3"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.34,
+            "y": 0.615,
+            "width": 0.32,
+            "height": 0.18
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "item-4",
+      "title": "Tool 4",
+      "kind": "voice",
+      "videoSlot": "clip4",
+      "slots": [
+        {
+          "name": "clip4",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "State your fourth use-case then the tool with a marker word, e.g. 'Real-time trends, I use Grok.'"
+        },
+        {
+          "name": "icon4",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Square app icon / logo of the tool named in this line."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "tool",
+          "kind": "literal",
+          "phrases": [
+            "use",
+            "I use",
+            "try",
+            "go with",
+            "reach for"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.4
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "item4-label",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "tool",
+              "textTemplate": "{captured}",
+              "variant": "title"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.55,
+            "width": 0.42,
+            "height": 0.065
+          },
+          "states": []
+        },
+        {
+          "id": "item4-icon",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "icon4"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.34,
+            "y": 0.615,
+            "width": 0.32,
+            "height": 0.18
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "item-5",
+      "title": "Tool 5",
+      "kind": "voice",
+      "videoSlot": "clip5",
+      "slots": [
+        {
+          "name": "clip5",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "State your fifth use-case then the tool with a marker word, e.g. 'Image generation, I use Higgsfield.'"
+        },
+        {
+          "name": "icon5",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Square app icon / logo of the tool named in this line."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "tool",
+          "kind": "literal",
+          "phrases": [
+            "use",
+            "I use",
+            "try",
+            "go with",
+            "reach for"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.4
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "item5-label",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "tool",
+              "textTemplate": "{captured}",
+              "variant": "title"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.55,
+            "width": 0.42,
+            "height": 0.065
+          },
+          "states": []
+        },
+        {
+          "id": "item5-icon",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "icon5"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.34,
+            "y": 0.615,
+            "width": 0.32,
+            "height": 0.18
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "item-6",
+      "title": "Tool 6",
+      "kind": "voice",
+      "videoSlot": "clip6",
+      "slots": [
+        {
+          "name": "clip6",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "State your sixth use-case then the tool with a marker word, e.g. 'Creating videos, I use Higgsfield.' Tools may repeat across items."
+        },
+        {
+          "name": "icon6",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Square app icon / logo of the tool named in this line."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "tool",
+          "kind": "literal",
+          "phrases": [
+            "use",
+            "I use",
+            "try",
+            "go with",
+            "reach for"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.4
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "item6-label",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "tool",
+              "textTemplate": "{captured}",
+              "variant": "title"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.55,
+            "width": 0.42,
+            "height": 0.065
+          },
+          "states": []
+        },
+        {
+          "id": "item6-icon",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "icon6"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.34,
+            "y": 0.615,
+            "width": 0.32,
+            "height": 0.18
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "item-7",
+      "title": "Tool 7",
+      "kind": "voice",
+      "videoSlot": "clip7",
+      "slots": [
+        {
+          "name": "clip7",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "State your seventh use-case then the tool with a marker word, e.g. 'Understanding a podcast, I use NotebookLM.'"
+        },
+        {
+          "name": "icon7",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Square app icon / logo of the tool named in this line."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "tool",
+          "kind": "literal",
+          "phrases": [
+            "use",
+            "I use",
+            "try",
+            "go with",
+            "reach for"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.4
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "item7-label",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "tool",
+              "textTemplate": "{captured}",
+              "variant": "title"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.55,
+            "width": 0.42,
+            "height": 0.065
+          },
+          "states": []
+        },
+        {
+          "id": "item7-icon",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "icon7"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.34,
+            "y": 0.615,
+            "width": 0.32,
+            "height": 0.18
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "item-8",
+      "title": "Tool 8",
+      "kind": "voice",
+      "videoSlot": "clip8",
+      "slots": [
+        {
+          "name": "clip8",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "State your eighth use-case then the tool with a marker word, e.g. 'Planning your day, I use ChatGPT.'"
+        },
+        {
+          "name": "icon8",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Square app icon / logo of the tool named in this line."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "tool",
+          "kind": "literal",
+          "phrases": [
+            "use",
+            "I use",
+            "try",
+            "go with",
+            "reach for"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.4
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "item8-label",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "tool",
+              "textTemplate": "{captured}",
+              "variant": "title"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.55,
+            "width": 0.42,
+            "height": 0.065
+          },
+          "states": []
+        },
+        {
+          "id": "item8-icon",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "icon8"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.34,
+            "y": 0.615,
+            "width": 0.32,
+            "height": 0.18
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "item-9",
+      "title": "Tool 9",
+      "kind": "voice",
+      "videoSlot": "clip9",
+      "slots": [
+        {
+          "name": "clip9",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "State your ninth use-case then the tool with a marker word, e.g. 'Creating cinematic content, I use Higgsfield.'"
+        },
+        {
+          "name": "icon9",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Square app icon / logo of the tool named in this line."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "tool",
+          "kind": "literal",
+          "phrases": [
+            "use",
+            "I use",
+            "try",
+            "go with",
+            "reach for"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.4
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "item9-label",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "tool",
+              "textTemplate": "{captured}",
+              "variant": "title"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.55,
+            "width": 0.42,
+            "height": 0.065
+          },
+          "states": []
+        },
+        {
+          "id": "item9-icon",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "icon9"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.34,
+            "y": 0.615,
+            "width": 0.32,
+            "height": 0.18
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "item-10",
+      "title": "Tool 10",
+      "kind": "voice",
+      "videoSlot": "clip10",
+      "slots": [
+        {
+          "name": "clip10",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "State your tenth use-case then the tool with a marker word, e.g. 'Writing a sales page, I use Claude.'"
+        },
+        {
+          "name": "icon10",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Square app icon / logo of the tool named in this line."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "tool",
+          "kind": "literal",
+          "phrases": [
+            "use",
+            "I use",
+            "try",
+            "go with",
+            "reach for"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.4
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "item10-label",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "tool",
+              "textTemplate": "{captured}",
+              "variant": "title"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.55,
+            "width": 0.42,
+            "height": 0.065
+          },
+          "states": []
+        },
+        {
+          "id": "item10-icon",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "icon10"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.34,
+            "y": 0.615,
+            "width": 0.32,
+            "height": 0.18
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "item-11",
+      "title": "Tool 11",
+      "kind": "voice",
+      "videoSlot": "clip11",
+      "slots": [
+        {
+          "name": "clip11",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "State your final use-case then the tool with a marker word, e.g. 'Creating product photos, I use Higgsfield.'"
+        },
+        {
+          "name": "icon11",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "Square app icon / logo of the tool named in this line."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "tool",
+          "kind": "literal",
+          "phrases": [
+            "use",
+            "I use",
+            "try",
+            "go with",
+            "reach for"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.4
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "item11-label",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "tool",
+              "textTemplate": "{captured}",
+              "variant": "title"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.29,
+            "y": 0.55,
+            "width": 0.42,
+            "height": 0.065
+          },
+          "states": []
+        },
+        {
+          "id": "item11-icon",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "icon11"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "tool",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.34,
+            "y": 0.615,
+            "width": 0.32,
+            "height": 0.18
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "cta-follow",
+      "title": "Follow CTA",
+      "kind": "voice",
+      "videoSlot": "ctaClip",
+      "slots": [
+        {
+          "name": "ctaClip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Close with a direct ask, gesturing toward the button: 'Follow [YourHandle] for daily AI tips.' Say your handle immediately after the word 'Follow'."
+        },
+        {
+          "name": "button",
+          "mediaType": "image",
+          "required": false,
+          "instructions": "Optional: a blue rounded 'Follow' button graphic (like the native app button) to sit under the caption; leave blank to use the built-in one."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "handle",
+          "kind": "literal",
+          "phrases": [
+            "Follow",
+            "Go follow",
+            "Make sure to follow"
+          ],
+          "capture": true,
+          "captureUntil": "for",
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0.3
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "cta-text",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "handle",
+              "textTemplate": "Follow {captured}",
+              "variant": "cta"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "handle",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.22,
+            "y": 0.53,
+            "width": 0.56,
+            "height": 0.07
+          },
+          "states": []
+        },
+        {
+          "id": "cta-button",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "button"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "handle",
+            "edge": "captureStart",
+            "offsetSec": 0.1
+          },
+          "layout": {
+            "x": 0.24,
+            "y": 0.62,
+            "width": 0.52,
+            "height": 0.08
+          },
+          "states": []
+        }
+      ]
+    }
+  ]
+}

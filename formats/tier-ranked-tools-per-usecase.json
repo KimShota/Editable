@@ -1,7 +1,7 @@
 {
   "id": "tier-ranked-tools-per-usecase",
   "name": "BAD / GOOD / GREAT [Tools] For Every [Use Case]",
-  "niche": "any niche where options can be ranked worst-to-best across several use cases (AI tools, apps, gear, tactics)",
+  "niche": "trending",
   "description": "For each use case the creator ranks three options worst-to-best while three top-of-frame cards (BAD/GOOD/GREAT) reveal their logos one at a time in sync with the speech, then a Follow + comment-keyword CTA.",
   "fps": 30,
   "width": 720,
