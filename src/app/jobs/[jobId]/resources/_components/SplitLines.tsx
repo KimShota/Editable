@@ -14,17 +14,19 @@ type TakeSplitBlock = {
 };
 type SplitState = { durationSec: number; blocks: TakeSplitBlock[] };
 
-const fetchSplit = async (jobId: string): Promise<SplitState | null> => {
+type SplitFetchResult = { split: SplitState | null; takeFile?: string };
+
+const fetchSplit = async (jobId: string): Promise<SplitFetchResult> => {
   const res = await fetch(`/api/jobs/${jobId}/split`);
   const data = await res.json();
-  return data.split ?? null;
+  return { split: data.split ?? null, takeFile: data.takeFile };
 };
 
-const runAutoSplit = async (jobId: string): Promise<SplitState> => {
+const runAutoSplit = async (jobId: string): Promise<SplitFetchResult> => {
   const res = await fetch(`/api/jobs/${jobId}/split`, { method: "POST" });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "split failed");
-  return data.split;
+  return { split: data.split, takeFile: data.takeFile };
 };
 
 const saveSpan = async (
@@ -90,16 +92,23 @@ export function SplitLines({
   format,
   script,
   takeFile,
+  takeBound,
 }: {
   jobId: string;
   format: Format;
   script: ScriptSuggestion | null;
   /** Job-relative path to the bound speaking take (e.g.
-   *  "assets/speaking-take.mp4"), or undefined if it isn't bound yet — the
-   *  split can't run until it is. */
+   *  "assets/speaking-take.mp4") — a same-render fallback for the FIRST
+   *  paint, before the split GET/POST below has resolved the real media
+   *  (for a multi-clip take, that's the derived combined file, which this
+   *  prop alone can't know — see the split route's own takeFile). */
   takeFile?: string;
+  /** Whether the take slot has ANY binding (single clip or several) — the
+   *  split can't run until it does. Distinct from `takeFile` because a
+   *  fresh multi-clip binding is bound but has no resolved media path yet. */
+  takeBound: boolean;
 }) {
-  const takeBound = !!takeFile;
+  const [resolvedTakeFile, setResolvedTakeFile] = useState(takeFile);
   const [split, setSplit] = useState<SplitState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -123,8 +132,11 @@ export function SplitLines({
       setLoading(true);
       try {
         const existing = await fetchSplit(jobId);
-        const result = existing ?? (await runAutoSplit(jobId));
-        if (!cancelled) setSplit(result);
+        const result = existing.split ? existing : await runAutoSplit(jobId);
+        if (!cancelled) {
+          setSplit(result.split);
+          if (result.takeFile) setResolvedTakeFile(result.takeFile);
+        }
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
       } finally {
@@ -137,11 +149,11 @@ export function SplitLines({
   }, [jobId, takeBound]);
 
   useEffect(() => {
-    if (!takeFile) return;
+    if (!resolvedTakeFile) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(mediaUrl(jobId, takeFile));
+        const res = await fetch(mediaUrl(jobId, resolvedTakeFile));
         const arrayBuffer = await res.arrayBuffer();
         const AudioCtx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
         const ctx = new AudioCtx();
@@ -155,13 +167,15 @@ export function SplitLines({
     return () => {
       cancelled = true;
     };
-  }, [jobId, takeFile]);
+  }, [jobId, resolvedTakeFile]);
 
   const reAlign = async () => {
     setLoading(true);
     setError(null);
     try {
-      setSplit(await runAutoSplit(jobId));
+      const result = await runAutoSplit(jobId);
+      setSplit(result.split);
+      if (result.takeFile) setResolvedTakeFile(result.takeFile);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -278,10 +292,10 @@ export function SplitLines({
       {error && <p className="mb-4 text-xs text-red-400">{error}</p>}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_1fr]">
         <div className="lg:sticky lg:top-24 lg:self-start">
-          {takeFile && (
+          {resolvedTakeFile && (
             <video
               ref={videoRef}
-              src={mediaUrl(jobId, takeFile)}
+              src={mediaUrl(jobId, resolvedTakeFile)}
               onTimeUpdate={onVideoTimeUpdate}
               onPause={() => setPlayingBlockId(null)}
               controls

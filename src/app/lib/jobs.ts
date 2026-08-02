@@ -91,6 +91,25 @@ export const createJob = (formatId: string): string => {
 const stageDone = (jobId: string, stage: PipelineStage): boolean =>
   fs.existsSync(path.join(artifactsDir(jobId), `${stage}.json`));
 
+/**
+ * Clears the auto-split (splitTake.json) and multi-clip take prep
+ * (takePrep.json — see prepareTake.ts) artifacts after any upload/delete
+ * that touches the speaking-take slot: a new/removed/replaced clip
+ * invalidates whatever ordering/spans were computed from the OLD set of
+ * clips. The derived combined MP4 itself doesn't need deleting here —
+ * ensureTakePrep already recomputes it whenever its own input signatures
+ * go stale; this only needs to happen on a full slot clear (no clips left
+ * at all), to avoid leaving an orphaned file behind.
+ */
+export const invalidateTakeArtifacts = (jobId: string, clearCombinedFile?: string): void => {
+  for (const name of ["splitTake.json", "takePrep.json"]) {
+    fs.rmSync(path.join(artifactsDir(jobId), name), { force: true });
+  }
+  if (clearCombinedFile) {
+    fs.rmSync(path.join(jobDir(jobId), clearCombinedFile), { force: true });
+  }
+};
+
 export const getJobStatus = (jobId: string): { completedStages: PipelineStage[]; rendered: boolean } => ({
   completedStages: STAGE_ARTIFACTS.filter((s) => stageDone(jobId, s)),
   rendered: fs.existsSync(path.join(outDir, `${jobId}.mp4`)),

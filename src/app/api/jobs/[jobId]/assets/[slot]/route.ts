@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
-import { jobExists, readJobManifest, writeJobManifest, jobDir } from "../../../../../lib/jobs";
+import { jobExists, readJobManifest, writeJobManifest, jobDir, invalidateTakeArtifacts } from "../../../../../lib/jobs";
+import { loadFormat } from "@backend/pipeline/loader";
 
 const unlinkIfExists = (jobId: string, relPath: string) => {
   const absPath = path.join(jobDir(jobId), relPath);
@@ -22,6 +23,8 @@ export async function DELETE(
     return NextResponse.json({ error: "job not found" }, { status: 404 });
   }
   const manifest = readJobManifest(jobId);
+  const format = loadFormat(manifest.format);
+  const isTakeSlot = format.speakingTakeSlot?.name === slot;
   const binding = manifest.bindings[slot];
   const indexParam = req.nextUrl.searchParams.get("index");
 
@@ -39,6 +42,14 @@ export async function DELETE(
       delete manifest.bindings[slot];
     }
     writeJobManifest(jobId, manifest);
+    // A removed clip changes the set fed to prepareTake.ts, or clears the
+    // slot outright — either way the old combined file/split is stale. Only
+    // wipe the derived combined MP4 itself once nothing is left to rebuild
+    // it from (remaining.length === 0); otherwise ensureTakePrep's own
+    // staleness check regenerates it from the smaller clip set next time.
+    if (isTakeSlot) {
+      invalidateTakeArtifacts(jobId, remaining.length === 0 ? `derived/${slot}-combined.mp4` : undefined);
+    }
     return NextResponse.json({ ok: true, binding: manifest.bindings[slot] });
   }
 
@@ -49,5 +60,6 @@ export async function DELETE(
   }
   delete manifest.bindings[slot];
   writeJobManifest(jobId, manifest);
+  if (isTakeSlot) invalidateTakeArtifacts(jobId, `derived/${slot}-combined.mp4`);
   return NextResponse.json({ ok: true });
 }

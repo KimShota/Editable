@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
-import { jobExists, readJobManifest, writeJobManifest, jobDir } from "../../../../lib/jobs";
+import { jobExists, readJobManifest, writeJobManifest, jobDir, invalidateTakeArtifacts } from "../../../../lib/jobs";
 import { isLibraryCategory, libraryDir } from "../../../../lib/library";
 import { loadFormat } from "@backend/pipeline/loader";
 import { allSlots } from "@backend/pipeline/intake";
@@ -25,12 +25,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     return NextResponse.json({ error: `format has no slot "${slotName}"` }, { status: 400 });
   }
   // Multiple files are only meaningful for a voice block's main clip (takes
-  // to auto-order/concatenate — see intake.ts) or the identity slot (several
-  // reference photos of the same person) — those are the slots where a
-  // 2nd/3rd upload APPENDS instead of replacing the binding.
+  // to auto-order/concatenate — see intake.ts), the identity slot (several
+  // reference photos of the same person), or the speaking-take slot itself
+  // (several clips stitched into one continuous take — see prepareTake.ts)
+  // — those are the slots where a 2nd/3rd upload APPENDS instead of
+  // replacing the binding.
   const isMultiSlot =
     format.blocks.some((b) => b.kind === "voice" && b.videoSlot === slotName) ||
-    format.identitySlot?.name === slotName;
+    format.identitySlot?.name === slotName ||
+    format.speakingTakeSlot?.name === slotName;
+  const isTakeSlot = format.speakingTakeSlot?.name === slotName;
 
   if (slot.mediaType === "text") {
     const text = formData.get("text");
@@ -43,7 +47,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
   }
 
   const existing = manifest.bindings[slotName];
-  const existingFiles = isMultiSlot && existing && "files" in existing ? existing.files : [];
+  // A slot that used to bind exactly one file (the take slot, before its
+  // second clip ever showed up) upgrades in place — the new upload APPENDS
+  // to it rather than discarding it, same as any other multi-slot.
+  const existingFiles = !isMultiSlot
+    ? []
+    : existing && "files" in existing
+      ? existing.files
+      : existing && "file" in existing
+        ? [existing.file]
+        : [];
   let takeCount = existingFiles.length;
   const nextRelPath = (ext: string) => path.posix.join("assets", `${slotName}-${++takeCount}${ext}`);
 
@@ -67,6 +80,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
       ? { files: [...existingFiles, relPath] }
       : { file: relPath };
     writeJobManifest(jobId, manifest);
+    if (isTakeSlot) invalidateTakeArtifacts(jobId);
     return NextResponse.json({ slot: slotName, binding: manifest.bindings[slotName] });
   }
 

@@ -40,6 +40,9 @@ import {
   SlotSchema,
   StyleProfileSchema,
   SubShotSpecSchema,
+  TakePrepClipSchema,
+  TakePrepInputSchema,
+  TakePrepSchema,
   TakeTrimSchema,
   TranscriptSchema,
   TrimPointsSchema,
@@ -101,6 +104,10 @@ export type PlatesManifest = z.infer<typeof PlatesManifestSchema>;
 
 export type GeneratedInsert = z.infer<typeof GeneratedInsertSchema>;
 export type Inserts = z.infer<typeof InsertsSchema>;
+
+export type TakePrepInput = z.infer<typeof TakePrepInputSchema>;
+export type TakePrepClip = z.infer<typeof TakePrepClipSchema>;
+export type TakePrep = z.infer<typeof TakePrepSchema>;
 
 export type BBoxFrac = z.infer<typeof BBoxFracSchema>;
 export type MatteBlock = z.infer<typeof MatteBlockSchema>;

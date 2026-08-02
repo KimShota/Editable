@@ -222,7 +222,13 @@ const runVerify = async (
   const diagnostics: string[] = [];
 
   const format = draft.format;
-  const split = splitTake(format, sourcePath, analysis.durationSec);
+  // Self-verification treats the WHOLE reference clip as if it were one
+  // continuous take covering every non-optional voice block — unlike a
+  // real job, there's no FilledFormat with per-block bindings to check
+  // coverage against (see splitTake.ts's isTakeCovered), so every such
+  // block is passed directly instead of letting production code narrow it.
+  const voiceBlocks = format.blocks.filter((b) => b.kind === "voice" && !b.optional);
+  const split = splitTake(format, voiceBlocks, sourcePath, analysis.durationSec);
 
   for (const block of format.blocks) {
     if (block.kind === "broll") {

@@ -1424,3 +1424,68 @@ export const InsertsSchema = z.object({
    *  supplied footage instead (an opt-out — see SlotSchema's doc comment). */
   skipped: z.array(z.object({ slotName: z.string(), blockId: z.string() })).default([]),
 });
+
+// ---------------------------------------------------------------------------
+// TakePrep — prepareTake.ts's own artifact (artifacts/<job>/takePrep.json).
+// Turns a MULTI-clip speakingTakeSlot binding ({files:[...]}) into one
+// derived, edge-trimmed, script-ordered combined MP4 that intake.ts binds
+// as an ordinary single-file take — see prepareTake.ts's own doc comment.
+// ---------------------------------------------------------------------------
+
+/** Identifies one input clip well enough to detect "this exact upload
+ *  hasn't changed" without hashing bytes — same cheap staleness signal
+ *  used elsewhere in this pipeline (see intake.ts's probeFile callers). */
+export const TakePrepInputSchema = z.object({
+  /** Job-dir-relative path, same convention as BoundFile.path. */
+  path: z.string(),
+  sizeBytes: z.number(),
+  mtimeMs: z.number(),
+});
+
+export const TakePrepClipSchema = z.object({
+  input: TakePrepInputSchema,
+  /** This clip's OWN whisper output, clip-relative seconds — cached here so
+   *  adding one more clip to the binding doesn't re-transcribe the ones
+   *  already prepared. */
+  words: z.array(WordSchema),
+  /** Edge-trimmed (dead-air-stripped) window inside this clip, source
+   *  seconds. Meaningless for an "excluded" clip (never cut into the
+   *  combined file at all). */
+  srcInSec: z.number().min(0),
+  srcOutSec: z.number().positive(),
+  /** Where srcInSec lands in the combined file's own timeline — 0 for an
+   *  "excluded" clip. */
+  offsetSec: z.number().min(0),
+  /** This clip's matched range in the concatenated script (all non-optional
+   *  voice blocks' script.json lines, in block order) — null when no
+   *  script existed to match against, or nothing matched confidently. */
+  scriptStartIdx: z.number().int().min(0).nullable(),
+  scriptEndIdx: z.number().int().min(0).nullable(),
+  /** Mean per-word similarity of the fit — see prepareTake.ts. */
+  score: z.number().min(0).max(1),
+  /** "aligned": placed by script/anchor match. "uploadOrder": no confident
+   *  match, placed relative to upload order instead. "excluded": looks like
+   *  a retake of another (better-matched) clip — left out of the combined
+   *  cut entirely. */
+  ordering: z.enum(["aligned", "uploadOrder", "excluded"]),
+});
+
+export const TakePrepSchema = z.object({
+  slotName: z.string(),
+  /** In COMBINED playback order — excluded clips are listed last (they
+   *  contribute no offset/duration to the combined file). */
+  clips: z.array(TakePrepClipSchema),
+  /** Job-dir-relative path to the stitched, edge-trimmed MP4 — servable via
+   *  /api/media/jobs/<jobId>/<combinedPath>, same convention as any other
+   *  BoundFile.path. */
+  combinedPath: z.string(),
+  combinedDurationSec: z.number().positive(),
+  /** Every kept clip's words, concatenated in combined order and shifted
+   *  into the combined file's own timeline — splitTake.ts can consume this
+   *  directly instead of re-transcribing the stitched file. */
+  words: z.array(WordSchema),
+  diagnostics: z.array(z.string()).default([]),
+  /** Bumped whenever the ordering/trim/concat algorithm changes in a way
+   *  that should invalidate every existing cached combined file. */
+  pipelineVersion: z.string(),
+});

@@ -54,6 +54,7 @@ export function SlotDropzone({
   binding,
   onChange,
   multi = false,
+  coveredNote,
 }: {
   jobId: string;
   slot: Slot;
@@ -64,6 +65,11 @@ export function SlotDropzone({
    *  than one here appends takes instead of replacing the binding; they're
    *  auto-ordered and stitched together once the video is built. */
   multi?: boolean;
+  /** Set when a bound speaking take currently covers this slot (see
+   *  ResourcesBoard.tsx's takeCoveredSlots) — shown as an explanatory note
+   *  instead of hiding the dropzone outright, so dropping a clip here still
+   *  works to re-film just this one line on its own. */
+  coveredNote?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,11 +146,15 @@ export function SlotDropzone({
     await clearSlot(jobId, slot.name);
   };
 
-  const takeFiles = binding && "files" in binding ? binding.files : undefined;
+  // A slot that used to bind exactly one file (the speaking-take slot,
+  // before it accepted several clips) may still carry an old {file}
+  // binding — shown here as a one-item list so it doesn't just vanish from
+  // a now-multi dropzone.
+  const takeFiles = binding && "files" in binding ? binding.files : binding && "file" in binding ? [binding.file] : undefined;
 
   if (multi) {
     return (
-      <SlotShell slot={slot}>
+      <SlotShell slot={slot} coveredNote={coveredNote}>
         <input
           ref={fileInput}
           type="file"
@@ -201,7 +211,7 @@ export function SlotDropzone({
   const boundFile = binding && "file" in binding ? binding.file : undefined;
 
   return (
-    <SlotShell slot={slot}>
+    <SlotShell slot={slot} coveredNote={coveredNote}>
       <input
         ref={fileInput}
         type="file"
@@ -250,7 +260,15 @@ export function SlotDropzone({
   );
 }
 
-function SlotShell({ slot, children }: { slot: Slot; children: React.ReactNode }) {
+function SlotShell({
+  slot,
+  coveredNote,
+  children,
+}: {
+  slot: Slot;
+  coveredNote?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
@@ -262,6 +280,11 @@ function SlotShell({ slot, children }: { slot: Slot; children: React.ReactNode }
         </span>
       </div>
       <p className="text-[12px] leading-snug text-[color:var(--ink-dim)]">{slot.instructions}</p>
+      {coveredNote && (
+        <p className="rounded-md border border-dashed border-[color:var(--accent)]/30 bg-[color:var(--accent)]/5 px-2 py-1 text-[11px] leading-snug text-[color:var(--accent)]">
+          {coveredNote}
+        </p>
+      )}
       {children}
     </div>
   );

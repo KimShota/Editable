@@ -16,7 +16,7 @@ import { loadFormat } from "./loader";
 import { applyInserts, generate } from "./generate";
 import { GeneratorChoice } from "./generation";
 import { transcribe } from "./transcribe";
-import { deriveTranscriptAndTrimWithStandalone } from "./splitTake";
+import { deriveTranscriptAndTrimWithStandalone, takeIsBound } from "./splitTake";
 import { readSplit, runSplit } from "./orchestrate";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
@@ -188,8 +188,9 @@ const main = async () => {
   }
   if (args.only === "generate") return;
 
-  // Single-take mode (speakingTakeSlot set): transcript/trim both come
-  // from the split step (whisper once + sequential anchor matching — see
+  // Single-take (or mixed) mode: whenever this job actually bound a
+  // speakingTakeSlot (takeIsBound), transcript/trim both come from the
+  // split step (whisper once + sequential anchor matching — see
   // splitTake.ts) instead of the ordinary per-block transcribe()/trim().
   // Memoized so a full run computes it once even though both the
   // "transcribe" and "trim" stages below consult it.
@@ -203,7 +204,7 @@ const main = async () => {
   };
 
   let transcript = wants("transcribe")
-    ? format.speakingTakeSlot
+    ? takeIsBound(format, filled)
       ? (await getSingleTakeDerived()).transcript
       : transcribe(format, filled)
     : read("transcript", TranscriptSchema);
@@ -229,7 +230,7 @@ const main = async () => {
   if (args.only === "transcribe") return;
 
   let trims = wants("trim")
-    ? format.speakingTakeSlot
+    ? takeIsBound(format, filled)
       ? (await getSingleTakeDerived()).trim
       : await trim(format, filled, transcript, args.resolver)
     : read("trim", TrimPointsSchema);

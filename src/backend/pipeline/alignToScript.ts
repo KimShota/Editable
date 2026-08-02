@@ -46,8 +46,11 @@ const levenshtein = (a: string, b: string): number => {
 };
 
 /** 1.0 = identical (after normalizing case/punctuation), 0.0 = nothing in
- *  common — normalized edit distance over the longer word's length. */
-const wordSimilarity = (a: string, b: string): number => {
+ *  common — normalized edit distance over the longer word's length.
+ *  Exported for prepareTake.ts's own word-sequence alignment (ordering
+ *  multiple speaking-take clips against the script), the same scoring this
+ *  module already uses for transcript correction. */
+export const wordSimilarity = (a: string, b: string): number => {
   const na = normalize(a);
   const nb = normalize(b);
   if (na.length === 0 && nb.length === 0) return 1;
@@ -124,7 +127,10 @@ const alignTake = (words: Word[], scriptText: string): Word[] => {
   return next;
 };
 
-const readScriptSuggestions = (jobDir: string): Map<string, string> | undefined => {
+/** jobs/<id>/script.json's suggestions, keyed by blockId — exported for
+ *  splitTake.ts's own use (backdating a mid-sentence marker to the line's
+ *  real start), not just this module's own transcript correction. */
+export const readScriptSuggestions = (jobDir: string): Map<string, string> | undefined => {
   const file = path.join(jobDir, "script.json");
   if (!fs.existsSync(file)) return undefined;
   let raw: unknown;

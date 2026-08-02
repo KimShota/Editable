@@ -9,6 +9,8 @@ import { loadFormat } from "./loader";
 import { matteFramesBatch } from "./generation/matte";
 import { loadPlatesManifest } from "./generation/plates";
 import { measureHeadBBox, measureSubjectBBox } from "./generation/subjectFit";
+import { ensureTakePrep } from "./prepareTake";
+import { readScriptSuggestions } from "./alignToScript";
 
 /**
  * Module 2 — Intake and slot binding.
@@ -192,12 +194,15 @@ export const intake = (jobDir: string): FilledFormat => {
   const slots = allSlots(format);
   const slotNames = new Set(slots.map((s) => s.name));
   // Multiple files are only meaningful for a voice block's main clip (takes
-  // to auto-order/concatenate by transcript) or the identity slot (several
-  // reference photos of the same person). Screen recordings, memes, music
-  // etc. always bind exactly one file.
+  // to auto-order/concatenate by transcript), the identity slot (several
+  // reference photos of the same person), or the speaking-take slot itself
+  // (several separate clips stitched into one continuous take — see the
+  // ensureTakePrep call below and prepareTake.ts). Screen recordings,
+  // memes, music etc. always bind exactly one file.
   const multiFileSlots = new Set([
     ...format.blocks.filter((b) => b.kind === "voice").map((b) => b.videoSlot),
     ...(format.identitySlot ? [format.identitySlot.name] : []),
+    ...(format.speakingTakeSlot ? [format.speakingTakeSlot.name] : []),
   ]);
 
   for (const name of Object.keys(manifest.bindings)) {
@@ -222,16 +227,28 @@ export const intake = (jobDir: string): FilledFormat => {
     }
   };
 
-  // In single-take mode, a voice block's own clip slot is DERIVED from
-  // speakingTakeSlot (see the derivation below) rather than filled
-  // directly — same "not a manifest error to be absent" treatment as a
-  // generated slot, just for a different reason. `optional` blocks are
-  // excluded: they're filmed as their own standalone clip (see
-  // BlockSchema's doc comment), so their slot is filled the ordinary way
-  // (or left unbound) rather than overwritten with the shared take.
+  // A voice block's own clip slot can be DERIVED from speakingTakeSlot
+  // instead of filled directly (see the derivation below) — same "not a
+  // manifest error to be absent" treatment as a generated slot, just for a
+  // different reason. A format's speakingTakeSlot may be merely an
+  // OPTIONAL alternative to per-block uploads (see loader.ts's
+  // withImplicitSpeakingTake) — so "derived" here only means "not bound
+  // directly by the manifest", not "definitely covered". Whether it's
+  // ACTUALLY covered depends on the take itself being bound too
+  // (`takeBound`, checked separately below) — so a block that's neither
+  // bound directly nor covered by an actually-bound take still fails
+  // loudly instead of silently passing as "derived". `optional` blocks are
+  // excluded outright: they're always filmed as their own standalone clip
+  // (see BlockSchema's doc comment), so their slot is filled the ordinary
+  // way (or left unbound) rather than overwritten with the shared take.
+  const takeBound = format.speakingTakeSlot
+    ? manifest.bindings[format.speakingTakeSlot.name] !== undefined
+    : false;
   const derivedFromTake = new Set(
     format.speakingTakeSlot
-      ? format.blocks.filter((b) => b.kind === "voice" && !b.optional).map((b) => b.videoSlot)
+      ? format.blocks
+          .filter((b) => b.kind === "voice" && !b.optional && !manifest.bindings[b.videoSlot])
+          .map((b) => b.videoSlot)
       : [],
   );
 
@@ -239,11 +256,15 @@ export const intake = (jobDir: string): FilledFormat => {
     const fill = manifest.bindings[slot.name];
     if (!fill) {
       // A generated slot is filled by the `generate` stage, not the
-      // manifest — its absence here is normal, not an error. If the user
-      // supplies a binding anyway (the "files"/"file" branches below), it's
-      // honored as-is and generation is skipped for that slot.
-      if (slot.required && !slot.generation && !derivedFromTake.has(slot.name)) {
-        errors.push(`required slot "${slot.name}" (${slot.mediaType}) is not filled`);
+      // manifest — its absence here is normal, not an error. A slot the
+      // shared take covers is likewise fine to leave unfilled here, but
+      // ONLY once the take itself is actually bound — otherwise neither
+      // half of the either/or was supplied, and this IS a real gap.
+      if (slot.required && !slot.generation && !(derivedFromTake.has(slot.name) && takeBound)) {
+        const takeHint = format.speakingTakeSlot
+          ? ` — film this block's own clip, or upload one whole take covering all your lines to "${format.speakingTakeSlot.name}"`
+          : "";
+        errors.push(`required slot "${slot.name}" (${slot.mediaType}) is not filled${takeHint}`);
       }
       continue;
     }
@@ -295,12 +316,58 @@ export const intake = (jobDir: string): FilledFormat => {
     bindings[slot.name] = { type: "file", ...bound };
   }
 
-  // Single-take mode: every voice block's own clip binding is the SAME
-  // shared take file (splitTake.ts later locates that block's own span
-  // inside it). Cloning the binding here — rather than teaching every
-  // downstream stage about speakingTakeSlot — is what keeps
-  // transcribe/trim/resolveRoles/assemble completely unchanged; they just
-  // see an ordinary bound clip per block, same as any other format.
+  // A speaking-take binding of SEVERAL clips (filmed apart, e.g. a marker
+  // line and its explanation shot separately) gets collapsed here into one
+  // ordinary {type:"file"} binding before anything else runs — a single
+  // clip is byte-identical to today's one-take path (no re-encode); two or
+  // more go through prepareTake.ts's own script-fitting ordering, edge
+  // trim, and ffmpeg concat into one derived, cached, edge-trimmed MP4.
+  // Runs BEFORE the clone below, which needs bindings[slot.name] to
+  // already be a single file. A clip missing audio is a per-clip intake
+  // error (not a per-clip errors.push scattered through the generic loop
+  // above) since prepareTake.ts's own ffmpeg concat would otherwise fail
+  // opaquely mid-run on a clip with no audio stream to trim.
+  if (format.speakingTakeSlot) {
+    const takeSlotName = format.speakingTakeSlot.name;
+    const take = bindings[takeSlotName];
+    if (take?.type === "files") {
+      if (take.files.length === 1) {
+        bindings[takeSlotName] = { type: "file", ...take.files[0] };
+      } else {
+        const silent = take.files.filter((f) => f.hasAudio === false);
+        if (silent.length > 0) {
+          for (const f of silent) {
+            errors.push(`speaking take clip "${f.path}" has no audio track`);
+          }
+        } else {
+          try {
+            const prep = ensureTakePrep(
+              absJobDir,
+              path.basename(absJobDir),
+              takeSlotName,
+              take.files,
+              format,
+              readScriptSuggestions(absJobDir),
+            );
+            const absCombined = path.resolve(absJobDir, prep.combinedPath);
+            bindings[takeSlotName] = { type: "file", path: prep.combinedPath, absPath: absCombined, ...probeFile(absCombined) };
+          } catch (err) {
+            errors.push(`speaking take: ${(err as Error).message}`);
+          }
+        }
+      }
+    }
+  }
+
+  // Every voice block NOT bound directly (derivedFromTake) gets the SAME
+  // shared take file cloned into its own slot (splitTake.ts later locates
+  // that block's own span inside it) — a block the user DID bind directly
+  // keeps its own clip untouched, which is what makes mixing "one whole
+  // take" with a few individually re-filmed lines work. Cloning the
+  // binding here — rather than teaching every downstream stage about
+  // speakingTakeSlot — is what keeps transcribe/trim/resolveRoles/assemble
+  // completely unchanged; they just see an ordinary bound clip per block,
+  // same as any other format.
   if (format.speakingTakeSlot) {
     const take = bindings[format.speakingTakeSlot.name];
     if (take?.type === "file") {

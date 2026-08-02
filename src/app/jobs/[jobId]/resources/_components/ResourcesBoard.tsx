@@ -27,10 +27,11 @@ const allSlots = (format: Format): Slot[] => [
 ];
 
 /** Three steps, matching the flow this was modeled on: write your lines,
- *  upload footage/photos/optional extras, then (for a single-take format)
- *  split the take into lines before building. A format without
- *  speakingTakeSlot just skips straight from footage to review+build in
- *  Step 3 — same step count either way. */
+ *  upload footage/photos/optional extras, then (when this job actually
+ *  bound a speaking take) split it into lines before building. A job that
+ *  filmed every block's own clip individually — or a format with no
+ *  speakingTakeSlot at all — just skips straight from footage to
+ *  review+build in Step 3, same step count either way. */
 const STEPS: WizardStepInfo[] = [
   { id: 1, label: "Write your lines", kicker: "Scripting & planning" },
   { id: 2, label: "Add your footage & photos", kicker: "Upload & inputs" },
@@ -70,26 +71,55 @@ export function ResourcesBoard({
    *  do something about it (fill a slot, re-film a take). */
   const [diagnostics, setDiagnostics] = useState<string[] | null>(null);
 
-  // In single-take mode, a voice block's own clip slot is DERIVED from
-  // speakingTakeSlot at intake time (see intake.ts) — never an upload
-  // target here, same treatment as a generated slot but for a different
-  // reason. Both this set and the `.generation` check below exist so
-  // "required slots filled" and the Step 2 dropzone grid agree on what's
-  // actually user-fillable.
-  const derivedFromTake = useMemo(
+  const takeSlot = format.speakingTakeSlot;
+  // A format's speakingTakeSlot is either the MANDATORY, sole way to
+  // supply voice footage (e.g. cinematic-debut-manifesto, `required:
+  // true`) or an OPTIONAL alternative to per-block uploads (every format
+  // loader.ts auto-synthesizes one for — see withImplicitSpeakingTake).
+  // The two need different UI: a mandatory take hides every voice block's
+  // own clip dropzone outright (it's never a real upload target); an
+  // optional one keeps every dropzone visible so per-clip filming keeps
+  // working unchanged, and only marks a block as "covered" once a take is
+  // actually dropped in — see takeCoveredSlots below.
+  const takeRequired = !!takeSlot?.required;
+  const takeBinding = takeSlot ? bindings[takeSlot.name] : undefined;
+  const takeIsBound = !!takeBinding;
+
+  const alwaysHiddenSlots = useMemo(
     () =>
       new Set(
-        format.speakingTakeSlot
-          ? format.blocks.filter((b) => b.kind === "voice").map((b) => b.videoSlot)
+        takeSlot && takeRequired
+          ? format.blocks.filter((b) => b.kind === "voice" && !b.optional).map((b) => b.videoSlot)
           : [],
       ),
-    [format],
+    [format, takeSlot, takeRequired],
+  );
+
+  // Mirrors intake.ts's own derivedFromTake-when-takeBound: once an
+  // OPTIONAL take is actually dropped in, every voice block the user
+  // hasn't individually bound is covered by it instead — so its own
+  // dropzone stops counting as required (and gets an explanatory note,
+  // rendered below) without disappearing outright, which is what lets a
+  // block still be re-filmed on its own to override the take for just
+  // that line.
+  const takeCoveredSlots = useMemo(
+    () =>
+      new Set(
+        takeSlot && !takeRequired && takeIsBound
+          ? format.blocks
+              .filter((b) => b.kind === "voice" && !b.optional && !bindings[b.videoSlot])
+              .map((b) => b.videoSlot)
+          : [],
+      ),
+    [format, takeSlot, takeRequired, takeIsBound, bindings],
   );
 
   const requiredSlots = useMemo(
     () =>
-      allSlots(format).filter((s) => s.required && !s.generation && !derivedFromTake.has(s.name)),
-    [format, derivedFromTake],
+      allSlots(format).filter(
+        (s) => s.required && !s.generation && !alwaysHiddenSlots.has(s.name) && !takeCoveredSlots.has(s.name),
+      ),
+    [format, alwaysHiddenSlots, takeCoveredSlots],
   );
   const filledCount = requiredSlots.filter((s) => bindings[s.name]).length;
   const ready = filledCount === requiredSlots.length;
@@ -97,9 +127,7 @@ export function ResourcesBoard({
    *  without hardcoding an id string — see content/virality.ts. */
   const hookBlock = useMemo(() => format.blocks.find((b) => b.kind === "voice"), [format]);
 
-  const speakingTakeBinding = format.speakingTakeSlot ? bindings[format.speakingTakeSlot.name] : undefined;
-  const speakingTakeFile =
-    speakingTakeBinding && "file" in speakingTakeBinding ? speakingTakeBinding.file : undefined;
+  const speakingTakeFile = takeBinding && "file" in takeBinding ? takeBinding.file : undefined;
 
   const setBinding = (slotName: string, binding: Binding | undefined) => {
     setBindings((prev) => ({ ...prev, [slotName]: binding }));
@@ -213,20 +241,35 @@ export function ResourcesBoard({
 
         {step === 2 && (
           <>
-            {format.speakingTakeSlot && (
+            {takeSlot && (
               <Card className="p-6">
                 <div className="mb-4 flex items-center gap-2">
                   <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
                     Speaking take
                   </h2>
-                  <Pill>one continuous take of all your lines</Pill>
+                  <Pill>
+                    {takeRequired
+                      ? "one continuous take of all your lines"
+                      : "optional — film it all in one take instead"}
+                  </Pill>
                 </div>
+                {!takeRequired && (
+                  <p className="mb-4 text-[12px] leading-snug text-[color:var(--ink-dim)]">
+                    Filmed each line separately? Skip this and fill in each block&apos;s own clip below
+                    instead. Throw in one whole take here and we&apos;ll automatically find where each
+                    line starts — you can even mix the two, using this for most of it and re-filming a
+                    line or two on its own below. Didn&apos;t film it in one go? Drop in several clips —
+                    even a clip that only covers one word — and we&apos;ll figure out what&apos;s said in
+                    each, put them in order, and stitch them into one continuous take.
+                  </p>
+                )}
                 <div className="max-w-md">
                   <SlotDropzone
                     jobId={jobId}
-                    slot={format.speakingTakeSlot}
-                    binding={bindings[format.speakingTakeSlot.name]}
+                    slot={takeSlot}
+                    binding={bindings[takeSlot.name]}
                     onChange={setBinding}
+                    multi
                   />
                 </div>
               </Card>
@@ -234,7 +277,7 @@ export function ResourcesBoard({
 
             {format.blocks.map((block) => {
               const footageSlots = block.slots.filter(
-                (s) => s.mediaType !== "text" && !derivedFromTake.has(s.name),
+                (s) => s.mediaType !== "text" && !alwaysHiddenSlots.has(s.name),
               );
               if (footageSlots.length === 0) return null;
               return (
@@ -257,6 +300,11 @@ export function ResourcesBoard({
                           binding={bindings[slot.name]}
                           onChange={setBinding}
                           multi={block.kind === "voice" && slot.name === block.videoSlot}
+                          coveredNote={
+                            takeCoveredSlots.has(slot.name)
+                              ? "Covered by your speaking take — drop a clip here to film this line separately instead."
+                              : undefined
+                          }
                         />
                       ),
                     )}
@@ -335,8 +383,19 @@ export function ResourcesBoard({
 
         {step === 3 && (
           <>
-            {format.speakingTakeSlot && (
-              <SplitLines jobId={jobId} format={format} script={script} takeFile={speakingTakeFile} />
+            {/* A mandatory take (takeRequired) always shows this, even before
+                it's bound, matching cinematic-debut-manifesto's existing
+                "upload it in the previous step first" nudge. An OPTIONAL take
+                only shows once actually bound — no reason to nudge a
+                per-clip-only user toward a step that has nothing to do. */}
+            {takeSlot && (takeRequired || takeIsBound) && (
+              <SplitLines
+                jobId={jobId}
+                format={format}
+                script={script}
+                takeFile={speakingTakeFile}
+                takeBound={takeRequired || takeIsBound}
+              />
             )}
 
             {hookBlock && <HookFeedbackPanel jobId={jobId} initialFeedback={initialHookFeedback} />}

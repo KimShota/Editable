@@ -5,7 +5,9 @@ import { loadFormat } from "./loader";
 import { generate } from "./generate";
 import { GeneratorChoice } from "./generation";
 import { transcribe } from "./transcribe";
-import { deriveTranscriptAndTrimWithStandalone, splitTake, SplitTakeResult } from "./splitTake";
+import { deriveTranscriptAndTrimWithStandalone, isTakeCovered, splitTake, SplitTakeResult, takeIsBound } from "./splitTake";
+import { readScriptSuggestions } from "./alignToScript";
+import { readTakePrep } from "./prepareTake";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
 import { runMatte } from "./matte";
@@ -59,7 +61,19 @@ export const runSplit = (format: Format, filled: FilledFormat, jobId: string): S
       `runSplit: speakingTakeSlot "${slot.name}" is not bound to a file with a known duration`,
     );
   }
-  const split = splitTake(format, take.absPath, take.durationSec);
+  const coveredBlocks = format.blocks.filter((b) => isTakeCovered(format, filled, b));
+  const scriptByBlockId = readScriptSuggestions(filled.jobDir);
+  // A multi-clip take binding leaves its already-computed, combined-file-
+  // relative words in takePrep.json — reuse them instead of re-running
+  // whisper on the just-concatenated file (see splitTake's own doc comment
+  // on precomputedWords). Only valid when takePrep's own combined file IS
+  // the file actually bound here — a job that's since gone back to a
+  // single-clip take (or a stale/foreign takePrep.json) falls through to
+  // the ordinary whisper pass.
+  const takePrep = readTakePrep(jobId);
+  const precomputedWords =
+    takePrep && path.resolve(filled.jobDir, takePrep.combinedPath) === take.absPath ? takePrep.words : undefined;
+  const split = splitTake(format, coveredBlocks, take.absPath, take.durationSec, scriptByBlockId, precomputedWords);
   writeArtifact(jobId, "splitTake", split);
   return split;
 };
@@ -107,15 +121,18 @@ export const buildJob = async (
   const { filled, inserts } = await generate(format, intakeFilled, generator);
   writeArtifact(jobId, "inserts", inserts);
 
-  // Single-take mode (speakingTakeSlot set): the split UI (resources
-  // wizard Step 3) is the normal path to a good splitTake.json, but if the
-  // user skipped straight to build, auto-split now rather than failing —
-  // same "never block a build over a skipped manual step" idea a
-  // generated slot's own fallback already uses. Otherwise, the ordinary
-  // per-block transcribe/trim this pipeline always did.
+  // Single-take (or mixed) mode: whenever this job actually bound a
+  // speakingTakeSlot (takeIsBound — a format may merely OFFER it as an
+  // optional alternative to per-block uploads, see loader.ts's
+  // withImplicitSpeakingTake), the split UI (resources wizard Step 3) is
+  // the normal path to a good splitTake.json, but if the user skipped
+  // straight to build, auto-split now rather than failing — same "never
+  // block a build over a skipped manual step" idea a generated slot's own
+  // fallback already uses. Otherwise, the ordinary per-block
+  // transcribe/trim this pipeline always did.
   let rawTranscript: Transcript;
   let trims: TrimPoints | undefined;
-  if (format.speakingTakeSlot) {
+  if (takeIsBound(format, filled)) {
     const split = readSplit(jobId) ?? runSplit(format, filled, jobId);
     const derived = await deriveTranscriptAndTrimWithStandalone(format, filled, split, resolver);
     rawTranscript = derived.transcript;
