@@ -50,8 +50,12 @@ const GAP_PENALTY = -0.4;
  *  alignToScript.ts uses for transcript correction. */
 const SIMILARITY_FLOOR = 0.5;
 /** A clip's overall fit (mean similarity over ALL its own words, matched or
- *  not) must clear this to be placed with confidence. */
-const MIN_ALIGN_SCORE = 0.55;
+ *  not) must clear this to be placed with confidence. Exported for
+ *  splitTake.ts's own multi-clip split, which uses the SAME bar to decide
+ *  whether a clip's own word-level alignment is trustworthy enough to
+ *  segment by, or whether to fall back to pause-based utterance splitting
+ *  instead (see splitClipByUtterance). */
+export const MIN_ALIGN_SCORE = 0.55;
 /** A single matched word only counts as a confident placement (the "one
  *  clip says just 'Claude'" case) when it's this close a match AND unique
  *  in the script — otherwise a short filler word matching every line's
@@ -151,19 +155,33 @@ const scriptWordsOf = (text: string): string[] =>
     .filter(Boolean);
 
 /** Concatenates every non-optional voice block's own script.json line, in
- *  format order — the reference a clip's own words are fit against. */
-const buildScriptWords = (format: Format, scriptByBlockId: Map<string, string>): string[] => {
+ *  format order, alongside a parallel array of which blockId each word came
+ *  from — the reference a clip's own words are fit against (words), and
+ *  (blockIds) how a matched script word index maps back to a block. Kept as
+ *  one function, not two, so the two arrays can never drift apart. Exported
+ *  for splitTake.ts's own per-clip segmentation (see its multi-clip split),
+ *  which re-fits each ORIGINAL clip's words against this same reference to
+ *  find where each block's own fragment falls inside that one clip. */
+export const buildScriptWordIndex = (
+  format: Format,
+  scriptByBlockId: Map<string, string>,
+): { words: string[]; blockIds: string[] } => {
   const words: string[] = [];
+  const blockIds: string[] = [];
   for (const block of format.blocks) {
     if (block.kind !== "voice" || block.optional) continue;
     const text = scriptByBlockId.get(block.id);
-    if (text) words.push(...scriptWordsOf(text));
+    if (!text) continue;
+    for (const w of scriptWordsOf(text)) {
+      words.push(w);
+      blockIds.push(block.id);
+    }
   }
-  return words;
+  return { words, blockIds };
 };
 
-type AlignedPair = { clipIndex: number; scriptIndex: number };
-type FitResult = { pairs: AlignedPair[]; scriptStartIdx: number; scriptEndIdx: number; score: number };
+export type AlignedPair = { clipIndex: number; scriptIndex: number };
+export type FitResult = { pairs: AlignedPair[]; scriptStartIdx: number; scriptEndIdx: number; score: number };
 
 /**
  * Semi-global ("fitting") word alignment: a clip is a FRAGMENT that may
@@ -174,7 +192,7 @@ type FitResult = { pairs: AlignedPair[]; scriptStartIdx: number; scriptEndIdx: n
  * script doesn't have) still costs GAP_PENALTY. Returns null when nothing
  * scores above the similarity floor at all.
  */
-const fitAlign = (clipWords: string[], scriptWords: string[]): FitResult | null => {
+export const fitAlign = (clipWords: string[], scriptWords: string[]): FitResult | null => {
   const n = clipWords.length;
   const m = scriptWords.length;
   if (n === 0 || m === 0) return null;
@@ -550,7 +568,7 @@ export const ensureTakePrep = (
 
   const clips = transcribeClips(files, inputs, cached);
 
-  const scriptWords = scriptByBlockId ? buildScriptWords(format, scriptByBlockId) : [];
+  const scriptWords = scriptByBlockId ? buildScriptWordIndex(format, scriptByBlockId).words : [];
   const placements =
     scriptWords.length > 0
       ? clips.map((c) => alignAgainstScript(c, scriptWords))

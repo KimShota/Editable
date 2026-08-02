@@ -6,6 +6,8 @@ import { detectSilenceIntervals, trim, trimBrollBlock } from "./trim";
 import { transcribe } from "./transcribe";
 import { ResolverChoice } from "./resolvers";
 import { requireWhisperModel, transcribeFile } from "./whisper";
+import { wordSimilarity } from "./alignToScript";
+import { buildScriptWordIndex, fitAlign, FitResult, MIN_ALIGN_SCORE } from "./prepareTake";
 import {
   Block,
   BlockTranscript,
@@ -13,6 +15,7 @@ import {
   FilledFormat,
   Format,
   LiteralAnchor,
+  TakePrep,
   TakeTrim,
   Transcript,
   TrimPoints,
@@ -86,12 +89,34 @@ export type TakeSplit = {
   blockId: string;
   srcInSec: number;
   srcOutSec: number;
-  /** 0 when no literal anchor matched and this block's start fell back to
-   *  "right after the previous block ended" — surfaced in the split UI as
+  /** 0 (or, for the multi-clip utterance fallback, a low fixed value — see
+   *  UTTERANCE_FALLBACK_CONFIDENCE) when no confident match was found and
+   *  this span is a guess — surfaced in the split UI (confidence < 0.5) as
    *  a span that especially needs a manual look. */
   confidence: number;
   quote?: string;
+  /** Job-relative path to the ORIGINAL uploaded clip this segment's span
+   *  was found in — set only by splitMultiClipTake (a single-clip take, the
+   *  ordinary case, leaves this undefined; srcInSec/srcOutSec are already
+   *  unambiguous with exactly one segment per block). The split UI groups
+   *  segments into one panel per clipPath so "check this line" means
+   *  checking it against the actual footage it was found in, not a
+   *  concatenated file the block boundaries can't line up with (see this
+   *  module's own doc comment on why splitMultiClipTake exists at all).
+   *  srcInSec/srcOutSec always stay in COMBINED-file time regardless —
+   *  only the grouping key changes; every downstream consumer
+   *  (deriveTranscriptAndTrim, assemble.ts) keeps working against the one
+   *  shared combined file exactly as before. */
+  clipPath?: string;
 };
+
+/** Bumped whenever this module's OWN output shape changes in a way that
+ *  invalidates an existing splitTake.json — e.g. adding clipPath/multi-
+ *  segment-per-block support here. orchestrate.ts's readSplit discards a
+ *  cached split whose version doesn't match, so an old job transparently
+ *  gets a fresh auto-split next time its resources page loads, rather than
+ *  the split UI trying to render a shape it no longer understands. */
+export const SPLIT_PIPELINE_VERSION = "2";
 
 export type SplitTakeResult = {
   /** Whole-take words, raw take-relative time — kept so a manual
@@ -99,6 +124,7 @@ export type SplitTakeResult = {
   words: Word[];
   durationSec: number;
   blocks: TakeSplit[];
+  pipelineVersion: string;
 };
 
 const literalAnchorsOf = (block: Block): LiteralAnchor[] =>
@@ -347,7 +373,267 @@ export const splitTake = (
     .filter((b) => b.covered)
     .map((b): TakeSplit => ({ blockId: b.blockId, srcInSec: b.srcInSec, srcOutSec: b.srcOutSec, confidence: b.confidence, quote: b.quote }));
 
-  return { words, durationSec, blocks };
+  return { words, durationSec, blocks, pipelineVersion: SPLIT_PIPELINE_VERSION };
+};
+
+// ---------------------------------------------------------------------------
+// Multi-clip split — one auto-split PER ORIGINAL CLIP instead of one walk
+// across the combined file (see prepareTake.ts and splitMultiClipTake's own
+// doc comment below for why the single-walk approach above can't work when
+// a "take" is actually several separately-filmed clips, each covering only
+// a FRAGMENT of every line rather than a few whole lines each).
+// ---------------------------------------------------------------------------
+
+/** Whisper wraps a non-lexical sound in literal parentheses — "(clears
+ *  throat)", "(laughs)" — never real script content. Filtered out before
+ *  counting utterances below so a leading throat-clear doesn't throw off
+ *  "does this clip's utterance count match the number of lines" (a false
+ *  start would otherwise silently add one bogus utterance and make an
+ *  otherwise-clean 1:1 mapping look like a mismatch). */
+const isNonVerbalUtterance = (words: Word[]): boolean => /[()]/.test(words.map((w) => w.text).join(""));
+
+/** How long a gap between two consecutive whisper words has to be to read
+ *  as the boundary between two separately-spoken LINES, for a clip whose
+ *  own whole-clip script alignment wasn't confident enough to trust word-
+ *  for-word (see splitClipRanges). Comfortably above ordinary word-to-word
+ *  timing within one phrase (0s within any word measured while building
+ *  this) and comfortably below the shortest real between-line pause
+ *  observed in practice (>1.4s) — a clip that simply names one tool after
+ *  another, one per line, reads as a clean run of short bursts separated
+ *  by long silences. */
+const UTTERANCE_GAP_SEC = 0.8;
+
+/** Fixed confidence assigned to every span the utterance fallback produces
+ *  — well under the split UI's own <0.5 "needs a look" threshold (same
+ *  spirit as this module's own confidence-0 fallback above), since a
+ *  positional guess is exactly that, not a real match. */
+const UTTERANCE_FALLBACK_CONFIDENCE = 0.3;
+
+type Utterance = { words: Word[]; startSec: number; endSec: number };
+
+/** Groups a clip's own words into runs separated by a UTTERANCE_GAP_SEC+
+ *  silence — the pause-based fallback's unit of "one spoken line", used
+ *  when this clip's whole-take alignment against the script wasn't
+ *  confident enough to trust (see MIN_ALIGN_SCORE). */
+const utterancesOf = (words: Word[]): Utterance[] => {
+  const utterances: Utterance[] = [];
+  let current: Word[] = [];
+  for (const w of words) {
+    const prev = current[current.length - 1];
+    if (prev && w.startSec - prev.endSec > UTTERANCE_GAP_SEC) {
+      utterances.push({ words: current, startSec: current[0].startSec, endSec: prev.endSec });
+      current = [];
+    }
+    current.push(w);
+  }
+  if (current.length > 0) {
+    utterances.push({ words: current, startSec: current[0].startSec, endSec: current[current.length - 1].endSec });
+  }
+  return utterances;
+};
+
+/** One block's own word range within a single clip, clip-relative seconds
+ *  — the shared intermediate shape both segmentation strategies below
+ *  produce, before padRangesToSegments turns adjacent ranges into
+ *  non-overlapping cut spans. */
+type ClipRange = { blockId: string; startSec: number; endSec: number; confidence: number };
+
+/**
+ * Word-level alignment strategy: fits this clip's own words against the
+ * SAME concatenated script reference prepareTake.ts's ensureTakePrep used
+ * to place the clip in the first place (buildScriptWordIndex), then groups
+ * the matched word pairs by which block each matched script word belongs
+ * to. Reliable exactly when the clip's WHOLE-clip fit score already cleared
+ * MIN_ALIGN_SCORE (checked by the caller) — a clip that scored well overall
+ * has clean, mostly-correct per-word matches to group by.
+ */
+const alignmentRanges = (
+  clipWords: Word[],
+  fit: FitResult,
+  scriptWordIndex: { words: string[]; blockIds: string[] },
+): ClipRange[] | null => {
+  if (fit.pairs.length === 0) return null;
+
+  const byBlock = new Map<string, { clipIndex: number; scriptIndex: number }[]>();
+  for (const p of fit.pairs) {
+    const blockId = scriptWordIndex.blockIds[p.scriptIndex];
+    if (!byBlock.has(blockId)) byBlock.set(blockId, []);
+    byBlock.get(blockId)!.push(p);
+  }
+
+  const ranges: ClipRange[] = [...byBlock.entries()].map(([blockId, pairs]) => {
+    const clipIdxs = pairs.map((p) => p.clipIndex).sort((a, b) => a - b);
+    const similarity =
+      pairs.reduce((sum, p) => sum + wordSimilarity(clipWords[p.clipIndex].text, scriptWordIndex.words[p.scriptIndex]), 0) /
+      pairs.length;
+    return {
+      blockId,
+      startSec: clipWords[clipIdxs[0]].startSec,
+      endSec: clipWords[clipIdxs[clipIdxs.length - 1]].endSec,
+      confidence: similarity,
+    };
+  });
+  ranges.sort((a, b) => a.startSec - b.startSec);
+  return ranges;
+};
+
+/**
+ * Pause-based fallback strategy for a clip whose whole-clip alignment
+ * wasn't confident (e.g. whisper mishears every brand name in a clip of
+ * back-to-back tool names — a real case: "Claude" transcribed as "Quad",
+ * "Grok" as "Grock", "NotebookLM" as "Note book and learn"). Rather than
+ * trust word-for-word matching against text whisper got largely wrong,
+ * this only trusts the ACOUSTIC shape of the clip: if it breaks into
+ * exactly as many pause-separated utterances as the format has lines, each
+ * utterance almost certainly IS one line, spoken in the same order the
+ * format lists them — map them 1:1 positionally, no text matching at all.
+ * Returns null (nothing usable) when the count doesn't match; a caller
+ * with no better guess for this clip then simply gets no segments from it
+ * rather than a wrong one (same "never wrong in a way that breaks
+ * rendering" precedent as this module's own confidence-0 fallback above).
+ */
+const utteranceRanges = (clipWords: Word[], walkBlockIds: string[]): ClipRange[] | null => {
+  const utterances = utterancesOf(clipWords).filter((u) => !isNonVerbalUtterance(u.words));
+  if (utterances.length !== walkBlockIds.length) return null;
+  return utterances.map((u, i) => ({
+    blockId: walkBlockIds[i],
+    startSec: u.startSec,
+    endSec: u.endSec,
+    confidence: UTTERANCE_FALLBACK_CONFIDENCE,
+  }));
+};
+
+/** Turns an ordered-by-startSec, one-range-per-block list into padded,
+ *  overlap-free cut spans: the boundary between two adjacent ranges lands
+ *  exactly on the MIDPOINT of the silence between them (never encroaching
+ *  on a neighbor, however little padding that leaves), padded out from
+ *  each range's own words by up to PAD_SEC when the gap allows it. The
+ *  outermost edges (no neighbor on that side) pad freely against
+ *  lowerBoundSec/upperBoundSec — this clip's own edge-trimmed window (see
+ *  TakePrepClip.srcInSec/srcOutSec), not the raw file, since anything
+ *  outside that window was never cut into the combined file at all. */
+const padRangesToSegments = (
+  ranges: ClipRange[],
+  lowerBoundSec: number,
+  upperBoundSec: number,
+): { blockId: string; srcInSec: number; srcOutSec: number; confidence: number }[] =>
+  ranges.map((r, i) => {
+    const prev = ranges[i - 1];
+    const next = ranges[i + 1];
+    const leftBound = prev ? (prev.endSec + r.startSec) / 2 : lowerBoundSec;
+    const rightBound = next ? (r.endSec + next.startSec) / 2 : upperBoundSec;
+    const srcInSec = Math.max(leftBound, r.startSec - PAD_SEC);
+    const srcOutSec = Math.max(srcInSec + 0.05, Math.min(rightBound, r.endSec + PAD_SEC));
+    return { blockId: r.blockId, srcInSec, srcOutSec, confidence: r.confidence };
+  });
+
+/**
+ * Module 3s, multi-clip variant — runs when a speakingTakeSlot binding is
+ * several separately-filmed clips (prepareTake.ts's TakePrep) rather than
+ * one continuous recording. splitTake's own single walk above assumes each
+ * covered block's content appears ONCE, contiguously, somewhere in the
+ * take — an assumption a multi-clip take can break outright: e.g. one clip
+ * recorded naming only the TASK half of every line ("Writing emails,
+ * brainstorming ideas, …") and a second recorded naming only the TOOL half
+ * ("Claude. ChatGPT. …"), so every single block's line is split across
+ * BOTH clips, not contained in either one. A linear walk across the
+ * concatenated combined file simply cannot represent that; this instead
+ * splits EACH ORIGINAL CLIP independently (segmentClipRanges below) and
+ * lets a block end up with as many segments as clips actually contributed
+ * to it — deriveTranscriptAndTrim already knows how to concatenate several
+ * segments for one block (the same multi-take machinery a block filmed as
+ * several standalone takes already uses), so nothing downstream of this
+ * function needs to know the take was ever split apart.
+ *
+ * Segment times are still COMBINED-file-relative, same as the single-walk
+ * path — only the SOURCE this function searches (one clip's own words at a
+ * time, not the concatenated whole) and the fact that one block can now
+ * emit more than one segment are new. Each segment also records which
+ * ORIGINAL clip it came from (TakeSplit.clipPath), purely for the split
+ * UI's own grouping — nothing in deriveTranscriptAndTrim/assemble reads it.
+ */
+export const splitMultiClipTake = (
+  format: Format,
+  coveredBlocks: Block[],
+  takePrep: TakePrep,
+  scriptByBlockId: Map<string, string> | undefined,
+): SplitTakeResult => {
+  const coveredIds = new Set(coveredBlocks.map((b) => b.id));
+  const walkBlocks = format.blocks.filter((b) => b.kind === "voice" && !b.optional);
+  const walkBlockIds = walkBlocks.map((b) => b.id);
+  const scriptWordIndex = scriptByBlockId ? buildScriptWordIndex(format, scriptByBlockId) : { words: [], blockIds: [] };
+
+  const keptClips = takePrep.clips.filter((c) => c.ordering !== "excluded");
+  const clipScriptStart = new Map(keptClips.map((c) => [c.input.path, c.scriptStartIdx ?? Number.MAX_SAFE_INTEGER]));
+
+  const blocks: TakeSplit[] = [];
+  for (const clip of keptClips) {
+    const clipWords = clip.words.filter((w) => w.startSec >= clip.srcInSec && w.startSec < clip.srcOutSec);
+    if (clipWords.length === 0) continue;
+
+    let ranges: ClipRange[] | null = null;
+    if (scriptWordIndex.words.length > 0) {
+      const fit = fitAlign(
+        clipWords.map((w) => w.text),
+        scriptWordIndex.words,
+      );
+      if (fit && fit.score >= MIN_ALIGN_SCORE) ranges = alignmentRanges(clipWords, fit, scriptWordIndex);
+    }
+    if (!ranges) ranges = utteranceRanges(clipWords, walkBlockIds);
+    if (!ranges) continue; // nothing usable from this clip — see utteranceRanges' own doc comment
+
+    const segments = padRangesToSegments(ranges, clip.srcInSec, clip.srcOutSec).filter((s) => coveredIds.has(s.blockId));
+    for (const s of segments) {
+      blocks.push({
+        blockId: s.blockId,
+        srcInSec: s.srcInSec - clip.srcInSec + clip.offsetSec,
+        srcOutSec: s.srcOutSec - clip.srcInSec + clip.offsetSec,
+        confidence: s.confidence,
+        clipPath: clip.input.path,
+      });
+    }
+  }
+
+  // A block with more than one segment gets concatenated by
+  // deriveTranscriptAndTrim in the ORDER its segments appear here (see that
+  // function's own doc comment) — so segments for the same block need to
+  // land in the order the LINE actually reads, not the order their source
+  // clips happen to sit in the combined file (the clip placed first by
+  // prepareTake.ts is whichever one aligned least confidently, which has
+  // nothing to do with which half of the line it says). Each kept clip's
+  // own scriptStartIdx (its rough position in the whole concatenated
+  // script, computed once by prepareTake.ts regardless of whether that
+  // placement was "confident") is a reasonable proxy for "which part of
+  // each line this clip covers".
+  //
+  // Grouped by blockId (first-seen order preserved) and each group sorted
+  // independently, rather than one Array.sort over the whole flat list
+  // with a comparator that returns 0 across different blockIds — that
+  // comparator isn't transitive (it can say tool > task for one block's
+  // pair while treating an unrelated block's segment as "equal" to both),
+  // which makes plain Array.sort's result unspecified, not merely
+  // "unsorted"; splitting into real groups first sidesteps that entirely.
+  const orderedBlockIds: string[] = [];
+  const byBlockId = new Map<string, TakeSplit[]>();
+  for (const b of blocks) {
+    if (!byBlockId.has(b.blockId)) {
+      byBlockId.set(b.blockId, []);
+      orderedBlockIds.push(b.blockId);
+    }
+    byBlockId.get(b.blockId)!.push(b);
+  }
+  const orderedBlocks: TakeSplit[] = orderedBlockIds.flatMap((blockId) => {
+    const segs = byBlockId.get(blockId)!;
+    segs.sort((a, b) => (clipScriptStart.get(a.clipPath!) ?? 0) - (clipScriptStart.get(b.clipPath!) ?? 0));
+    return segs;
+  });
+
+  return {
+    words: takePrep.words,
+    durationSec: takePrep.combinedDurationSec,
+    blocks: orderedBlocks,
+    pipelineVersion: SPLIT_PIPELINE_VERSION,
+  };
 };
 
 /**
@@ -367,26 +653,50 @@ export const deriveTranscriptAndTrim = (
   filled: FilledFormat,
   split: SplitTakeResult,
 ): { transcript: Transcript; trim: TrimPoints } => {
-  const transcriptBlocks: BlockTranscript[] = [];
-  const trimBlocks: BlockTrim[] = [];
+  // A block usually gets exactly one segment (the ordinary single-walk
+  // split above), but splitMultiClipTake can emit SEVERAL for one block —
+  // one per contributing clip (see its own doc comment). Grouped by
+  // blockId, in the order split.blocks already lists them (that order is
+  // itself meaningful for a multi-segment block — see
+  // splitMultiClipTake's own sort), into the SAME multi-take shape a block
+  // filmed as several standalone takes already produces (BlockTranscript.
+  // takes/BlockTrim.takes are always arrays) — so assemble.ts's existing
+  // multi-take concatenation (one video segment per take, laid back to
+  // back) handles this with no changes of its own, same as
+  // concatenateTakes for captions.
+  const wordsByBlock = new Map<string, Word[][]>();
+  const takesByBlock = new Map<string, TakeTrim[]>();
   for (const b of split.blocks) {
     const blockWords = split.words.filter((w) => w.startSec >= b.srcInSec && w.startSec < b.srcOutSec);
-    transcriptBlocks.push({ blockId: b.blockId, takeOrder: [0], takes: [blockWords] });
+    if (!wordsByBlock.has(b.blockId)) wordsByBlock.set(b.blockId, []);
+    wordsByBlock.get(b.blockId)!.push(blockWords);
+
     // Clamp the tail to just after the last word actually spoken in this
-    // block — otherwise a long pause before the next block's marker (or
-    // before the take's own last detected speech, for the final block)
-    // leaves dead air inside the span, and a broll beat cut right after
-    // this block lands in that dead air instead of right at the end of
-    // speech (the beat-wiring "cuts land exactly at line ends" guarantee).
-    // Skipped when no word matched inside the span at all (a confidence-0
-    // fallback start) — there's no word timing here to clamp against.
+    // segment — otherwise a long pause before the next boundary (the next
+    // block's marker, the next segment of the SAME block, or the take's
+    // own last detected speech for the final one) leaves dead air inside
+    // the span, and a broll beat cut right after this block lands in that
+    // dead air instead of right at the end of speech (the beat-wiring
+    // "cuts land exactly at line ends" guarantee). Skipped when no word
+    // matched inside the span at all (a confidence-0 fallback start) —
+    // there's no word timing here to clamp against.
     const lastWordEnd = blockWords.length > 0 ? blockWords[blockWords.length - 1].endSec : undefined;
     const srcOutSec = lastWordEnd !== undefined ? Math.min(b.srcOutSec, lastWordEnd + LONG_PAUSE_CLAMP_SEC) : b.srcOutSec;
-    trimBlocks.push({
-      blockId: b.blockId,
-      takes: [{ srcInSec: b.srcInSec, srcOutSec } satisfies TakeTrim],
-    });
+    if (!takesByBlock.has(b.blockId)) takesByBlock.set(b.blockId, []);
+    takesByBlock.get(b.blockId)!.push({ srcInSec: b.srcInSec, srcOutSec });
   }
+
+  const transcriptBlocks: BlockTranscript[] = [...wordsByBlock.entries()].map(([blockId, takes]) => ({
+    blockId,
+    // Every take here comes from the SAME shared take file (splitTake's
+    // whole point), so there's only ever one underlying source file for
+    // assemble.ts's takeFiles to index into — takeOrder is all zeros
+    // regardless of how many segments this block has.
+    takeOrder: takes.map(() => 0),
+    takes,
+  }));
+  const trimBlocks: BlockTrim[] = [...takesByBlock.entries()].map(([blockId, takes]) => ({ blockId, takes }));
+
   for (const block of format.blocks) {
     if (block.kind !== "broll") continue;
     trimBlocks.push(trimBrollBlock(block, filled));

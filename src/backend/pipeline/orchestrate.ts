@@ -5,7 +5,15 @@ import { loadFormat } from "./loader";
 import { generate } from "./generate";
 import { GeneratorChoice } from "./generation";
 import { transcribe } from "./transcribe";
-import { deriveTranscriptAndTrimWithStandalone, isTakeCovered, splitTake, SplitTakeResult, takeIsBound } from "./splitTake";
+import {
+  deriveTranscriptAndTrimWithStandalone,
+  isTakeCovered,
+  splitMultiClipTake,
+  splitTake,
+  SPLIT_PIPELINE_VERSION,
+  SplitTakeResult,
+  takeIsBound,
+} from "./splitTake";
 import { readScriptSuggestions } from "./alignToScript";
 import { readTakePrep } from "./prepareTake";
 import { correctTranscript } from "./correctTranscript";
@@ -43,11 +51,22 @@ const writeArtifact = (jobId: string, name: string, data: unknown): void => {
 
 /** The persisted split (auto or manually adjusted), for a single-take-mode
  *  format — see splitTake.ts and schemas.ts's speakingTakeSlot doc. Null
- *  before the split step has ever run for this job. */
+ *  before the split step has ever run for this job, OR when the cached
+ *  file predates a shape change (SPLIT_PIPELINE_VERSION mismatch) — same
+ *  "transparently re-derive rather than misread" contract as
+ *  readOrMigrateEdl below, just triggered by a version STRING instead of a
+ *  schema parse failure (this artifact isn't zod-validated). */
 export const readSplit = (jobId: string): SplitTakeResult | null => {
   const file = path.join(artifactsDir(jobId), "splitTake.json");
   if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, "utf8"));
+  let parsed: SplitTakeResult;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+  if (parsed.pipelineVersion !== SPLIT_PIPELINE_VERSION) return null;
+  return parsed;
 };
 
 /** Runs (or re-runs, for "Re-align lines") auto-split fresh from the bound
@@ -64,25 +83,42 @@ export const runSplit = (format: Format, filled: FilledFormat, jobId: string): S
   const coveredBlocks = format.blocks.filter((b) => isTakeCovered(format, filled, b));
   const scriptByBlockId = readScriptSuggestions(filled.jobDir);
   // A multi-clip take binding leaves its already-computed, combined-file-
-  // relative words in takePrep.json — reuse them instead of re-running
-  // whisper on the just-concatenated file (see splitTake's own doc comment
-  // on precomputedWords). Only valid when takePrep's own combined file IS
-  // the file actually bound here — a job that's since gone back to a
+  // relative words (AND each original clip's own words/placement) in
+  // takePrep.json. Only valid when takePrep's own combined file IS the
+  // file actually bound here — a job that's since gone back to a
   // single-clip take (or a stale/foreign takePrep.json) falls through to
-  // the ordinary whisper pass.
+  // the ordinary single-clip path below.
   const takePrep = readTakePrep(jobId);
-  const precomputedWords =
-    takePrep && path.resolve(filled.jobDir, takePrep.combinedPath) === take.absPath ? takePrep.words : undefined;
-  const split = splitTake(format, coveredBlocks, take.absPath, take.durationSec, scriptByBlockId, precomputedWords);
+  const isMultiClipTake =
+    takePrep &&
+    path.resolve(filled.jobDir, takePrep.combinedPath) === take.absPath &&
+    takePrep.clips.filter((c) => c.ordering !== "excluded").length > 1;
+
+  // A genuinely multi-clip take (more than one clip actually cut into the
+  // combined file) can't be walked as one contiguous file — see
+  // splitMultiClipTake's own doc comment for why. Anything else (a single
+  // upload, or a multi-upload binding where retake-dedupe left only one
+  // clip standing) is the ordinary single-walk case, reusing takePrep's
+  // already-computed words when available (see splitTake's own doc
+  // comment on precomputedWords) instead of re-running whisper on the
+  // just-concatenated file.
+  const split = isMultiClipTake
+    ? splitMultiClipTake(format, coveredBlocks, takePrep, scriptByBlockId)
+    : splitTake(format, coveredBlocks, take.absPath, take.durationSec, scriptByBlockId, takePrep?.words);
   writeArtifact(jobId, "splitTake", split);
   return split;
 };
 
-/** Persists a manually dragged span for one block — re-derived from the
- *  SAME stored whole-take words already on disk, never re-transcribing. */
+/** Persists a manually dragged span for one block's segment — re-derived
+ *  from the SAME stored whole-take words already on disk, never
+ *  re-transcribing. `clipPath` disambiguates WHICH segment when a block
+ *  has more than one (a multi-clip split — see splitMultiClipTake); a
+ *  single-clip split's blocks have at most one segment each, so blockId
+ *  alone is already unambiguous there and clipPath can be omitted. */
 export const adjustSplit = (
   jobId: string,
   blockId: string,
+  clipPath: string | undefined,
   srcInSec: number,
   srcOutSec: number,
 ): SplitTakeResult => {
@@ -90,12 +126,21 @@ export const adjustSplit = (
   if (!split) {
     throw new Error(`adjustSplit: no split exists yet for job "${jobId}" — run split first`);
   }
+  let matched = false;
   const next: SplitTakeResult = {
     ...split,
-    blocks: split.blocks.map((b) =>
-      b.blockId === blockId ? { ...b, srcInSec, srcOutSec, confidence: 1 } : b,
-    ),
+    blocks: split.blocks.map((b) => {
+      if (b.blockId !== blockId) return b;
+      if (clipPath !== undefined && b.clipPath !== undefined && b.clipPath !== clipPath) return b;
+      matched = true;
+      return { ...b, srcInSec, srcOutSec, confidence: 1 };
+    }),
   };
+  if (!matched) {
+    throw new Error(
+      `adjustSplit: no segment found for block "${blockId}"${clipPath ? ` in clip "${clipPath}"` : ""}`,
+    );
+  }
   writeArtifact(jobId, "splitTake", next);
   return next;
 };

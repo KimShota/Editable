@@ -8,6 +8,30 @@ import { readSplit, runSplit, adjustSplit } from "@backend/pipeline/orchestrate"
 import { readTakePrep } from "@backend/pipeline/prepareTake";
 import type { FilledFormat, Format, JobManifest } from "@backend/pipeline/types";
 
+/** Per-original-clip conversion between COMBINED-file time (what
+ *  split.blocks' srcInSec/srcOutSec are always in) and that clip's own
+ *  NATIVE playback time — clipSec = combinedSec - offsetSec + srcInSec.
+ *  The split UI needs this to seek/scrub each clip's own <video> against
+ *  spans that are otherwise only meaningful against the (never directly
+ *  shown, in multi-clip mode) combined file. Always returns at least one
+ *  entry when a take is bound at all: a single-clip take's "window" is
+ *  just the identity mapping (offsetSec 0, srcInSec 0) against the bound
+ *  file itself, so the client can use the SAME conversion logic regardless
+ *  of whether the take turned out to be one clip or several. */
+const buildClipWindows = (
+  jobId: string,
+  takeFile: string | undefined,
+): { path: string; offsetSec: number; srcInSec: number }[] => {
+  if (!takeFile) return [];
+  const prep = readTakePrep(jobId);
+  if (prep && prep.combinedPath === takeFile) {
+    return prep.clips
+      .filter((c) => c.ordering !== "excluded")
+      .map((c) => ({ path: c.input.path, offsetSec: c.offsetSec, srcInSec: c.srcInSec }));
+  }
+  return [{ path: takeFile, offsetSec: 0, srcInSec: 0 }];
+};
+
 /**
  * Single-take split (resources wizard Step 3, "Split your take into
  * lines" — see schemas.ts's speakingTakeSlot doc comment). Only meaningful
@@ -58,7 +82,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ job
   }
   const manifest = readJobManifest(jobId);
   const format = loadFormat(manifest.format);
-  return NextResponse.json({ split: readSplit(jobId), takeFile: takeFileFromManifest(jobId, format, manifest) });
+  const takeFile = takeFileFromManifest(jobId, format, manifest);
+  return NextResponse.json({ split: readSplit(jobId), takeFile, clipWindows: buildClipWindows(jobId, takeFile) });
 }
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
@@ -70,7 +95,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ jo
     const filled = intake(jobDir(jobId));
     const format = loadFormat(filled.formatId);
     const split = runSplit(format, filled, jobId);
-    return NextResponse.json({ split, takeFile: takeFileFromFilled(format, filled) });
+    const takeFile = takeFileFromFilled(format, filled);
+    return NextResponse.json({ split, takeFile, clipWindows: buildClipWindows(jobId, takeFile) });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 400 });
   }
@@ -82,17 +108,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ jo
     return NextResponse.json({ error: "job not found" }, { status: 404 });
   }
   const body = await req.json().catch(() => null);
-  const { blockId, srcInSec, srcOutSec } = body ?? {};
+  const { blockId, clipPath, srcInSec, srcOutSec } = body ?? {};
   if (
     typeof blockId !== "string" ||
+    (clipPath !== undefined && typeof clipPath !== "string") ||
     typeof srcInSec !== "number" ||
     typeof srcOutSec !== "number" ||
     srcOutSec <= srcInSec
   ) {
-    return NextResponse.json({ error: "expected { blockId: string, srcInSec: number, srcOutSec: number } with srcOutSec > srcInSec" }, { status: 400 });
+    return NextResponse.json(
+      { error: "expected { blockId: string, clipPath?: string, srcInSec: number, srcOutSec: number } with srcOutSec > srcInSec" },
+      { status: 400 },
+    );
   }
   try {
-    const split = adjustSplit(jobId, blockId, srcInSec, srcOutSec);
+    const split = adjustSplit(jobId, blockId, clipPath, srcInSec, srcOutSec);
     return NextResponse.json({ split });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 400 });
