@@ -296,7 +296,14 @@ const detailPrompt = (req: GenerationRequest, shot: string): string => {
  *  Gemini failure — rate limits, a missing/quota-exhausted key, a network
  *  blip — so a detail shot no photo can truly cover (glasses/cash/shoes
  *  props) degrades to "a real photo of the person" rather than crashing
- *  the whole build. Not the real prop shot, but always SOMETHING valid. */
+ *  the whole build. Not the real prop shot, but always SOMETHING valid.
+ *
+ *  Under `req.strict` that photo fallback is refused the same way
+ *  compositeV2TierDown refuses it — reusing an already-generated still
+ *  from this job instead, and throwing when there is none. This path has
+ *  NO retry ladder of its own (one Gemini call, any throw lands here), so
+ *  it is the likeliest route by which a real photo reaches a finished
+ *  video; leaving it unguarded would make strict mode a false promise. */
 const buildDetailStillImage = async (
   req: GenerationRequest,
   sub: {
@@ -310,7 +317,7 @@ const buildDetailStillImage = async (
   width: number,
   height: number,
   outImagePath: string,
-): Promise<{ tier: "gemini" | "composite" }> => {
+): Promise<{ tier: "gemini" | "composite" | "reuse" }> => {
   try {
     const prompt = sub.fullPrompt ?? detailPrompt(req, sub.shot);
     const aspectRatio = closestGeminiAspectRatio(width, height);
@@ -328,6 +335,20 @@ const buildDetailStillImage = async (
     }
     return { tier: "gemini" };
   } catch (err) {
+    if (req.strict) {
+      if (reuseGeneratedStill(req.jobDir, width, height, sub.seed, outImagePath)) {
+        console.warn(
+          `modelShots: detailStill "${sub.shot}" Gemini generation failed, reusing an already-generated still ` +
+            `(STRICT_GENERATION=1, no identity-photo fallback) — ${(err as Error).message}`,
+        );
+        return { tier: "reuse" };
+      }
+      throw new Error(
+        `modelShots: detailStill "${sub.shot}" failed and this job has no already-generated still to reuse in ` +
+          `its place — refusing to fall back to the identity-photo composite (STRICT_GENERATION=1). ` +
+          `Original error: ${(err as Error).message}`,
+      );
+    }
     console.warn(`modelShots: detailStill "${sub.shot}" Gemini generation failed, falling back to a photo composite — ${(err as Error).message}`);
     // seed varies the fallback pick across sub-shots — without it every
     // failed detailStill in a triptych/montageReel would fall back to the
@@ -350,14 +371,77 @@ const stillPathFor = (jobDir: string, slotName: string): string => path.join(sti
  *  through GenerationRequest. */
 const slotNameFromOutPath = (outPath: string): string => path.basename(outPath, ".mp4");
 
+/** A still's recorded tier, read back from the qc sidecar its clip wrote
+ *  (writeQcSidecar) — the only trustworthy way to tell a real generated
+ *  frame from a tiered-down one, since both land in stills/ as ordinary
+ *  PNGs. Member stills are named "<parent>__member-<i>.png" and their tier
+ *  lives in the PARENT clip's own sidecar members[] array. Undefined when
+ *  no sidecar vouches for the file. */
+const recordedStillTier = (jobDir: string, stillFileName: string): string | undefined => {
+  const base = path.basename(stillFileName, ".png");
+  const memberMatch = /^(.*)__member-(\d+)$/.exec(base);
+  const clipSlot = memberMatch ? memberMatch[1] : base;
+  const sidecar = path.join(jobDir, "generated", `${clipSlot}.mp4.qc.json`);
+  if (!fs.existsSync(sidecar)) return undefined;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(sidecar, "utf8")) as {
+      qc?: { tier?: string; members?: Array<{ tier?: string }> };
+    };
+    return memberMatch ? parsed.qc?.members?.[Number(memberMatch[2])]?.tier : parsed.qc?.tier;
+  } catch {
+    return undefined;
+  }
+};
+
+/** Every still in this job whose sidecar vouches for it as REAL generated
+ *  output — the candidate pool a strict-mode fallback reuses instead of
+ *  compositing the user's own identity photo. Deliberately admits only the
+ *  "gemini" tier: a "composite"/"realCrop" still IS the user's own pixels,
+ *  so reusing one would quietly reintroduce exactly what strict mode
+ *  exists to prevent. Sorted for run-to-run determinism. */
+export const generatedStillsOnDisk = (jobDir: string): string[] => {
+  const dir = stillsDir(jobDir);
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".png") && recordedStillTier(jobDir, f) === "gemini")
+    .sort()
+    .map((f) => path.join(dir, f));
+};
+
+/** Strict-mode fallback: reuse an already-generated still from this same
+ *  job, resized onto the failed shot's own canvas, in place of the
+ *  identity-photo composite. `seed` spreads picks across the pool so
+ *  several failed members in one montage don't all land on the same image.
+ *  False when the job has generated nothing yet (e.g. its very first shot
+ *  failed), leaving the caller to fail loudly rather than invent pixels. */
+const reuseGeneratedStill = (
+  jobDir: string,
+  width: number,
+  height: number,
+  seed: number,
+  outImagePath: string,
+): boolean => {
+  const candidates = generatedStillsOnDisk(jobDir);
+  if (candidates.length === 0) return false;
+  resizeCover(candidates[Math.abs(seed) % candidates.length], width, height, outImagePath);
+  return true;
+};
+
+/** SceneResult.provider → the ShotTier actually recorded for it. */
+const providerTier = (provider: string): ShotTier =>
+  provider === "composite-v2" ? "composite" : provider === "reuse-generated" ? "reuse" : "gemini";
+
 /** Composite-v2 tier-down for a generatedScene shot whose Gemini attempts
  *  never cleared identity — reuses the SAME deterministic photo-on-plate
  *  composite plateStill already is, at the failed shot's own plate/
  *  treatment/pose. Identity-safe by construction (the user's own pixels),
  *  which is the whole point of a tier-down.
  *
- *  `req.strict` (GenerationRequest doc comment) skips the tier-down
- *  entirely and throws instead, naming `label` — see this file's own
+ *  `req.strict` (GenerationRequest doc comment) refuses the photo composite
+ *  entirely: it reuses an already-generated still from this same job
+ *  instead (reuseGeneratedStill), and only if the job has produced nothing
+ *  generated yet does it throw, naming `label` — see this file's own
  *  ShotTier doc comment for why a silent tier-down is worth being able to
  *  turn into a hard failure. */
 const compositeV2TierDown = (
@@ -366,14 +450,17 @@ const compositeV2TierDown = (
   width: number,
   height: number,
   label: string,
-) => (outImagePath: string): void => {
+) => (outImagePath: string): "composite" | "reuse" => {
   if (req.strict) {
+    if (reuseGeneratedStill(req.jobDir, width, height, spec.seed, outImagePath)) return "reuse";
     throw new Error(
-      `modelShots: "${label}" exhausted its generation ladder without clearing hard gates — refusing to ` +
-        `silently tier down to composite-v2 (STRICT_GENERATION=1). Retry, or unset STRICT_GENERATION to allow the fallback.`,
+      `modelShots: "${label}" exhausted its generation ladder without clearing hard gates, and this job has no ` +
+        `already-generated still to reuse in its place — refusing to tier down to the identity-photo composite ` +
+        `(STRICT_GENERATION=1). Retry, or unset STRICT_GENERATION to allow the photo fallback.`,
     );
   }
   buildPlateStillImage(req, spec, width, height, outImagePath);
+  return "composite";
 };
 
 /** Which generation path actually produced a shot's pixels — the plan's
@@ -422,6 +509,16 @@ const buildSubShotImage = async (
   };
 
   if (sub.kind === "plateStill") {
+    // Unlike the tier-downs above, this kind is an explicit request for the
+    // photo composite rather than a degrade — so strict mode has nothing to
+    // substitute and simply refuses it, pointing at the format spec.
+    if (req.strict) {
+      throw new Error(
+        `modelShots: sub-shot "${sub.shot}" is kind "plateStill", which composites the user's own identity ` +
+          `photo — refusing under STRICT_GENERATION=1. Change this sub-shot's kind in the format, or unset ` +
+          `STRICT_GENERATION.`,
+      );
+    }
     buildPlateStillImage(req, { plate: sub.plate, treatment: sub.treatment, poseTag: sub.poseTag, seed: sub.seed }, width, height, outImagePath);
     persistMember();
     return { tier: "composite" };
@@ -466,7 +563,7 @@ const buildSubShotImage = async (
     compositeV2TierDown(req, spec, width, height, memberLabel),
   );
   persistMember();
-  return { flag: result.flag, tier: result.provider === "composite-v2" ? "composite" : "gemini" };
+  return { flag: result.flag, tier: providerTier(result.provider) };
 };
 
 const concatClips = (clipPaths: string[], outPath: string): void => {
@@ -722,6 +819,13 @@ export const modelShotsGenerationProvider: GenerationProvider = {
 
     switch (req.kind) {
       case "plateStill": {
+        if (req.strict) {
+          throw new Error(
+            `model-shots: slot kind "plateStill" composites the user's own identity photo — refusing under ` +
+              `STRICT_GENERATION=1 (shot: "${req.shot}"). Change the slot's generation kind in the format, or ` +
+              `unset STRICT_GENERATION.`,
+          );
+        }
         const workDir = workDirFor("still");
         try {
           const stillPath = path.join(workDir, "still.png");
@@ -763,7 +867,7 @@ export const modelShotsGenerationProvider: GenerationProvider = {
           fs.mkdirSync(stillsDir(req.jobDir), { recursive: true });
           fs.copyFileSync(stillPath, stillPathFor(req.jobDir, slotName));
           animateStillToClip(stillPath, { durationSec: req.durationSec, width: req.width, height: req.height, fps: req.fps, outPath: req.outPath });
-          const tier: ShotTier = result.provider === "composite-v2" ? "composite" : "gemini";
+          const tier: ShotTier = providerTier(result.provider);
           writeQcSidecar(req.outPath, result.flag, { attempts: result.attempts, provider: result.provider, tier });
         } finally {
           fs.rmSync(workDir, { recursive: true, force: true });

@@ -1,23 +1,105 @@
+import fs from "node:fs";
+import path from "node:path";
+import { spawn } from "node:child_process";
 import { NextRequest, NextResponse } from "next/server";
 import { jobExists, jobDir } from "../../../../lib/jobs";
-import { buildJob } from "@backend/pipeline/orchestrate";
-import { ResolverChoice } from "@backend/pipeline/resolvers";
-import { GeneratorChoice } from "@backend/pipeline/generation";
+import { repoRoot, artifactsDir } from "@backend/pipeline/paths";
+import { Edl } from "@backend/pipeline/types";
 
-/** Runs intake through assemble (transcription + role resolution included). */
+/**
+ * Runs intake through assemble (transcription + role resolution included).
+ *
+ * A job with generation-marked slots pays for paid Gemini/Higgsfield calls
+ * plus whisper/ffmpeg work per block — minutes, not seconds. Running that
+ * in-process inside this request (as this route used to, via orchestrate.ts's
+ * buildJob) means the browser's fetch eventually gives up waiting and the
+ * connection drops as a raw "Failed to fetch", losing all progress with no
+ * error the user can act on. Same "background job + poll" shape as
+ * render/route.ts: spawn the pipeline as its own process, report progress
+ * through a status file, return immediately.
+ */
+
+type BuildStatus =
+  | { status: "idle" }
+  | { status: "building"; startedAt: string; stage: string }
+  | { status: "done"; startedAt: string; finishedAt: string; edl: Edl }
+  | { status: "error"; startedAt: string; finishedAt: string; error: string };
+
+const statusPath = (jobId: string) => path.join(artifactsDir(jobId), "build-status.json");
+const readStatus = (jobId: string): BuildStatus | null =>
+  fs.existsSync(statusPath(jobId))
+    ? JSON.parse(fs.readFileSync(statusPath(jobId), "utf8"))
+    : null;
+const writeStatus = (jobId: string, status: BuildStatus): void =>
+  fs.writeFileSync(statusPath(jobId), JSON.stringify(status, null, 2));
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;
   if (!jobExists(jobId)) {
     return NextResponse.json({ error: "job not found" }, { status: 404 });
   }
-  const body = await req.json().catch(() => ({}));
-  const resolver: ResolverChoice = body?.resolver ?? "auto";
-  const generator: GeneratorChoice = body?.generator ?? "auto";
-
-  try {
-    const edl = await buildJob(jobDir(jobId), jobId, resolver, generator);
-    return NextResponse.json({ edl });
-  } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 400 });
+  const existing = readStatus(jobId);
+  if (existing?.status === "building") {
+    return NextResponse.json(existing, { status: 202 });
   }
+
+  const body = await req.json().catch(() => ({}));
+  const resolver = typeof body?.resolver === "string" ? body.resolver : "auto";
+  const generator = typeof body?.generator === "string" ? body.generator : "auto";
+
+  const startedAt = new Date().toISOString();
+  writeStatus(jobId, { status: "building", startedAt, stage: "intake" });
+
+  const child = spawn(
+    "npm",
+    [
+      "run",
+      "pipeline",
+      "--",
+      "--job",
+      jobDir(jobId),
+      "--stop-after",
+      "assemble",
+      "--resolver",
+      resolver,
+      "--generator",
+      generator,
+    ],
+    { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stderrTail = "";
+  child.stderr.on("data", (chunk) => {
+    stderrTail = (stderrTail + chunk.toString()).slice(-4000);
+  });
+  child.stdout.on("data", (chunk) => {
+    // run.ts logs "  ✔ <artifact>   → ..." as each stage's artifact is
+    // written (see run.ts's own `write` helper) — the last one seen is the
+    // furthest-along stage, good enough for a "Building… (matte)" label
+    // without needing a structured progress channel.
+    const matches = chunk.toString().match(/✔ (\S+)/g);
+    if (matches) {
+      const stage = matches[matches.length - 1].replace("✔ ", "");
+      writeStatus(jobId, { status: "building", startedAt, stage });
+    }
+  });
+  child.on("close", (code) => {
+    const finishedAt = new Date().toISOString();
+    const edlPath = path.join(artifactsDir(jobId), "edl.json");
+    if (code === 0 && fs.existsSync(edlPath)) {
+      const edl = JSON.parse(fs.readFileSync(edlPath, "utf8"));
+      writeStatus(jobId, { status: "done", startedAt, finishedAt, edl });
+    } else {
+      writeStatus(jobId, { status: "error", startedAt, finishedAt, error: stderrTail || `build exited with code ${code}` });
+    }
+  });
+
+  return NextResponse.json({ status: "building", startedAt, stage: "intake" }, { status: 202 });
+}
+
+export async function GET(_req: Request, { params }: { params: Promise<{ jobId: string }> }) {
+  const { jobId } = await params;
+  if (!jobExists(jobId)) {
+    return NextResponse.json({ error: "job not found" }, { status: 404 });
+  }
+  return NextResponse.json(readStatus(jobId) ?? { status: "idle" });
 }

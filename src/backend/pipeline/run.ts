@@ -32,7 +32,7 @@ import { artifactsDir } from "./paths";
 /**
  * The pipeline orchestrator.
  *
- *   npm run pipeline -- --job jobs/demo [--only <stage>] [--resolver <name>] [--generator <name>] [--soft-gates]
+ *   npm run pipeline -- --job jobs/demo [--only <stage>] [--stop-after <stage>] [--resolver <name>] [--generator <name>] [--soft-gates]
  *
  * Stages: intake → generate → transcribe → trim → matte → composite →
  * roles → assemble → render. Each stage writes its artifact to
@@ -64,7 +64,14 @@ const STAGES = ["intake", "generate", "transcribe", "trim", "matte", "composite"
 type Stage = (typeof STAGES)[number];
 
 const parseArgs = (argv: string[]) => {
-  const args: { job?: string; only?: Stage; resolver: ResolverChoice; generator: GeneratorChoice; softGates: boolean } = {
+  const args: {
+    job?: string;
+    only?: Stage;
+    stopAfter?: Stage;
+    resolver: ResolverChoice;
+    generator: GeneratorChoice;
+    softGates: boolean;
+  } = {
     resolver: "auto",
     generator: "auto",
     softGates: false,
@@ -83,6 +90,20 @@ const parseArgs = (argv: string[]) => {
           throw new Error(`--only must be one of: ${STAGES.join(", ")}`);
         }
         args.only = stage;
+        break;
+      }
+      // Runs every stage from intake, same as no flag at all, but returns
+      // right after this one instead of also rendering — e.g. the `build`
+      // API route (src/app/api/jobs/[jobId]/build/route.ts) wants intake
+      // through assemble as a single subprocess, without also paying for a
+      // render it doesn't need yet. Unlike --only, earlier stages still run
+      // (rather than being read back from disk).
+      case "--stop-after": {
+        const stage = argv[++i] as Stage;
+        if (!STAGES.includes(stage)) {
+          throw new Error(`--stop-after must be one of: ${STAGES.join(", ")}`);
+        }
+        args.stopAfter = stage;
         break;
       }
       case "--resolver": {
@@ -107,10 +128,17 @@ const parseArgs = (argv: string[]) => {
   }
   if (!args.job) {
     throw new Error(
-      "usage: npm run pipeline -- --job <jobDir> [--only <stage>] [--resolver <name>] [--generator <name>] [--soft-gates]",
+      "usage: npm run pipeline -- --job <jobDir> [--only <stage>] [--stop-after <stage>] [--resolver <name>] [--generator <name>] [--soft-gates]",
     );
   }
-  return args as { job: string; only?: Stage; resolver: ResolverChoice; generator: GeneratorChoice; softGates: boolean };
+  return args as {
+    job: string;
+    only?: Stage;
+    stopAfter?: Stage;
+    resolver: ResolverChoice;
+    generator: GeneratorChoice;
+    softGates: boolean;
+  };
 };
 
 const main = async () => {
@@ -135,13 +163,14 @@ const main = async () => {
   };
 
   const wants = (stage: Stage) => !args.only || args.only === stage;
+  const stop = (stage: Stage) => args.only === stage || args.stopAfter === stage;
   console.log(`editable pipeline — job "${jobId}"${args.only ? ` (only: ${args.only})` : ""}`);
 
   // Each stage either runs or is rehydrated from its artifact on disk.
   let filled = wants("intake") ? intake(args.job) : read("filled", FilledFormatSchema);
   if (wants("intake")) write("filled", filled);
   const format = loadFormat(filled.formatId);
-  if (args.only === "intake") return;
+  if (stop("intake")) return;
 
   if (wants("generate")) {
     const result = await generate(format, filled, args.generator);
@@ -186,7 +215,7 @@ const main = async () => {
       filled = applyInserts(filled, inserts);
     }
   }
-  if (args.only === "generate") return;
+  if (stop("generate")) return;
 
   // Single-take (or mixed) mode: whenever this job actually bound a
   // speakingTakeSlot (takeIsBound), transcript/trim both come from the
@@ -227,7 +256,7 @@ const main = async () => {
     }
     write("transcript", transcript);
   }
-  if (args.only === "transcribe") return;
+  if (stop("transcribe")) return;
 
   let trims = wants("trim")
     ? takeIsBound(format, filled)
@@ -238,11 +267,11 @@ const main = async () => {
     write("trim", trims);
     for (const d of trims.diagnostics) console.log(`    ${d}`);
   }
-  if (args.only === "trim") return;
+  if (stop("trim")) return;
 
   const matteArtifact = wants("matte") ? await runMatte(format, filled, trims) : read("matte", MatteArtifactSchema);
   if (wants("matte")) write("matte", matteArtifact);
-  if (args.only === "matte") return;
+  if (stop("matte")) return;
 
   if (wants("composite")) {
     const replaced = await replaceBackgrounds(format, filled, trims, transcript, matteArtifact);
@@ -268,7 +297,7 @@ const main = async () => {
     trims = restored.trims;
     transcript = restored.transcript;
   }
-  if (args.only === "composite") return;
+  if (stop("composite")) return;
 
   const resolved = wants("roles")
     ? await resolveRoles(format, transcript, trims, args.resolver)
@@ -285,13 +314,13 @@ const main = async () => {
       );
     }
   }
-  if (args.only === "roles") return;
+  if (stop("roles")) return;
 
   const edl = wants("assemble")
     ? assemble(format, filled, transcript, trims, resolved)
     : read("edl", EdlSchema);
   if (wants("assemble")) write("edl", edl);
-  if (args.only === "assemble") return;
+  if (stop("assemble")) return;
 
   const outPath = render(edl, dir);
   console.log(`\n✔ rendered ${path.relative(process.cwd(), outPath)} (${edl.durationSec.toFixed(2)}s, ${edl.width}x${edl.height}@${edl.fps}fps)`);

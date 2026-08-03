@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import type { Format, Slot } from "@backend/pipeline/types";
+import type { Edl, Format, Slot } from "@backend/pipeline/types";
 import type { HookFeedbackResult, ScriptSuggestion } from "@backend/content/types";
 import { Button, Card, Pill } from "../../../../_components/ui";
 import { LibraryPanel } from "../../../../_components/library/LibraryPanel";
@@ -38,6 +38,17 @@ const STEPS: WizardStepInfo[] = [
   { id: 3, label: "Split your take & build", kicker: "Preparation" },
 ];
 
+/** Mirrors the build API route's status shape (build/route.ts) — the build
+ *  runs as a background subprocess (paid generation + whisper/ffmpeg can
+ *  take minutes), so this is polled rather than awaited from one fetch. */
+type BuildStatus =
+  | { status: "idle" }
+  | { status: "building"; startedAt: string; stage: string }
+  | { status: "done"; startedAt: string; finishedAt: string; edl: Edl }
+  | { status: "error"; startedAt: string; finishedAt: string; error: string };
+
+const BUILD_POLL_MS = 2000;
+
 export function ResourcesBoard({
   jobId,
   format,
@@ -63,6 +74,7 @@ export function ResourcesBoard({
   const [script, setScript] = useState<ScriptSuggestion | null>(initialScript);
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [building, setBuilding] = useState(false);
+  const [buildStage, setBuildStage] = useState<string | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
   /** What assemble() skipped/altered from the format's declared structure
    *  (unfilled slot, unmatched anchor, a beat sequence that didn't fit its
@@ -137,8 +149,71 @@ export function ResourcesBoard({
     setBinding(slotName, await bindText(jobId, slotName, text));
   };
 
+  // Set by continueToEditor each time it's called, read once the build this
+  // click started finishes — a ref (not state) because the poll interval
+  // that eventually reads it is a closure captured at start-polling time,
+  // not re-created per click.
+  const forceRef = useRef(false);
+  const buildTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopBuildPolling = () => {
+    if (buildTimer.current) {
+      clearInterval(buildTimer.current);
+      buildTimer.current = null;
+    }
+  };
+
+  const handleBuildStatus = (data: BuildStatus) => {
+    if (data.status === "building") {
+      setBuilding(true);
+      setBuildStage(data.stage);
+      return;
+    }
+    stopBuildPolling();
+    setBuilding(false);
+    if (data.status === "error") {
+      setBuildError(data.error);
+    } else if (data.status === "done") {
+      const buildDiagnostics: string[] = data.edl.diagnostics ?? [];
+      if (buildDiagnostics.length > 0 && !forceRef.current) {
+        setDiagnostics(buildDiagnostics);
+        return;
+      }
+      router.push(`/jobs/${jobId}/edit`);
+    }
+  };
+
+  const pollBuildStatus = async () => {
+    const res = await fetch(`/api/jobs/${jobId}/build`);
+    handleBuildStatus(await res.json());
+  };
+
+  // A build already in flight (kicked off before a refresh, or from another
+  // tab) survives the subprocess even though this component just remounted
+  // — pick its polling back up instead of leaving the button showing
+  // "Continue to editor" over a build that's still actually running. A
+  // "done"/"error" status file is left on disk indefinitely (until the next
+  // build overwrites it), so ignore anything but "building" here — otherwise
+  // simply opening this page later would replay a stale past result,
+  // including auto-navigating to /edit from a long-finished build.
+  useEffect(() => {
+    (async () => {
+      const res = await fetch(`/api/jobs/${jobId}/build`);
+      const data: BuildStatus = await res.json();
+      if (data.status === "building") {
+        setBuilding(true);
+        setBuildStage(data.stage);
+        buildTimer.current = setInterval(pollBuildStatus, BUILD_POLL_MS);
+      }
+    })();
+    return stopBuildPolling;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]);
+
   const continueToEditor = async (opts: { force?: boolean } = {}) => {
+    forceRef.current = !!opts.force;
     setBuilding(true);
+    setBuildStage(null);
     setBuildError(null);
     try {
       const res = await fetch(`/api/jobs/${jobId}/build`, {
@@ -148,16 +223,11 @@ export function ResourcesBoard({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "build failed");
-      const buildDiagnostics: string[] = data.edl?.diagnostics ?? [];
-      if (buildDiagnostics.length > 0 && !opts.force) {
-        setDiagnostics(buildDiagnostics);
-        setBuilding(false);
-        return;
-      }
-      router.push(`/jobs/${jobId}/edit`);
+      if (!buildTimer.current) buildTimer.current = setInterval(pollBuildStatus, BUILD_POLL_MS);
+      handleBuildStatus(data);
     } catch (err) {
-      setBuildError((err as Error).message);
       setBuilding(false);
+      setBuildError((err as Error).message);
     }
   };
 
@@ -447,7 +517,7 @@ export function ResourcesBoard({
                 onClick={() => continueToEditor({ force: diagnostics !== null })}
                 disabled={!ready || building}
               >
-                {building ? "Building…" : diagnostics ? "Continue anyway" : "Continue to editor"}
+                {building ? `Building…${buildStage ? ` (${buildStage})` : ""}` : diagnostics ? "Continue anyway" : "Continue to editor"}
               </Button>
             </div>
           </>

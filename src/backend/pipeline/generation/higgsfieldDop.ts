@@ -25,6 +25,51 @@ const getClient = (): HiggsfieldClient => {
   return cachedClient;
 };
 
+/**
+ * client.uploadImage() (the SDK's own two-step upload: POST for a presigned
+ * S3 URL, then PUT the bytes) is broken in @higgsfield/client 0.2.1 — the
+ * latest published version, confirmed no newer release exists. The presigned
+ * URL's X-Amz-SignedHeaders includes "x-amz-tagging", and
+ * /files/generate-upload-url's response carries the exact header set the PUT
+ * needs (`upload_headers: { Content-Type, x-amz-tagging }`) — but
+ * uploadImage()'s PUT only ever sends Content-Type, silently dropping
+ * upload_headers entirely. Every signed header must be present on the
+ * request for SigV4 to validate, so this omission makes S3 reject EVERY
+ * upload with 403 SignatureDoesNotMatch — confirmed directly against the
+ * live API: the SDK's own request fails regardless of client (axios/fetch/
+ * curl all fail identically), while replaying the API's own upload_headers
+ * on the PUT succeeds. Nothing to do with credentials, credits, or plan.
+ * This bypasses uploadImage() and redoes the same two-step flow by hand,
+ * honoring upload_headers instead of hardcoding just Content-Type.
+ */
+const uploadStillForDop = async (imageBuffer: Buffer, format: string): Promise<string> => {
+  const apiKey = process.env.HIGGSFIELD_API_KEY;
+  const apiSecret = process.env.HIGGSFIELD_API_SECRET;
+  if (!apiKey || !apiSecret) {
+    throw new Error("Higgsfield DoP animation requires HIGGSFIELD_API_KEY and HIGGSFIELD_API_SECRET (put them in .env)");
+  }
+
+  const linkRes = await fetch("https://platform.higgsfield.ai/files/generate-upload-url", {
+    method: "POST",
+    headers: { "hf-api-key": apiKey, "hf-secret": apiSecret, "Content-Type": "application/json" },
+    body: JSON.stringify({ content_type: `image/${format}` }),
+  });
+  if (!linkRes.ok) {
+    throw new Error(`higgsfield DoP: failed to get upload URL (${linkRes.status})`);
+  }
+  const { upload_url, public_url, upload_headers } = (await linkRes.json()) as {
+    upload_url: string;
+    public_url: string;
+    upload_headers: Record<string, string>;
+  };
+
+  const putRes = await fetch(upload_url, { method: "PUT", body: new Uint8Array(imageBuffer), headers: upload_headers });
+  if (!putRes.ok) {
+    throw new Error(`higgsfield DoP: image upload failed (${putRes.status}) — ${await putRes.text()}`);
+  }
+  return public_url;
+};
+
 /** Sends one still through DoP image2video and returns the resulting
  *  video's raw bytes (whatever container/codec Higgsfield returns —
  *  written straight to disk by the caller, then read by ffmpeg like any
@@ -35,7 +80,7 @@ export const animateStillWithDop = async (
   opts: { model?: "dop-lite" | "dop-preview" | "dop-turbo"; seed?: number } = {},
 ): Promise<Buffer> => {
   const client = getClient();
-  const imageUrl = await client.uploadImage(fs.readFileSync(stillImagePath), "png");
+  const imageUrl = await uploadStillForDop(fs.readFileSync(stillImagePath), "png");
 
   const jobSet = await client.generate(
     "/v1/image2video/dop",

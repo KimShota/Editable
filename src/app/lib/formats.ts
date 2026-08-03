@@ -14,6 +14,13 @@ import { listJobs } from "./jobs";
  * nothing here is persisted, so a new formats/<id>.json shows up for free.
  */
 
+export type ReferenceReel = {
+  url: string;
+  uploader: string;
+  likes: number;
+  comments: number;
+};
+
 export type FormatSummary = {
   id: string;
   name: string;
@@ -24,6 +31,7 @@ export type FormatSummary = {
   optionalSlotCount: number;
   estimatedMinutes: number;
   exampleVideoUrl: string | null;
+  reel: ReferenceReel | null;
 };
 
 /** Minutes to film one slot, by media type — a rough, honest estimate. */
@@ -46,6 +54,33 @@ const findExampleVideoUrl = (formatId: string): string | null => {
   return rendered ? `/api/media/out/${rendered.id}.mp4` : null;
 };
 
+const reelsPath = path.join(repoRoot, "formats", "meta", "reels.json");
+type ReelsFile = Record<string, { url: string; uploader: string; likes: number; comments: number }>;
+
+/** Reads formats/meta/reels.json once per process — small, rarely-changing
+ *  reference data (see reelsSync.ts, the only writer), not worth re-reading
+ *  per request. Lives in a subdirectory, not formatsDir itself, since
+ *  loader.ts's listFormats() treats every *.json directly in formatsDir as
+ *  a Format to enumerate (same reasoning as formatStylesDir). Absent
+ *  entirely in an environment with no reels configured. */
+let cachedReels: ReelsFile | null = null;
+const loadReels = (): ReelsFile => {
+  if (cachedReels) return cachedReels;
+  cachedReels = (fs.existsSync(reelsPath) ? JSON.parse(fs.readFileSync(reelsPath, "utf8")) : {}) as ReelsFile;
+  return cachedReels;
+};
+
+/** Only claims a reel for a format when BOTH the metadata entry AND its
+ *  staged video (public/reels/<id>.mp4) exist — a reels.json entry with no
+ *  downloaded clip yet (see the gallery redesign's yt-dlp staging step)
+ *  shouldn't render a broken <video> src. */
+const findReel = (formatId: string): ReferenceReel | null => {
+  const entry = loadReels()[formatId];
+  if (!entry) return null;
+  if (!fs.existsSync(path.join(repoRoot, "public", "reels", `${formatId}.mp4`))) return null;
+  return { url: entry.url, uploader: entry.uploader, likes: entry.likes, comments: entry.comments };
+};
+
 export const getFormatSummary = (formatId: string): FormatSummary => {
   const format = loadFormat(formatId);
   const slots = allSlots(format);
@@ -59,6 +94,7 @@ export const getFormatSummary = (formatId: string): FormatSummary => {
     optionalSlotCount: slots.filter((s) => !s.required).length,
     estimatedMinutes: estimateMinutes(format),
     exampleVideoUrl: findExampleVideoUrl(format.id),
+    reel: findReel(format.id),
   };
 };
 

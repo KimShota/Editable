@@ -299,12 +299,16 @@ export type SceneResult = {
  *  fails a hard gate — it's the caller's composite-v2 fallback
  *  (modelShots.ts's buildPlateStillImage), kept as an injected callback so
  *  this module doesn't need to import modelShots.ts (which would create a
- *  require cycle: modelShots.ts is what calls in here). */
+ *  require cycle: modelShots.ts is what calls in here). It reports back
+ *  WHICH fallback it took ("composite" = the identity-photo composite,
+ *  "reuse" = another already-generated still, under STRICT_GENERATION),
+ *  so the provider string this returns keeps naming the pixels' real
+ *  origin rather than always claiming composite-v2. */
 export const generateSceneStill = async (
   req: GenerationRequest,
   spec: { plate: string; treatment: "lit" | "silhouette"; posePrompt: string; poseTag?: PoseTag; seed: number },
   outStillPath: string,
-  tierDown: (outImagePath: string) => void,
+  tierDown: (outImagePath: string) => "composite" | "reuse",
 ): Promise<SceneResult> => {
   const manifest = loadPlatesManifest(req.formatId);
   const isSofaShot = spec.plate === "sofa";
@@ -361,8 +365,13 @@ export const generateSceneStill = async (
       // or never produced an image at all (provider error on every
       // attempt) — tier down to the identity-safe composite fallback
       // rather than ever ship a wrong face or a missing shot.
-      tierDown(outStillPath);
-      return { imagePath: outStillPath, flag: "red", provider: "composite-v2", attempts };
+      const fallback = tierDown(outStillPath);
+      return {
+        imagePath: outStillPath,
+        flag: "red",
+        provider: fallback === "reuse" ? "reuse-generated" : "composite-v2",
+        attempts,
+      };
     }
 
     const flag: "green" | "orange" = best.qc.softGateFailures.length === 0 ? "green" : "orange";

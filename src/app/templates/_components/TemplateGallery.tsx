@@ -1,10 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Card, Pill } from "../../_components/ui";
 import type { FormatSummary } from "../../lib/formats";
 import type { JobSummary } from "../../lib/jobs";
+
+/** Compact social-count formatting: 2649446 -> "2.6M", 10616 -> "10.6K".
+ *  Truncates rather than rounds up (34898 -> "34.8K", not "34.9K") to match
+ *  how every mainstream platform displays these counts. */
+const formatCount = (n: number): string => {
+  if (n >= 1_000_000) return `${Math.floor((n / 1_000_000) * 10) / 10}M`;
+  if (n >= 1_000) return `${Math.floor((n / 1_000) * 10) / 10}K`;
+  return String(n);
+};
 
 type Tab = "browse" | "mine";
 
@@ -78,7 +87,7 @@ export function TemplateGallery({
         filtered.length === 0 ? (
           <p className="text-[color:var(--ink-dim)]">No formats match that search.</p>
         ) : (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             {filtered.map((f) => (
               <FormatCard key={f.id} format={f} />
             ))}
@@ -91,21 +100,104 @@ export function TemplateGallery({
   );
 }
 
-function FormatCard({ format }: { format: FormatSummary }) {
+function HeartIcon() {
   return (
-    <Card href={`/templates/${format.id}`} className="flex flex-col gap-4 p-6">
+    <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+      <path d="M12 21s-6.7-4.35-9.33-8.2C.94 10.2 1.4 6.9 4.1 5.1a5.2 5.2 0 0 1 7.1 1.2A5.2 5.2 0 0 1 18.3 5.1c2.7 1.8 3.16 5.1 1.43 7.7C18.7 16.65 12 21 12 21z" />
+    </svg>
+  );
+}
+
+function CommentIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+      <path d="M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8.5L4 20.5V16H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" />
+    </svg>
+  );
+}
+
+/** Reel preview + hover-to-play — the video is decorative (muted, looped,
+ *  no controls) so a click anywhere on it still bubbles up to the Card's
+ *  own <Link>, keeping the whole card a single click-through target. Play
+ *  starts on hover rather than autoplaying so 2 cards on screen at once
+ *  isn't 2 simultaneous decodes running for no reason. */
+function ReelPreview({ formatId }: { formatId: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  return (
+    <div
+      onMouseEnter={() => {
+        const v = videoRef.current;
+        if (v) {
+          v.currentTime = 0;
+          v.play().catch(() => {});
+        }
+      }}
+      onMouseLeave={() => {
+        const v = videoRef.current;
+        if (v) {
+          v.pause();
+          v.currentTime = 0;
+        }
+      }}
+      className="relative aspect-[9/16] w-32 shrink-0 overflow-hidden rounded-xl bg-black/30 sm:w-36"
+    >
+      <video
+        ref={videoRef}
+        src={`/reels/${formatId}.mp4`}
+        poster={`/reels/${formatId}.jpg`}
+        muted
+        loop
+        playsInline
+        preload="none"
+        className="h-full w-full object-cover"
+      />
+    </div>
+  );
+}
+
+function StatBlock({ icon, value, label }: { icon: React.ReactNode; value: number; label: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-[color:var(--accent)]">{icon}</span>
+      <div>
+        <p className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
+          {formatCount(value)}
+        </p>
+        <p className="text-[11px] tracking-wide text-[color:var(--ink-faint)] uppercase">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+function FormatCard({ format }: { format: FormatSummary }) {
+  const reel = format.reel;
+  return (
+    <Card href={`/templates/${format.id}`} className="flex flex-col gap-5 p-6">
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-[family-name:var(--font-display)] text-xl font-bold text-[color:var(--ink)]">
           {format.name}
         </h3>
         <Pill>{format.niche}</Pill>
       </div>
-      <p className="line-clamp-3 text-sm text-[color:var(--ink-dim)]">{format.description}</p>
-      <div className="mt-auto flex flex-wrap gap-2 pt-2">
-        <Pill>{format.blockCount} blocks</Pill>
-        <Pill>{format.requiredSlots.length} slots to film</Pill>
-        <Pill>~{format.estimatedMinutes} min</Pill>
-      </div>
+
+      {reel ? (
+        <div className="flex gap-5">
+          <ReelPreview formatId={format.id} />
+          <div className="flex flex-1 flex-col justify-center gap-4">
+            <StatBlock icon={<HeartIcon />} value={reel.likes} label="likes" />
+            <StatBlock icon={<CommentIcon />} value={reel.comments} label="comments" />
+          </div>
+        </div>
+      ) : (
+        <>
+          <p className="line-clamp-3 text-sm text-[color:var(--ink-dim)]">{format.description}</p>
+          <div className="mt-auto flex flex-wrap gap-2 pt-2">
+            <Pill>{format.blockCount} blocks</Pill>
+            <Pill>{format.requiredSlots.length} slots to film</Pill>
+            <Pill>~{format.estimatedMinutes} min</Pill>
+          </div>
+        </>
+      )}
     </Card>
   );
 }

@@ -41,6 +41,7 @@
     "matte:proof": "tsx src/backend/pipeline/tools/matteProof.ts",
     "author": "tsx src/backend/authoring/run.ts",
     "waitlist:export": "tsx src/backend/tools/waitlistExport.ts",
+    "reels:sync": "tsx src/backend/tools/reelsSync.ts",
     "dev": "remotion studio src/backend/index.ts",
     "build": "remotion bundle src/backend/index.ts",
     "upgrade": "remotion upgrade",
