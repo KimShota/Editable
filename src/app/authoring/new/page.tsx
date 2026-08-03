@@ -1,15 +1,9 @@
-import { Container, PageHeader } from "../../_components/ui";
-import { NewDraftForm } from "./_components/NewDraftForm";
+import { redirect } from "next/navigation";
 
-export default function NewAuthoringPage() {
-  return (
-    <Container className="max-w-2xl">
-      <PageHeader
-        kicker="Create from a reel"
-        title="Paste a link to a viral reel."
-        subtitle="We'll download it, transcribe it, sample its frames, and reverse-engineer the structure into a draft format you can review before it joins the library."
-      />
-      <NewDraftForm />
-    </Container>
-  );
+/** This page moved to /reverse-engineer (same "paste a reel URL" flow,
+ *  just properly named and given a real nav entry instead of being a
+ *  button buried on the templates page). Kept as a redirect rather than
+ *  deleted so any bookmarked/linked /authoring/new URL still works. */
+export default function AuthoringNewRedirect() {
+  redirect("/reverse-engineer");
 }

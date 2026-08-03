@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Card } from "../../../_components/ui";
+import { Button, Card } from "../../_components/ui";
 
 export function NewDraftForm() {
   const router = useRouter();

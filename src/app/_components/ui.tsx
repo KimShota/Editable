@@ -72,7 +72,7 @@ export function PageHeader({
   actions,
 }: {
   kicker?: string;
-  title: string;
+  title: ReactNode;
   subtitle?: string;
   actions?: ReactNode;
 }) {

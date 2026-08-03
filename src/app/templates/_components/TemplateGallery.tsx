@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { Card, Pill } from "../../_components/ui";
 import type { FormatSummary } from "../../lib/formats";
 import type { JobSummary } from "../../lib/jobs";
@@ -16,6 +15,34 @@ const formatCount = (n: number): string => {
 };
 
 type Tab = "browse" | "mine";
+
+/** Bigger, more legible than the old 11px Pill-in-a-button (the redesign's
+ *  whole point) — real button padding, a filled accent state, and a count
+ *  so the filter's effect is visible before you click it. */
+function NicheButton({
+  active,
+  onClick,
+  count,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-full border px-5 py-2.5 font-[family-name:var(--font-display)] text-sm font-semibold tracking-wide capitalize transition-colors ${
+        active
+          ? "border-[color:var(--accent)] bg-[color:var(--accent)] text-[color:var(--accent-ink)]"
+          : "border-white/15 text-[color:var(--ink-dim)] hover:border-white/30 hover:text-[color:var(--ink)]"
+      }`}
+    >
+      {children} <span className="opacity-60">{count}</span>
+    </button>
+  );
+}
 
 export function TemplateGallery({
   formats,
@@ -39,48 +66,57 @@ export function TemplateGallery({
 
   return (
     <div>
-      <div className="mb-8 flex flex-wrap items-center gap-4 border-b border-white/10 pb-6">
-        <div className="flex gap-1 rounded-full border border-white/10 p-1">
-          {(["browse", "mine"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`rounded-full px-4 py-1.5 font-[family-name:var(--font-display)] text-[13px] tracking-wide transition-colors ${
-                tab === t ? "bg-[color:var(--accent)] text-[color:var(--accent-ink)]" : "text-[color:var(--ink-dim)] hover:text-[color:var(--ink)]"
-              }`}
-            >
-              {t === "browse" ? "Browse" : `My templates (${pastJobs.length})`}
-            </button>
-          ))}
-        </div>
+      <div className="mb-8 flex flex-col gap-5 border-b border-white/10 pb-6">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex gap-1 rounded-full border border-white/10 p-1">
+            {(["browse", "mine"] as Tab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`rounded-full px-4 py-1.5 font-[family-name:var(--font-display)] text-[13px] tracking-wide transition-colors ${
+                  tab === t ? "bg-[color:var(--accent)] text-[color:var(--accent-ink)]" : "text-[color:var(--ink-dim)] hover:text-[color:var(--ink)]"
+                }`}
+              >
+                {t === "browse" ? "Browse" : `My templates (${pastJobs.length})`}
+              </button>
+            ))}
+          </div>
 
-        {tab === "browse" && (
-          <>
+          {tab === "browse" && (
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search niche or format…"
               className="min-w-[220px] flex-1 rounded-full border border-white/12 bg-transparent px-4 py-2 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
             />
-            <div className="flex flex-wrap gap-2">
-              <button onClick={() => setNiche(null)}>
-                <Pill tone={niche === null ? "accent" : "default"}>All niches</Pill>
-              </button>
+          )}
+        </div>
+
+        {/* Niche filter gets its own labeled row, in real buttons (not
+            11px Pills) with counts — the old cramped-in-with-search Pill
+            row was easy to miss entirely (the whole point of this redesign). */}
+        {tab === "browse" && (
+          <div>
+            <p className="mb-2 font-[family-name:var(--font-display)] text-[11px] tracking-[0.2em] text-[color:var(--ink-dim)] uppercase">
+              Niche
+            </p>
+            <div className="flex flex-wrap gap-2.5">
+              <NicheButton active={niche === null} onClick={() => setNiche(null)} count={formats.length}>
+                All
+              </NicheButton>
               {niches.map((n) => (
-                <button key={n} onClick={() => setNiche(n)}>
-                  <Pill tone={niche === n ? "accent" : "default"}>{n}</Pill>
-                </button>
+                <NicheButton
+                  key={n}
+                  active={niche === n}
+                  onClick={() => setNiche(n)}
+                  count={formats.filter((f) => f.niche === n).length}
+                >
+                  {n}
+                </NicheButton>
               ))}
             </div>
-          </>
+          </div>
         )}
-
-        <Link
-          href="/authoring/new"
-          className="ml-auto rounded-full bg-[color:var(--accent)] px-4 py-1.5 font-[family-name:var(--font-display)] text-[13px] font-bold tracking-wide text-[color:var(--accent-ink)] transition-transform hover:scale-[1.03]"
-        >
-          + Create from a reel
-        </Link>
       </div>
 
       {tab === "browse" ? (

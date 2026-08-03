@@ -108,3 +108,24 @@ body {
   background: var(--ed-canvas);
   color: var(--ed-ink);
 }
+
+/* ---------- templates page: animated title (AnimatedTitle.tsx) ---------- */
+.tg-anim-ch {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(0.55em);
+  animation: tg-anim-ch-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes tg-anim-ch-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tg-anim-ch {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+}
