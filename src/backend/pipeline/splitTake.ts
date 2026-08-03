@@ -108,6 +108,13 @@ export type TakeSplit = {
    *  (deriveTranscriptAndTrim, assemble.ts) keeps working against the one
    *  shared combined file exactly as before. */
   clipPath?: string;
+  /** False when clipPath's own clip has no usable video (see
+   *  TakePrepClip.hasUsableVideo) — undefined for the ordinary single-clip
+   *  walk (clipPath also undefined there). deriveTranscriptAndTrim copies
+   *  this straight into the TakeTrim it builds for this segment, which is
+   *  what tells assemble.ts to render it as a voiceover instead of a video
+   *  segment. */
+  hasUsableVideo?: boolean;
 };
 
 /** Bumped whenever this module's OWN output shape changes in a way that
@@ -116,7 +123,7 @@ export type TakeSplit = {
  *  cached split whose version doesn't match, so an old job transparently
  *  gets a fresh auto-split next time its resources page loads, rather than
  *  the split UI trying to render a shape it no longer understands. */
-export const SPLIT_PIPELINE_VERSION = "2";
+export const SPLIT_PIPELINE_VERSION = "3";
 
 export type SplitTakeResult = {
   /** Whole-take words, raw take-relative time — kept so a manual
@@ -507,11 +514,23 @@ const utteranceRanges = (clipWords: Word[], walkBlockIds: string[]): ClipRange[]
  *  overlap-free cut spans: the boundary between two adjacent ranges lands
  *  exactly on the MIDPOINT of the silence between them (never encroaching
  *  on a neighbor, however little padding that leaves), padded out from
- *  each range's own words by up to PAD_SEC when the gap allows it. The
- *  outermost edges (no neighbor on that side) pad freely against
+ *  each range's own words by up to PAD_SEC when the gap allows it.
+ *
+ *  The outermost edges (no neighbor on that side) pad ALL THE WAY to
  *  lowerBoundSec/upperBoundSec — this clip's own edge-trimmed window (see
- *  TakePrepClip.srcInSec/srcOutSec), not the raw file, since anything
- *  outside that window was never cut into the combined file at all. */
+ *  TakePrepClip.srcInSec/srcOutSec), not just PAD_SEC past the range's own
+ *  first/last MATCHED word. A block's script line can end (or, for the
+ *  first/last block in the clip, the clip's own real speech can run past
+ *  the line) with words this clip's alignment never matched to anything —
+ *  real case: one clip's own trailing "…learning AI faster" after its last
+ *  scripted line's own words, no next block in this clip to bound it. The
+ *  ordinary interior case still gets clamped only to the neighbor's own
+ *  midpoint, so this never steals another block's content — there simply
+ *  IS no neighbor at the outer edge to protect. deriveTranscriptAndTrim's
+ *  own LONG_PAUSE_CLAMP_SEC still tightens the final trim to right after
+ *  whatever real words actually landed inside the span, so this doesn't
+ *  leave dead air in the rendered cut — it only stops WORDS from being
+ *  silently dropped before that clamp ever gets to see them. */
 const padRangesToSegments = (
   ranges: ClipRange[],
   lowerBoundSec: number,
@@ -520,10 +539,12 @@ const padRangesToSegments = (
   ranges.map((r, i) => {
     const prev = ranges[i - 1];
     const next = ranges[i + 1];
-    const leftBound = prev ? (prev.endSec + r.startSec) / 2 : lowerBoundSec;
-    const rightBound = next ? (r.endSec + next.startSec) / 2 : upperBoundSec;
-    const srcInSec = Math.max(leftBound, r.startSec - PAD_SEC);
-    const srcOutSec = Math.max(srcInSec + 0.05, Math.min(rightBound, r.endSec + PAD_SEC));
+    const srcInSec = prev
+      ? Math.max((prev.endSec + r.startSec) / 2, r.startSec - PAD_SEC)
+      : lowerBoundSec;
+    const srcOutSec = next
+      ? Math.max(srcInSec + 0.05, Math.min((r.endSec + next.startSec) / 2, r.endSec + PAD_SEC))
+      : Math.max(srcInSec + 0.05, upperBoundSec);
     return { blockId: r.blockId, srcInSec, srcOutSec, confidence: r.confidence };
   });
 
@@ -579,10 +600,29 @@ export const splitMultiClipTake = (
       );
       if (fit && fit.score >= MIN_ALIGN_SCORE) ranges = alignmentRanges(clipWords, fit, scriptWordIndex);
     }
+    // Alignment only ranges the words it actually MATCHED — real trailing/
+    // leading speech the script doesn't have a line for (an ad-libbed
+    // sign-off, one more sentence tacked on the end) falls outside every
+    // range, so padRangesToSegments needs the true clip edge to recover it
+    // (see that function's own doc comment). Utterance-fallback ranges are
+    // already EXHAUSTIVE over every real (non-nonverbal) utterance in the
+    // clip by construction (utteranceRanges only returns at all when the
+    // count matches 1:1) — there's no unmatched real speech left to
+    // recover there, so reaching all the way to the clip's own edge would
+    // only reabsorb whatever isNonVerbalUtterance deliberately excluded
+    // (a leading throat-clear, filtered OUT of the utterance list but
+    // still inside the clip's own edge-trimmed window) right back into
+    // the first/last block. Capped to this tier's own first/last utterance
+    // + ordinary PAD_SEC instead, same as an interior boundary gets.
+    const exhaustive = !ranges;
     if (!ranges) ranges = utteranceRanges(clipWords, walkBlockIds);
     if (!ranges) continue; // nothing usable from this clip — see utteranceRanges' own doc comment
 
-    const segments = padRangesToSegments(ranges, clip.srcInSec, clip.srcOutSec).filter((s) => coveredIds.has(s.blockId));
+    const lowerBoundSec = exhaustive ? Math.max(clip.srcInSec, ranges[0].startSec - PAD_SEC) : clip.srcInSec;
+    const upperBoundSec = exhaustive
+      ? Math.min(clip.srcOutSec, ranges[ranges.length - 1].endSec + PAD_SEC)
+      : clip.srcOutSec;
+    const segments = padRangesToSegments(ranges, lowerBoundSec, upperBoundSec).filter((s) => coveredIds.has(s.blockId));
     for (const s of segments) {
       blocks.push({
         blockId: s.blockId,
@@ -590,6 +630,7 @@ export const splitMultiClipTake = (
         srcOutSec: s.srcOutSec - clip.srcInSec + clip.offsetSec,
         confidence: s.confidence,
         clipPath: clip.input.path,
+        hasUsableVideo: clip.hasUsableVideo,
       });
     }
   }
@@ -683,7 +724,7 @@ export const deriveTranscriptAndTrim = (
     const lastWordEnd = blockWords.length > 0 ? blockWords[blockWords.length - 1].endSec : undefined;
     const srcOutSec = lastWordEnd !== undefined ? Math.min(b.srcOutSec, lastWordEnd + LONG_PAUSE_CLAMP_SEC) : b.srcOutSec;
     if (!takesByBlock.has(b.blockId)) takesByBlock.set(b.blockId, []);
-    takesByBlock.get(b.blockId)!.push({ srcInSec: b.srcInSec, srcOutSec });
+    takesByBlock.get(b.blockId)!.push({ srcInSec: b.srcInSec, srcOutSec, hasUsableVideo: b.hasUsableVideo });
   }
 
   const transcriptBlocks: BlockTranscript[] = [...wordsByBlock.entries()].map(([blockId, takes]) => ({

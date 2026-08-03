@@ -68,6 +68,26 @@ export const VerifyBlockResultSchema = z.object({
   skipped: z.string().optional(),
 });
 
+/**
+ * Structural similarity over just ONE overlay event's own enter/exit
+ * animation window — as opposed to VerifyBlockResult.ssim, which averages
+ * over the block's WHOLE span. A short animation (a handful of frames) is
+ * a small fraction of a block's total duration, so a wrong or missing
+ * entrance barely moves the block-level average; measuring the window on
+ * its own is what actually lets a bad animation show up as a bad number,
+ * per this format's own MotionSpec (schemas.ts) — see verify.ts's own doc
+ * comment on why this exists. Only ever populated for an event that
+ * authors `motion` at all; a format with no motion authored gets an empty
+ * `windows` array, same as today.
+ */
+export const VerifyWindowResultSchema = z.object({
+  eventId: z.string(),
+  blockId: z.string(),
+  phase: z.enum(["enter", "exit"]),
+  ssim: z.number().optional(),
+  skipped: z.string().optional(),
+});
+
 export const VerifyResultSchema = z.object({
   draftId: z.string(),
   createdAt: z.string(),
@@ -76,6 +96,8 @@ export const VerifyResultSchema = z.object({
    *  away by several accurate ones. Absent when nothing could be measured. */
   overallScore: z.number().optional(),
   blocks: z.array(VerifyBlockResultSchema),
+  /** See VerifyWindowResultSchema. */
+  windows: z.array(VerifyWindowResultSchema).default([]),
   diagnostics: z.array(z.string()),
 });
 

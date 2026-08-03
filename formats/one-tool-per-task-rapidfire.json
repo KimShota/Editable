@@ -2,7 +2,7 @@
   "id": "one-tool-per-task-rapidfire",
   "name": "Best [AI Tool] for Every Task",
   "niche": "AI",
-  "description": "A fast talking-head list where the creator names a use-case then the AI tool for it, and that tool's app icon plus a yellow name label pop in below the chin. Repeats for many task→tool pairs, then ends on a follow CTA with a Follow button.",
+  "description": "A fast talking-head list where the creator names a use-case then the AI tool for it, and that tool's app icon pops in below the chin with the tool's own name picked out in yellow in the caption line. Repeats for many task→tool pairs, then ends on a follow CTA with a Follow button.",
   "fps": 30,
   "width": 720,
   "height": 1280,
@@ -61,31 +61,6 @@
       ],
       "events": [
         {
-          "id": "hook-label",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "tool",
-              "textTemplate": "{captured}",
-              "variant": "hook"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "tool",
-            "edge": "captureStart",
-            "offsetSec": 0
-          },
-          "layout": {
-            "x": 0.29,
-            "y": 0.55,
-            "width": 0.42,
-            "height": 0.065
-          },
-          "states": []
-        },
-        {
           "id": "hook-icon",
           "kind": "overlay",
           "component": {
@@ -106,7 +81,130 @@
             "width": 0.32,
             "height": 0.18
           },
-          "states": []
+          "states": [],
+          "motion": {
+            "enter": {
+              "durationSec": 0.3,
+              "x": [
+                {
+                  "at": 0,
+                  "value": -0.55,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "y": [
+                {
+                  "at": 0,
+                  "value": 0.12,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "rotate": [
+                {
+                  "at": 0,
+                  "value": -50,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 14,
+                    "mass": 0.7,
+                    "stiffness": 140
+                  }
+                }
+              ],
+              "scale": [
+                {
+                  "at": 0,
+                  "value": 0.5,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 0.4,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            },
+            "exit": {
+              "durationSec": 0.2,
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -156,31 +254,6 @@
       ],
       "events": [
         {
-          "id": "item2-label",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "tool",
-              "textTemplate": "{captured}",
-              "variant": "title"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "tool",
-            "edge": "captureStart",
-            "offsetSec": 0
-          },
-          "layout": {
-            "x": 0.29,
-            "y": 0.55,
-            "width": 0.42,
-            "height": 0.065
-          },
-          "states": []
-        },
-        {
           "id": "item2-icon",
           "kind": "overlay",
           "component": {
@@ -201,7 +274,130 @@
             "width": 0.32,
             "height": 0.18
           },
-          "states": []
+          "states": [],
+          "motion": {
+            "enter": {
+              "durationSec": 0.3,
+              "x": [
+                {
+                  "at": 0,
+                  "value": -0.55,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "y": [
+                {
+                  "at": 0,
+                  "value": 0.12,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "rotate": [
+                {
+                  "at": 0,
+                  "value": -50,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 14,
+                    "mass": 0.7,
+                    "stiffness": 140
+                  }
+                }
+              ],
+              "scale": [
+                {
+                  "at": 0,
+                  "value": 0.5,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 0.4,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            },
+            "exit": {
+              "durationSec": 0.2,
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -251,31 +447,6 @@
       ],
       "events": [
         {
-          "id": "item3-label",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "tool",
-              "textTemplate": "{captured}",
-              "variant": "title"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "tool",
-            "edge": "captureStart",
-            "offsetSec": 0
-          },
-          "layout": {
-            "x": 0.29,
-            "y": 0.55,
-            "width": 0.42,
-            "height": 0.065
-          },
-          "states": []
-        },
-        {
           "id": "item3-icon",
           "kind": "overlay",
           "component": {
@@ -296,7 +467,130 @@
             "width": 0.32,
             "height": 0.18
           },
-          "states": []
+          "states": [],
+          "motion": {
+            "enter": {
+              "durationSec": 0.3,
+              "x": [
+                {
+                  "at": 0,
+                  "value": -0.55,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "y": [
+                {
+                  "at": 0,
+                  "value": 0.12,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "rotate": [
+                {
+                  "at": 0,
+                  "value": -50,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 14,
+                    "mass": 0.7,
+                    "stiffness": 140
+                  }
+                }
+              ],
+              "scale": [
+                {
+                  "at": 0,
+                  "value": 0.5,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 0.4,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            },
+            "exit": {
+              "durationSec": 0.2,
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -346,31 +640,6 @@
       ],
       "events": [
         {
-          "id": "item4-label",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "tool",
-              "textTemplate": "{captured}",
-              "variant": "title"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "tool",
-            "edge": "captureStart",
-            "offsetSec": 0
-          },
-          "layout": {
-            "x": 0.29,
-            "y": 0.55,
-            "width": 0.42,
-            "height": 0.065
-          },
-          "states": []
-        },
-        {
           "id": "item4-icon",
           "kind": "overlay",
           "component": {
@@ -391,7 +660,130 @@
             "width": 0.32,
             "height": 0.18
           },
-          "states": []
+          "states": [],
+          "motion": {
+            "enter": {
+              "durationSec": 0.3,
+              "x": [
+                {
+                  "at": 0,
+                  "value": -0.55,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "y": [
+                {
+                  "at": 0,
+                  "value": 0.12,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "rotate": [
+                {
+                  "at": 0,
+                  "value": -50,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 14,
+                    "mass": 0.7,
+                    "stiffness": 140
+                  }
+                }
+              ],
+              "scale": [
+                {
+                  "at": 0,
+                  "value": 0.5,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 0.4,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            },
+            "exit": {
+              "durationSec": 0.2,
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -441,31 +833,6 @@
       ],
       "events": [
         {
-          "id": "item5-label",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "tool",
-              "textTemplate": "{captured}",
-              "variant": "title"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "tool",
-            "edge": "captureStart",
-            "offsetSec": 0
-          },
-          "layout": {
-            "x": 0.29,
-            "y": 0.55,
-            "width": 0.42,
-            "height": 0.065
-          },
-          "states": []
-        },
-        {
           "id": "item5-icon",
           "kind": "overlay",
           "component": {
@@ -486,7 +853,130 @@
             "width": 0.32,
             "height": 0.18
           },
-          "states": []
+          "states": [],
+          "motion": {
+            "enter": {
+              "durationSec": 0.3,
+              "x": [
+                {
+                  "at": 0,
+                  "value": -0.55,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "y": [
+                {
+                  "at": 0,
+                  "value": 0.12,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "rotate": [
+                {
+                  "at": 0,
+                  "value": -50,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 14,
+                    "mass": 0.7,
+                    "stiffness": 140
+                  }
+                }
+              ],
+              "scale": [
+                {
+                  "at": 0,
+                  "value": 0.5,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 0.4,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            },
+            "exit": {
+              "durationSec": 0.2,
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -536,31 +1026,6 @@
       ],
       "events": [
         {
-          "id": "item6-label",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "tool",
-              "textTemplate": "{captured}",
-              "variant": "title"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "tool",
-            "edge": "captureStart",
-            "offsetSec": 0
-          },
-          "layout": {
-            "x": 0.29,
-            "y": 0.55,
-            "width": 0.42,
-            "height": 0.065
-          },
-          "states": []
-        },
-        {
           "id": "item6-icon",
           "kind": "overlay",
           "component": {
@@ -581,7 +1046,130 @@
             "width": 0.32,
             "height": 0.18
           },
-          "states": []
+          "states": [],
+          "motion": {
+            "enter": {
+              "durationSec": 0.3,
+              "x": [
+                {
+                  "at": 0,
+                  "value": -0.55,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "y": [
+                {
+                  "at": 0,
+                  "value": 0.12,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "rotate": [
+                {
+                  "at": 0,
+                  "value": -50,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 14,
+                    "mass": 0.7,
+                    "stiffness": 140
+                  }
+                }
+              ],
+              "scale": [
+                {
+                  "at": 0,
+                  "value": 0.5,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 0.4,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            },
+            "exit": {
+              "durationSec": 0.2,
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -631,31 +1219,6 @@
       ],
       "events": [
         {
-          "id": "item7-label",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "tool",
-              "textTemplate": "{captured}",
-              "variant": "title"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "tool",
-            "edge": "captureStart",
-            "offsetSec": 0
-          },
-          "layout": {
-            "x": 0.29,
-            "y": 0.55,
-            "width": 0.42,
-            "height": 0.065
-          },
-          "states": []
-        },
-        {
           "id": "item7-icon",
           "kind": "overlay",
           "component": {
@@ -676,7 +1239,130 @@
             "width": 0.32,
             "height": 0.18
           },
-          "states": []
+          "states": [],
+          "motion": {
+            "enter": {
+              "durationSec": 0.3,
+              "x": [
+                {
+                  "at": 0,
+                  "value": -0.55,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "y": [
+                {
+                  "at": 0,
+                  "value": 0.12,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "rotate": [
+                {
+                  "at": 0,
+                  "value": -50,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 14,
+                    "mass": 0.7,
+                    "stiffness": 140
+                  }
+                }
+              ],
+              "scale": [
+                {
+                  "at": 0,
+                  "value": 0.5,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 0.4,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            },
+            "exit": {
+              "durationSec": 0.2,
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -726,31 +1412,6 @@
       ],
       "events": [
         {
-          "id": "item8-label",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "tool",
-              "textTemplate": "{captured}",
-              "variant": "title"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "tool",
-            "edge": "captureStart",
-            "offsetSec": 0
-          },
-          "layout": {
-            "x": 0.29,
-            "y": 0.55,
-            "width": 0.42,
-            "height": 0.065
-          },
-          "states": []
-        },
-        {
           "id": "item8-icon",
           "kind": "overlay",
           "component": {
@@ -771,7 +1432,130 @@
             "width": 0.32,
             "height": 0.18
           },
-          "states": []
+          "states": [],
+          "motion": {
+            "enter": {
+              "durationSec": 0.3,
+              "x": [
+                {
+                  "at": 0,
+                  "value": -0.55,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "y": [
+                {
+                  "at": 0,
+                  "value": 0.12,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "rotate": [
+                {
+                  "at": 0,
+                  "value": -50,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 14,
+                    "mass": 0.7,
+                    "stiffness": 140
+                  }
+                }
+              ],
+              "scale": [
+                {
+                  "at": 0,
+                  "value": 0.5,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 0.4,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            },
+            "exit": {
+              "durationSec": 0.2,
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -821,31 +1605,6 @@
       ],
       "events": [
         {
-          "id": "item9-label",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "tool",
-              "textTemplate": "{captured}",
-              "variant": "title"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "tool",
-            "edge": "captureStart",
-            "offsetSec": 0
-          },
-          "layout": {
-            "x": 0.29,
-            "y": 0.55,
-            "width": 0.42,
-            "height": 0.065
-          },
-          "states": []
-        },
-        {
           "id": "item9-icon",
           "kind": "overlay",
           "component": {
@@ -866,7 +1625,130 @@
             "width": 0.32,
             "height": 0.18
           },
-          "states": []
+          "states": [],
+          "motion": {
+            "enter": {
+              "durationSec": 0.3,
+              "x": [
+                {
+                  "at": 0,
+                  "value": -0.55,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "y": [
+                {
+                  "at": 0,
+                  "value": 0.12,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "rotate": [
+                {
+                  "at": 0,
+                  "value": -50,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 14,
+                    "mass": 0.7,
+                    "stiffness": 140
+                  }
+                }
+              ],
+              "scale": [
+                {
+                  "at": 0,
+                  "value": 0.5,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 0.4,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            },
+            "exit": {
+              "durationSec": 0.2,
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -916,31 +1798,6 @@
       ],
       "events": [
         {
-          "id": "item10-label",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "tool",
-              "textTemplate": "{captured}",
-              "variant": "title"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "tool",
-            "edge": "captureStart",
-            "offsetSec": 0
-          },
-          "layout": {
-            "x": 0.29,
-            "y": 0.55,
-            "width": 0.42,
-            "height": 0.065
-          },
-          "states": []
-        },
-        {
           "id": "item10-icon",
           "kind": "overlay",
           "component": {
@@ -961,7 +1818,130 @@
             "width": 0.32,
             "height": 0.18
           },
-          "states": []
+          "states": [],
+          "motion": {
+            "enter": {
+              "durationSec": 0.3,
+              "x": [
+                {
+                  "at": 0,
+                  "value": -0.55,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "y": [
+                {
+                  "at": 0,
+                  "value": 0.12,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "rotate": [
+                {
+                  "at": 0,
+                  "value": -50,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 14,
+                    "mass": 0.7,
+                    "stiffness": 140
+                  }
+                }
+              ],
+              "scale": [
+                {
+                  "at": 0,
+                  "value": 0.5,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 0.4,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            },
+            "exit": {
+              "durationSec": 0.2,
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -1011,31 +1991,6 @@
       ],
       "events": [
         {
-          "id": "item11-label",
-          "kind": "overlay",
-          "component": {
-            "component": "TextOverlay",
-            "params": {
-              "textAnchor": "tool",
-              "textTemplate": "{captured}",
-              "variant": "title"
-            }
-          },
-          "timing": {
-            "kind": "role",
-            "roleId": "tool",
-            "edge": "captureStart",
-            "offsetSec": 0
-          },
-          "layout": {
-            "x": 0.29,
-            "y": 0.55,
-            "width": 0.42,
-            "height": 0.065
-          },
-          "states": []
-        },
-        {
           "id": "item11-icon",
           "kind": "overlay",
           "component": {
@@ -1056,7 +2011,130 @@
             "width": 0.32,
             "height": 0.18
           },
-          "states": []
+          "states": [],
+          "motion": {
+            "enter": {
+              "durationSec": 0.3,
+              "x": [
+                {
+                  "at": 0,
+                  "value": -0.55,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "y": [
+                {
+                  "at": 0,
+                  "value": 0.12,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "rotate": [
+                {
+                  "at": 0,
+                  "value": -50,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 14,
+                    "mass": 0.7,
+                    "stiffness": 140
+                  }
+                }
+              ],
+              "scale": [
+                {
+                  "at": 0,
+                  "value": 0.5,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "spring",
+                    "damping": 12,
+                    "mass": 0.6,
+                    "stiffness": 120
+                  }
+                }
+              ],
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 0.4,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            },
+            "exit": {
+              "durationSec": 0.2,
+              "opacity": [
+                {
+                  "at": 0,
+                  "value": 1,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                },
+                {
+                  "at": 1,
+                  "value": 0,
+                  "easing": {
+                    "kind": "linear"
+                  }
+                }
+              ]
+            }
+          }
         }
       ]
     },

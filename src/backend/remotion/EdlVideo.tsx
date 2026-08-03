@@ -57,6 +57,7 @@ import { SkillCard } from "./components/SkillCard";
 import { Captions } from "./components/Captions";
 import { KaraokeTitleLayer } from "./components/KaraokeTitleLayer";
 import { TriptychNameStamp } from "./components/TriptychNameStamp";
+import { DEFAULT_MOTION_BY_COMPONENT, MotionWrapper } from "./components/Motion";
 
 /**
  * The generic EDL renderer. This single composition renders ANY finished
@@ -190,6 +191,7 @@ const OverlayInstance: React.FC<{ overlay: Edl["overlays"][number] }> = ({ overl
     console.warn(`EdlVideo: unknown overlay component "${overlay.component}"`);
     return null;
   }
+  const totalDurationInFrames = Math.round((overlay.tlOutSec - overlay.tlInSec) * fps);
   return (
     <div
       style={{
@@ -200,7 +202,12 @@ const OverlayInstance: React.FC<{ overlay: Edl["overlays"][number] }> = ({ overl
         height: `${overlay.height * 100}%`,
       }}
     >
-      <Component {...params} />
+      <MotionWrapper
+        motion={overlay.motion ?? DEFAULT_MOTION_BY_COMPONENT[overlay.component]}
+        totalDurationInFrames={totalDurationInFrames}
+      >
+        <Component {...params} />
+      </MotionWrapper>
     </div>
   );
 };
@@ -292,6 +299,21 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
           theme={edl.captionStyle?.params.theme as string | undefined}
         />
       )}
+
+      {edl.voiceovers.map((v) => (
+        <Sequence
+          key={v.id}
+          from={toFrames(v.tlInSec)}
+          durationInFrames={Math.max(1, toFrames(v.tlOutSec) - toFrames(v.tlInSec))}
+          name={`voiceover:${v.id}`}
+        >
+          <Audio
+            src={previewMode ? previewProxySrc(edl.jobId, v.src) : staticFile(v.src)}
+            volume={() => v.volume}
+            trimBefore={toFrames(v.srcInSec)}
+          />
+        </Sequence>
+      ))}
 
       {edl.sfx.map((s) => (
         <Sequence

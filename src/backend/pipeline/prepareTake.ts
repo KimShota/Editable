@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -37,7 +37,7 @@ import { BoundFile, Format, LiteralAnchor, TakePrep, TakePrepClip, TakePrepInput
  * a stat, not a re-transcribe-and-re-encode.
  */
 
-const PIPELINE_VERSION = "1";
+const PIPELINE_VERSION = "3";
 
 /** Breathing room kept around each clip's own detected speech, seconds —
  *  same constant/rationale as splitTake.ts's and trim.ts's own PAD_SEC. */
@@ -125,6 +125,54 @@ type ClipTranscript = {
   uploadIdx: number;
   input: TakePrepInput;
   words: Word[];
+  /** False when this clip's own video track is black for effectively its
+   *  whole duration — a voice-only recording (phone left recording with
+   *  the lens covered, screen off, camera app backgrounded) that still
+   *  has a video stream, just nothing worth showing. See
+   *  detectHasUsableVideo. */
+  hasUsableVideo: boolean;
+};
+
+/** ffmpeg's blackdetect minimum-duration/darkness-threshold — tuned to
+ *  catch a genuinely near-zero frame (a covered lens, a black screen),
+ *  not merely a dim room: this module's own splitTake.ts multi-clip split
+ *  runs on real phone footage that's often quite dark on its own (see
+ *  gates.ts's shot-luma checks catching that separately), so pix_th stays
+ *  tight rather than reusing a generic threshold. */
+const BLACK_ARGS = "blackdetect=d=0.5:pix_th=0.06";
+/** How much of a clip's own duration must be reported black for it to
+ *  count as having NO usable video at all — comfortably below 100% (a
+ *  black frame or two at the very start/end from an encoder flush
+ *  shouldn't narrowly escape detection) and comfortably above "a dark
+ *  room, or a black title card mid-clip" (which is real, if dim, footage
+ *  of the subject, not a video-less recording). */
+const BLACK_COVERAGE_THRESHOLD = 0.9;
+
+/** Total seconds ffmpeg's blackdetect reports as black anywhere in the
+ *  clip — unmerged, order doesn't matter, only the sum. Mirrors trim.ts's
+ *  own rawSilenceIntervals in shelling out to a `*detect` filter and
+ *  parsing its stderr log lines, but sums durations directly rather than
+ *  building an interval list — nothing downstream needs the black spans'
+ *  own positions, only how much of the clip they cover in total. */
+const detectBlackCoverageSec = (clipAbsPath: string): number => {
+  const out = spawnSync("ffmpeg", ["-i", clipAbsPath, "-vf", BLACK_ARGS, "-an", "-f", "null", "-"], {
+    encoding: "utf8",
+  }).stderr;
+  let totalSec = 0;
+  for (const match of out.matchAll(/black_duration:([\d.]+)/g)) {
+    totalSec += Number(match[1]);
+  }
+  return totalSec;
+};
+
+/** See ClipTranscript.hasUsableVideo's own doc comment. `durationSec`
+ *  undefined (a probe that couldn't determine it) reads as "has video" —
+ *  the same fail-open default this pipeline uses elsewhere (never block a
+ *  build over incomplete metadata; the WORST case is one voice-only clip
+ *  wrongly treated as showing footage, no worse than today's behavior). */
+const detectHasUsableVideo = (clipAbsPath: string, durationSec: number | undefined): boolean => {
+  if (durationSec === undefined || durationSec <= 0) return true;
+  return detectBlackCoverageSec(clipAbsPath) / durationSec < BLACK_COVERAGE_THRESHOLD;
 };
 
 const transcribeClips = (files: BoundFile[], inputs: TakePrepInput[], cached: TakePrep | null): ClipTranscript[] => {
@@ -134,7 +182,8 @@ const transcribeClips = (files: BoundFile[], inputs: TakePrepInput[], cached: Ta
     return files.map((file, uploadIdx) => {
       const cachedClip = cached?.clips.find((c) => sameInput(c.input, inputs[uploadIdx]));
       const words = cachedClip ? cachedClip.words : transcribeFile(file.absPath, workDir);
-      return { file, uploadIdx, input: inputs[uploadIdx], words };
+      const hasUsableVideo = cachedClip ? cachedClip.hasUsableVideo : detectHasUsableVideo(file.absPath, file.durationSec);
+      return { file, uploadIdx, input: inputs[uploadIdx], words, hasUsableVideo };
     });
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
@@ -524,6 +573,7 @@ const toClipRecord = (c: PositionedClip): TakePrepClip => ({
   scriptEndIdx: c.scriptEndIdx,
   score: c.score,
   ordering: c.ordering,
+  hasUsableVideo: c.hasUsableVideo,
 });
 
 const toExcludedClipRecord = (p: ResolvedPlacement): TakePrepClip => ({
@@ -536,6 +586,7 @@ const toExcludedClipRecord = (p: ResolvedPlacement): TakePrepClip => ({
   scriptEndIdx: p.scriptEndIdx,
   score: p.score,
   ordering: "excluded",
+  hasUsableVideo: p.hasUsableVideo,
 });
 
 // ---------------------------------------------------------------------------

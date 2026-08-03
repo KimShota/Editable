@@ -25,6 +25,7 @@ export const defaultEdl: Edl = {
       volume: 1,
     },
   ],
+  voiceovers: [],
   overlays: [
     {
       id: "placeholder_text",

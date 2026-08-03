@@ -313,6 +313,95 @@ export const EventTimingSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+// ---------------------------------------------------------------------------
+// Motion — an overlay's own enter/exit animation, as DATA rather than
+// component code. Formats never contained animation before this (every
+// overlay component hardcoded its own one-size-fits-all fade/scale); this
+// is a deliberate, explicit amendment to that principle, not a quiet
+// reversal of it — a format still contains no animation CODE, only
+// animation DATA a single generic player (EdlVideo.tsx's MotionWrapper)
+// interprets the exact same way for every registered component.
+//
+// A channel is a small keyframe track (0..1 phase-local time -> a value),
+// each keyframe carrying the EASING for the segment ending at it (ignored
+// on a channel's first keyframe). x/y/rotate are OFFSETS from the event's
+// own resting layout box / 0deg — 0 always means "exactly where it would
+// render with no motion at all". scale/opacity are ABSOLUTE (1 = normal
+// size, 1 = fully visible) — both already have a natural non-zero rest
+// value, unlike position/rotation. MotionWrapper leaves any channel a
+// phase doesn't mention at its resting value throughout that phase, so
+// e.g. an exit that only fades opacity never touches position/scale.
+// ---------------------------------------------------------------------------
+
+export const MotionEasingSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("linear") }),
+  /** Same 4-number convention as CSS cubic-bezier()/most motion-design
+   *  tools — (x1,y1,x2,y2) control points of a unit bezier from (0,0) to
+   *  (1,1). */
+  z.object({
+    kind: z.literal("cubicBezier"),
+    x1: z.number(),
+    y1: z.number(),
+    x2: z.number(),
+    y2: z.number(),
+  }),
+  /** Remotion's own Easing.spring — a t(0..1)->t'(0..1) curve driven by
+   *  spring physics (can overshoot past 1 before settling), not a
+   *  frame-by-frame simulation — so it composes with a plain keyframe
+   *  segment exactly like any other easing function would. */
+  z.object({
+    kind: z.literal("spring"),
+    damping: z.number().positive().default(10),
+    mass: z.number().positive().default(1),
+    stiffness: z.number().positive().default(100),
+  }),
+]);
+
+export const MotionKeyframeSchema = z.object({
+  /** Fraction of this phase's own durationSec — 0 at the phase's start,
+   *  1 at its end. */
+  at: z.number().min(0).max(1),
+  value: z.number(),
+  /** Eases the segment from the PREVIOUS keyframe to this one — meaningless
+   *  (ignored) on a channel's first keyframe, which has no prior segment. */
+  easing: MotionEasingSchema.default({ kind: "linear" }),
+});
+
+/** At least 2 keyframes to be a meaningful animated track — a single fixed
+ *  value belongs in the component's own base params, not a one-point
+ *  "channel". */
+export const MotionChannelSchema = z.array(MotionKeyframeSchema).min(2);
+
+export const MotionPhaseSchema = z.object({
+  durationSec: z.number().positive(),
+  /** Fraction of composition WIDTH, offset from resting x. Negative = left
+   *  of rest — e.g. an entrance sliding in from off-screen left starts
+   *  around -0.6..-1 and animates to 0. */
+  x: MotionChannelSchema.optional(),
+  /** Fraction of composition HEIGHT, offset from resting y. */
+  y: MotionChannelSchema.optional(),
+  /** Absolute multiplier on the event's own rendered size (1 = normal). */
+  scale: MotionChannelSchema.optional(),
+  /** Degrees, offset from 0 (the event's own authored orientation). */
+  rotate: MotionChannelSchema.optional(),
+  /** Absolute 0..1 (1 = fully visible). */
+  opacity: MotionChannelSchema.optional(),
+});
+
+/** An overlay event's own enter/exit animation — see this section's own
+ *  doc comment above. Both optional and independent: an event with only
+ *  `enter` animates in and then simply holds at rest until it disappears
+ *  (today's exact behavior for every event that doesn't author `exit`);
+ *  one with only `exit` pops in immediately (todays's default) and
+ *  animates out. Absent entirely = the CURRENT COMPONENT's own hardcoded
+ *  default motion (see e.g. ImageOverlay.tsx's DEFAULT_MOTION) — so no
+ *  existing format needs to author this to keep rendering exactly as it
+ *  does today. */
+export const MotionSpecSchema = z.object({
+  enter: MotionPhaseSchema.optional(),
+  exit: MotionPhaseSchema.optional(),
+});
+
 /** Fixed on-canvas geometry authored for ONE overlay event — a fraction of
  *  the frame, same convention as EdlOverlaySchema's own x/y/width/height.
  *  Present = the reference's OWN edit decided this box (e.g. three rank
@@ -357,6 +446,8 @@ export const FormatEventSchema = z.object({
   layout: EventLayoutSchema.optional(),
   /** See FormatEventStateSchema. Overlay events only — meaningless for sfx. */
   states: z.array(FormatEventStateSchema).default([]),
+  /** See MotionSpecSchema. Overlay events only — meaningless for sfx. */
+  motion: MotionSpecSchema.optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -902,6 +993,14 @@ export const TranscriptSchema = z.object({
 export const TakeTrimSchema = z.object({
   srcInSec: z.number().min(0),
   srcOutSec: z.number().positive(),
+  /** False when this take's own source clip has no usable video (see
+   *  TakePrepClipSchema's own doc comment) — carried through from
+   *  splitTake.ts's TakeSplit.hasUsableVideo (set only by the multi-clip
+   *  split) so assemble.ts knows to render this take as a voiceover-only
+   *  element instead of a video segment. Undefined for the ordinary
+   *  single-clip path (and any take assemble.ts should treat as ordinary
+   *  video) — only `false` triggers the voiceover path. */
+  hasUsableVideo: z.boolean().optional(),
 });
 
 export const BlockTrimSchema = z.object({
@@ -978,6 +1077,32 @@ export const EdlVideoSegmentSchema = z.object({
   fgSrc: z.string().optional(),
 });
 
+/**
+ * Audio-only playback for a voice-block segment whose own source clip has
+ * no usable video (TakeTrim.hasUsableVideo:false — see splitTake.ts's
+ * multi-clip split doc comment: a "take" can be several separately-filmed
+ * clips, and one of them may be a voice-only recording with a black or
+ * covered-lens video track). assemble.ts emits one of these instead of an
+ * EdlVideoSegment for that take, and extends whichever OTHER take in the
+ * same block DOES have usable video to visually cover this element's own
+ * [tlInSec, tlOutSec) span (muted, so only this element's own audio is
+ * heard during that stretch) — see assemble.ts's own doc comment on
+ * voiceover placement for the full reasoning. `src` is ordinarily the
+ * SAME combined take file an adjacent EdlVideoSegment in the same block
+ * already uses — the video-less clip's own audio survives inside that one
+ * shared file at its own offset, so no separate source file is needed.
+ */
+export const EdlVoiceoverSchema = z.object({
+  id: z.string(),
+  blockId: z.string(),
+  src: z.string(),
+  srcInSec: z.number().min(0),
+  srcOutSec: z.number().positive(),
+  tlInSec: z.number().min(0),
+  tlOutSec: z.number().positive(),
+  volume: z.number().min(0).max(1).default(1),
+});
+
 export const EdlOverlaySchema = z.object({
   /** The originating event id (override/debug handle). */
   id: z.string(),
@@ -1008,6 +1133,10 @@ export const EdlOverlaySchema = z.object({
       }),
     )
     .default([]),
+  /** See MotionSpecSchema — carried straight through from the originating
+   *  FormatEvent.motion (or an override's own, see assemble.ts). Absent =
+   *  the rendering component's own hardcoded default motion. */
+  motion: MotionSpecSchema.optional(),
 });
 
 export const EdlSfxSchema = z.object({
@@ -1111,6 +1240,7 @@ export const EdlSchema = z.object({
   height: z.number().int().positive(),
   durationSec: z.number().positive(),
   video: z.array(EdlVideoSegmentSchema).min(1),
+  voiceovers: z.array(EdlVoiceoverSchema).default([]),
   overlays: z.array(EdlOverlaySchema).default([]),
   sfx: z.array(EdlSfxSchema).default([]),
   captions: z.array(EdlCaptionGroupSchema).default([]),
@@ -1468,6 +1598,13 @@ export const TakePrepClipSchema = z.object({
    *  a retake of another (better-matched) clip — left out of the combined
    *  cut entirely. */
   ordering: z.enum(["aligned", "uploadOrder", "excluded"]),
+  /** False when this clip's own video track is black for effectively its
+   *  whole duration — a voice-only recording (see prepareTake.ts's
+   *  detectHasUsableVideo). splitTake.ts's multi-clip split reads this to
+   *  emit an EdlVoiceover element instead of a video segment for a block
+   *  whose take falls inside this clip, so the rendered video never shows
+   *  a black frame with audio playing over it. */
+  hasUsableVideo: z.boolean(),
 });
 
 export const TakePrepSchema = z.object({

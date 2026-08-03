@@ -10,7 +10,7 @@ import { clamp } from "../pipeline/timing";
 import { authoringDir } from "../pipeline/paths";
 import { BoundAsset, FilledFormat, Format } from "../pipeline/types";
 import { measureSsim } from "./ssim";
-import { Analysis, Draft, VerifyBlockResult, VerifyResult } from "./types";
+import { Analysis, Draft, VerifyBlockResult, VerifyResult, VerifyWindowResult } from "./types";
 
 /**
  * Module A4 — Verify (self-verification).
@@ -203,6 +203,7 @@ export const verify = async (
       draftId,
       createdAt: new Date().toISOString(),
       blocks: [],
+      windows: [],
       diagnostics: [`verify: failed unexpectedly — ${(err as Error).message}`],
     };
   }
@@ -252,6 +253,7 @@ const runVerify = async (
       draftId,
       createdAt: new Date().toISOString(),
       blocks: blockResults,
+      windows: [],
       diagnostics: ["verify: nothing to self-verify — no voice block's marker phrase was found in the reference"],
     };
   }
@@ -367,11 +369,77 @@ const runVerify = async (
   const measuredScores = blockResults.map((b) => b.ssim).filter((s): s is number => typeof s === "number");
   const overallScore = measuredScores.length > 0 ? Math.min(...measuredScores) : undefined;
 
+  // Per-animation-window scoring (see VerifyWindowResultSchema's own doc
+  // comment for why a block-level average can't catch a bad entrance/exit
+  // on its own): only ever runs for an event that actually authors
+  // `motion` — a format with none gets an empty `windows` array, same as
+  // today's exact behavior for every draft that predates this.
+  const windowResults: VerifyWindowResult[] = [];
+  for (const block of verifyFormat.blocks) {
+    const span = splitBlocks.get(block.id);
+    if (!span) continue;
+    const videoSpans = edlFinal.video.filter((v) => v.blockId === block.id);
+    if (videoSpans.length === 0) continue;
+    const blockTlInSec = Math.min(...videoSpans.map((v) => v.tlInSec));
+
+    for (const event of block.events) {
+      if (event.kind !== "overlay" || !event.motion) continue;
+      const overlay = edlFinal.overlays.find((o) => o.id === event.id);
+      if (!overlay) continue; // dropped in pass 2 despite the placeholder — unexpected, nothing to measure
+
+      const phases: Array<{ name: "enter" | "exit"; tlStartSec: number; durationSec: number }> = [];
+      if (event.motion.enter) phases.push({ name: "enter", tlStartSec: overlay.tlInSec, durationSec: event.motion.enter.durationSec });
+      if (event.motion.exit) {
+        phases.push({ name: "exit", tlStartSec: overlay.tlOutSec - event.motion.exit.durationSec, durationSec: event.motion.exit.durationSec });
+      }
+
+      for (const phase of phases) {
+        // The reference-side window at the SAME offset from this block's
+        // own start, mapped through the split span exactly like the
+        // block-level measurement above does — this is what lets the
+        // rendered animation be compared against how the reference itself
+        // actually looked at that same relative moment.
+        const refAtSec = span.srcInSec + (phase.tlStartSec - blockTlInSec);
+        const measurableSec = Math.min(phase.durationSec, span.srcOutSec - refAtSec);
+        if (refAtSec < span.srcInSec - 0.01 || measurableSec <= 0.05) {
+          windowResults.push({
+            eventId: event.id,
+            blockId: block.id,
+            phase: phase.name,
+            skipped: "animation window falls outside the reference's own matched span",
+          });
+          continue;
+        }
+        try {
+          const ssim = measureSsim(
+            outPath,
+            phase.tlStartSec,
+            sourcePath,
+            refAtSec,
+            measurableSec,
+            verifyFormat.width,
+            verifyFormat.height,
+            verifyFormat.fps,
+          );
+          windowResults.push({ eventId: event.id, blockId: block.id, phase: phase.name, ssim });
+        } catch (err) {
+          windowResults.push({
+            eventId: event.id,
+            blockId: block.id,
+            phase: phase.name,
+            skipped: `ssim measurement failed: ${(err as Error).message}`,
+          });
+        }
+      }
+    }
+  }
+
   return {
     draftId,
     createdAt: new Date().toISOString(),
     overallScore,
     blocks: blockResults,
+    windows: windowResults,
     diagnostics: [...diagnostics, ...edlPass1.diagnostics, ...edlFinal.diagnostics],
   };
 };

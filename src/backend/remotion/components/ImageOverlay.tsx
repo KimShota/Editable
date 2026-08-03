@@ -1,11 +1,5 @@
 import React from "react";
-import {
-  AbsoluteFill,
-  Img,
-  interpolate,
-  staticFile,
-  useCurrentFrame,
-} from "remotion";
+import { AbsoluteFill, Img, staticFile } from "remotion";
 import { Gif } from "@remotion/gif";
 import { SYSTEM_FONT, TEXT_SHADOW } from "../../components/style";
 
@@ -20,6 +14,13 @@ import { SYSTEM_FONT, TEXT_SHADOW } from "../../components/style";
  * default), and is what the editor's canvas lets the user drag/resize
  * directly, so this needs to trust it completely rather than shrinking
  * again inside it.
+ *
+ * Carries NO enter/exit animation of its own — that's MotionWrapper's job
+ * now (see EdlVideo.tsx, schemas.ts's MotionSpecSchema doc comment), one
+ * layer up, driven by the event's own `motion` (or, absent that,
+ * Motion.tsx's DEFAULT_MOTION_BY_COMPONENT entry for "ImageOverlay",
+ * which reproduces this component's own former hardcoded fade/scale
+ * exactly) — this component only ever renders its OWN resting appearance.
  *
  * `label`/`labelColor`/`blurred` exist to reproduce a reference reel's own
  * rank-card treatment (e.g. a "BAD"/"GOOD"/"GREAT" tag, blurred-placeholder
@@ -37,18 +38,12 @@ export const ImageOverlay: React.FC<{
   labelColor?: string;
   blurred?: boolean;
 }> = ({ src, label, labelColor, blurred }) => {
-  const frame = useCurrentFrame();
   if (!src) return null;
-  const progress = interpolate(frame, [0, 5], [0, 1], {
-    extrapolateRight: "clamp",
-  });
 
   const style: React.CSSProperties = {
     width: "100%",
     height: "100%",
     borderRadius: 24,
-    opacity: progress,
-    transform: `scale(${interpolate(progress, [0, 1], [0.85, 1])})`,
     boxShadow: "0 12px 48px rgba(0,0,0,0.5)",
     filter: blurred ? "blur(22px)" : "none",
   };
@@ -68,7 +63,6 @@ export const ImageOverlay: React.FC<{
             fontSize: 30,
             color: labelColor ?? "#fff",
             textShadow: TEXT_SHADOW,
-            opacity: progress,
           }}
         >
           {label}

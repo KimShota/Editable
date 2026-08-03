@@ -3,6 +3,7 @@ import {
   ResolvedRole,
   ResolvedRoles,
   SemanticAnchor,
+  TakeTrim,
   Transcript,
   TrimPoints,
   Word,
@@ -42,6 +43,32 @@ const snapToWordStart = (timeSec: number, words: Word[]): number => {
     }
   }
   return best;
+};
+
+/**
+ * Block-relative (trimmed-clip) [startSec, endSec) of a multi-take block's
+ * own LAST take — a strictly more informed literal-anchor fallback than a
+ * fixed blockStart+offsetSec guess whenever one's available. Undefined for
+ * an ordinary single-take block (nothing to prefer over the configured
+ * fallback there).
+ *
+ * A multi-take block's takes are already ordered to match the LINE's own
+ * reading order — deriveTranscriptAndTrim (splitTake.ts) sorts same-block
+ * segments by their source clip's own scriptStartIdx specifically so a
+ * concatenated block plays back in the order the words were actually
+ * meant to be heard (see its own doc comment) — so the LAST take is
+ * exactly the part of the line most likely to hold whatever a trailing
+ * marker (a named tool, a captured keyword) is pointing at, independent of
+ * how many takes there are or why the block has more than one. A literal
+ * anchor's own fallback.offsetSec ("push roughly past the opening words")
+ * is already reaching for this same idea with a fixed guess; this is a
+ * more accurate version of that same intent whenever real segment
+ * boundaries are available to use instead. */
+const lastTakeSpan = (takes: TakeTrim[]): { startSec: number; endSec: number } | undefined => {
+  if (takes.length <= 1) return undefined;
+  const startSec = takes.slice(0, -1).reduce((s, t) => s + (t.srcOutSec - t.srcInSec), 0);
+  const last = takes[takes.length - 1];
+  return { startSec, endSec: startSec + (last.srcOutSec - last.srcInSec) };
 };
 
 const snapToWordEnd = (timeSec: number, words: Word[]): number => {
@@ -122,13 +149,24 @@ export const resolveRoles = async (
           capturedText: match.capturedText,
         });
       } else {
-        const fb = anchoredTimeSec(anchor.fallback, blockDurationSec);
-        literalSpans.set(anchor.id, { startSec: fb, endSec: fb });
+        const takeSpan = lastTakeSpan(trim.takes);
+        const fb = takeSpan?.startSec ?? anchoredTimeSec(anchor.fallback, blockDurationSec);
+        const fbEnd = takeSpan?.endSec ?? fb;
+        literalSpans.set(anchor.id, { startSec: fb, endSec: fbEnd });
         roles.push({
           blockId: block.id,
           roleId: anchor.id,
           timeSec: fb,
-          endSec: fb,
+          endSec: fbEnd,
+          // Not a real captured phrase (no text was matched at all) — but
+          // when takeSpan is available, [fb, fbEnd) is still a genuine,
+          // segment-boundary-derived span worth flagging as "the part
+          // that matters" for caption emphasis (assemble.ts's
+          // captureSpans) and the "captureStart" overlay-timing edge,
+          // same as a real capture would. Left unset for the ordinary
+          // single-take case, where a fixed-offset fallback point is no
+          // better a signal than blockStart itself.
+          captureStartSec: takeSpan ? fb : undefined,
           confidence: 0,
           source: "fallback",
         });

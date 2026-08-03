@@ -18,6 +18,7 @@ import {
   EdlSfxSchema,
   EdlTransitionSchema,
   EdlVideoSegmentSchema,
+  EdlVoiceoverSchema,
   FilledFormatSchema,
   FormatEventSchema,
   FormatSchema,
@@ -29,6 +30,11 @@ import {
   MatteArtifactSchema,
   MatteBlockSchema,
   MediaTypeSchema,
+  MotionChannelSchema,
+  MotionEasingSchema,
+  MotionKeyframeSchema,
+  MotionPhaseSchema,
+  MotionSpecSchema,
   OverridesSchema,
   PlateAssetSchema,
   PlateLumaStatsSchema,
@@ -66,6 +72,11 @@ export type PoseTag = z.infer<typeof PoseTagSchema>;
 export type SubShotSpec = z.infer<typeof SubShotSpecSchema>;
 export type GenerationSpec = z.infer<typeof GenerationSpecSchema>;
 export type Slot = z.infer<typeof SlotSchema>;
+export type MotionEasing = z.infer<typeof MotionEasingSchema>;
+export type MotionKeyframe = z.infer<typeof MotionKeyframeSchema>;
+export type MotionChannel = z.infer<typeof MotionChannelSchema>;
+export type MotionPhase = z.infer<typeof MotionPhaseSchema>;
+export type MotionSpec = z.infer<typeof MotionSpecSchema>;
 export type FormatEvent = z.infer<typeof FormatEventSchema>;
 export type Block = z.infer<typeof BlockSchema>;
 export type Format = z.infer<typeof FormatSchema>;
@@ -88,6 +99,7 @@ export type ResolvedRole = z.infer<typeof ResolvedRoleSchema>;
 export type ResolvedRoles = z.infer<typeof ResolvedRolesSchema>;
 
 export type EdlVideoSegment = z.infer<typeof EdlVideoSegmentSchema>;
+export type EdlVoiceover = z.infer<typeof EdlVoiceoverSchema>;
 export type EdlOverlay = z.infer<typeof EdlOverlaySchema>;
 export type EdlSfx = z.infer<typeof EdlSfxSchema>;
 export type EdlCaptionWord = z.infer<typeof EdlCaptionWordSchema>;

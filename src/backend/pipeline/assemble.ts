@@ -9,6 +9,7 @@ import {
   EdlSfx,
   EdlTransition,
   EdlVideoSegment,
+  EdlVoiceover,
   FilledFormat,
   Format,
   FormatEvent,
@@ -371,6 +372,7 @@ export const assemble = (
   };
 
   const video: EdlVideoSegment[] = [];
+  const voiceovers: EdlVoiceover[] = [];
   const overlays: EdlOverlay[] = [];
   const sfx: EdlSfx[] = [];
   const captions: EdlCaptionGroup[] = [];
@@ -422,27 +424,157 @@ export const assemble = (
 
     let segCursor = tlInSec;
     let lastSegId = block.id;
-    trim.takes.forEach((t, i) => {
-      const file = takeFiles[takeOrder[i] ?? i];
-      const segId = trim.takes.length > 1 ? `${block.id}__take${i}` : block.id;
-      const durationSec = t.srcOutSec - t.srcInSec;
-      video.push({
-        id: segId,
-        blockId: block.id,
-        src: stage(file),
-        srcInSec: t.srcInSec,
-        srcOutSec: t.srcOutSec,
-        srcDurationSec: file.durationSec,
-        tlInSec: segCursor,
-        tlOutSec: segCursor + durationSec,
-        // B-roll plays under the music/voice; its own audio is muted.
-        muted: block.kind === "broll",
-        volume: 1,
-        fgSrc: i === 0 && fgAsset ? stage(fgAsset) : undefined,
+    // Ordinary path: every take has real (or unknown, i.e. assumed real)
+    // video — unchanged from before this block ever had voiceover support,
+    // so every other format/job takes this exact branch with zero behavior
+    // change. Only a multi-clip split (splitTake.ts's splitMultiClipTake)
+    // ever sets hasUsableVideo:false on a take.
+    if (!trim.takes.some((t) => t.hasUsableVideo === false)) {
+      trim.takes.forEach((t, i) => {
+        const file = takeFiles[takeOrder[i] ?? i];
+        const segId = trim.takes.length > 1 ? `${block.id}__take${i}` : block.id;
+        const durationSec = t.srcOutSec - t.srcInSec;
+        video.push({
+          id: segId,
+          blockId: block.id,
+          src: stage(file),
+          srcInSec: t.srcInSec,
+          srcOutSec: t.srcOutSec,
+          srcDurationSec: file.durationSec,
+          tlInSec: segCursor,
+          tlOutSec: segCursor + durationSec,
+          // B-roll plays under the music/voice; its own audio is muted.
+          muted: block.kind === "broll",
+          volume: 1,
+          fgSrc: i === 0 && fgAsset ? stage(fgAsset) : undefined,
+        });
+        segCursor += durationSec;
+        lastSegId = segId;
       });
-      segCursor += durationSec;
-      lastSegId = segId;
-    });
+    } else {
+      // At least one take's own source clip has no usable video (a
+      // voice-only recording — see splitTake.ts's TakeSplit.hasUsableVideo
+      // doc comment). Rather than render that take as a video segment
+      // (which would show a black frame with its audio playing over it —
+      // the original bug report this exists to fix), it becomes an
+      // EdlVoiceover at its own natural timeline position, and whichever
+      // ADJACENT take in this same block DOES have usable video gets a
+      // second, MUTED video segment appended immediately before/after its
+      // own natural (unmuted) span to visually cover that same stretch —
+      // same underlying file, contiguous source time, so the cut is
+      // invisible; only the video's own audio is silenced there, since the
+      // voiceover is what should be heard during that stretch. The
+      // video-having take's own natural span stays exactly where it was
+      // (still unmuted), so its own real synced audio — e.g. the one word
+      // actually spoken on camera — is never affected.
+      //
+      // The muted extension reaches backward/forward only as far as the
+      // SAME source file's own bounds allow (0 and srcDurationSec) — not
+      // clamped against a neighboring BLOCK's own footage in that clip
+      // (splitTake.ts doesn't surface that boundary this far downstream).
+      // In practice the shared take file is a full-length recording and
+      // any one block's own borrowed stretch is a few seconds, so this
+      // essentially never runs out of room; on the rare occasion it did,
+      // the extension simply falls short of the needed duration rather
+      // than erroring — the same "never wrong in a way that breaks
+      // rendering, just occasionally imprecise" tradeoff splitTake.ts's
+      // own boundary heuristics already make elsewhere in this pipeline.
+      let pendingVoSec = 0;
+      let pendingVoStartSec: number | null = null;
+      let voSeq = 0;
+
+      trim.takes.forEach((t, i) => {
+        const durationSec = t.srcOutSec - t.srcInSec;
+
+        if (t.hasUsableVideo === false) {
+          const file = takeFiles[takeOrder[i] ?? i];
+          voiceovers.push({
+            id: `${block.id}__vo${voSeq++}`,
+            blockId: block.id,
+            src: stage(file),
+            srcInSec: t.srcInSec,
+            srcOutSec: t.srcOutSec,
+            tlInSec: segCursor,
+            tlOutSec: segCursor + durationSec,
+            volume: 1,
+          });
+          if (pendingVoStartSec === null) pendingVoStartSec = segCursor;
+          pendingVoSec += durationSec;
+          segCursor += durationSec;
+          return;
+        }
+
+        const file = takeFiles[takeOrder[i] ?? i];
+        const srcDurationSec = file.durationSec;
+
+        // Absorb any immediately-preceding voiceover-only run by covering
+        // its own timeline span with real (muted) footage from just
+        // before this take's own natural start in the SAME source file.
+        if (pendingVoStartSec !== null) {
+          const backExtendSec = Math.min(pendingVoSec, t.srcInSec);
+          if (backExtendSec > 0.01) {
+            video.push({
+              id: `${block.id}__take${i}__pre`,
+              blockId: block.id,
+              src: stage(file),
+              srcInSec: t.srcInSec - backExtendSec,
+              srcOutSec: t.srcInSec,
+              srcDurationSec,
+              tlInSec: pendingVoStartSec,
+              tlOutSec: pendingVoStartSec + backExtendSec,
+              muted: true,
+              volume: 1,
+            });
+          }
+          pendingVoSec = 0;
+          pendingVoStartSec = null;
+        }
+
+        const segId = trim.takes.length > 1 ? `${block.id}__take${i}` : block.id;
+        video.push({
+          id: segId,
+          blockId: block.id,
+          src: stage(file),
+          srcInSec: t.srcInSec,
+          srcOutSec: t.srcOutSec,
+          srcDurationSec,
+          tlInSec: segCursor,
+          tlOutSec: segCursor + durationSec,
+          muted: block.kind === "broll",
+          volume: 1,
+          fgSrc: i === 0 && fgAsset ? stage(fgAsset) : undefined,
+        });
+        segCursor += durationSec;
+        lastSegId = segId;
+
+        // Look ahead for a run of voiceover-only takes immediately
+        // following this one, and cover it the same way (forward this
+        // time) — the outer forEach still visits and emits those takes'
+        // own EdlVoiceover entries normally; this only adds the muted
+        // video underneath, it never advances segCursor itself (the
+        // upcoming voiceover-only iterations do that on their own, and
+        // need to land on exactly this same span).
+        let aheadSec = 0;
+        for (let j = i + 1; j < trim.takes.length && trim.takes[j].hasUsableVideo === false; j++) {
+          aheadSec += trim.takes[j].srcOutSec - trim.takes[j].srcInSec;
+        }
+        const fwdExtendSec = srcDurationSec !== undefined ? Math.min(aheadSec, srcDurationSec - t.srcOutSec) : aheadSec;
+        if (fwdExtendSec > 0.01) {
+          video.push({
+            id: `${segId}__post`,
+            blockId: block.id,
+            src: stage(file),
+            srcInSec: t.srcOutSec,
+            srcOutSec: t.srcOutSec + fwdExtendSec,
+            srcDurationSec,
+            tlInSec: segCursor,
+            tlOutSec: segCursor + fwdExtendSec,
+            muted: true,
+            volume: 1,
+          });
+        }
+      });
+    }
 
     for (const event of block.events) {
       const override = overrides?.events[event.id];
@@ -525,6 +657,7 @@ export const assemble = (
           // drag/resize is what the user narrows/moves it with afterward.
           ...box,
           states: resolvedStates,
+          motion: event.motion,
         });
       } else {
         const volume = resolvedRef.params.volume;
@@ -949,6 +1082,7 @@ export const assemble = (
     height: format.height,
     durationSec: cursor,
     video,
+    voiceovers,
     overlays,
     sfx: dedupedSfx,
     captions,

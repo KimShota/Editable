@@ -44,6 +44,7 @@ export const probeFile = (absPath: string): ProbedMedia => {
       width?: number;
       height?: number;
       disposition?: { attached_pic?: number };
+      side_data_list?: Array<{ side_data_type?: string; rotation?: number }>;
     }>;
     format?: { duration?: string };
   };
@@ -57,20 +58,36 @@ export const probeFile = (absPath: string): ProbedMedia => {
   );
   const hasAudio = streams.some((s) => s.codec_type === "audio");
 
+  // Phone footage very commonly carries a Display Matrix side-data entry
+  // (rotation, degrees — ffprobe reports it signed, e.g. -90) instead of
+  // ever storing the frame pre-rotated: the DECODED/displayed frame is
+  // rotated by the player (ffmpeg's own filters auto-apply it; a raw
+  // <video> tag or Remotion's OffthreadVideo does NOT), but width/height
+  // above are always the stream's UNROTATED storage dimensions. A ±90/±270
+  // rotation swaps which axis is actually longer on screen — every
+  // consumer of these dimensions (prepareTake.ts's buildCombinedFile
+  // target size, assemble.ts's overlay auto-fit) needs the DISPLAYED
+  // shape, not the storage one, or a portrait clip gets treated as
+  // landscape and force-cropped/upscaled to fit.
+  const rotation = video?.side_data_list?.find((s) => s.rotation !== undefined)?.rotation;
+  const swapped = rotation !== undefined && Math.abs(rotation % 180) === 90;
+  const displayWidth = swapped ? video?.height : video?.width;
+  const displayHeight = swapped ? video?.width : video?.height;
+
   // Images decode as a single-frame "video" stream under ffprobe — read it
   // for width/height (assemble.ts needs the real aspect ratio to size an
   // overlay's default on-canvas box to actually fit the picture, not the
   // whole frame), but classify by extension rather than stream shape.
   if (IMAGE_EXTENSIONS.has(path.extname(absPath).toLowerCase())) {
-    return { mediaType: "image", width: video?.width, height: video?.height };
+    return { mediaType: "image", width: displayWidth, height: displayHeight };
   }
 
   if (video) {
     return {
       mediaType: "video",
       durationSec,
-      width: video.width,
-      height: video.height,
+      width: displayWidth,
+      height: displayHeight,
       hasAudio,
     };
   }
