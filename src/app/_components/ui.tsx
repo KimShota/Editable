@@ -21,10 +21,16 @@ export function Card({
   children,
   className = "",
   href,
+  onClick,
 }: {
   children: ReactNode;
   className?: string;
   href?: string;
+  /** Whole-card click target with no navigation of its own (e.g. "click
+   *  this card to kick off an action"), as opposed to `href` (navigates).
+   *  Rendered as a real div — role/tabIndex/onKeyDown make it keyboard-
+   *  accessible the way an anchor already is natively. */
+  onClick?: () => void;
 }) {
   const classes = `group rounded-2xl border border-[color:var(--card-border)] bg-[color:var(--card)] transition-colors hover:border-[color:var(--card-border-hover)] ${className}`;
   if (href) {
@@ -32,6 +38,24 @@ export function Card({
       <Link href={href} className={classes}>
         {children}
       </Link>
+    );
+  }
+  if (onClick) {
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick();
+          }
+        }}
+        className={`${classes} cursor-pointer`}
+      >
+        {children}
+      </div>
     );
   }
   return <div className={classes}>{children}</div>;

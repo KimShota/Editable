@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, Pill } from "../../_components/ui";
 import type { FormatSummary } from "../../lib/formats";
 import type { JobSummary } from "../../lib/jobs";
@@ -154,9 +155,10 @@ function CommentIcon() {
 
 /** Reel preview + hover-to-play — the video is decorative (muted, looped,
  *  no controls) so a click anywhere on it still bubbles up to the Card's
- *  own <Link>, keeping the whole card a single click-through target. Play
- *  starts on hover rather than autoplaying so 2 cards on screen at once
- *  isn't 2 simultaneous decodes running for no reason. */
+ *  own onClick (starting the job), keeping the whole card a single
+ *  click-through target. Play starts on hover rather than autoplaying so
+ *  2 cards on screen at once isn't 2 simultaneous decodes running for no
+ *  reason. */
 function ReelPreview({ formatId }: { formatId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   return (
@@ -205,10 +207,41 @@ function StatBlock({ icon, value, label }: { icon: React.ReactNode; value: numbe
   );
 }
 
+/** Clicking a card used to go to a /templates/[formatId] detail page with
+ *  its own "Use this template" button — removed as an unnecessary extra
+ *  step; this now does exactly what that button did (POST /api/jobs,
+ *  then straight to the resources wizard), just triggered by the card
+ *  itself. */
 function FormatCard({ format }: { format: FormatSummary }) {
+  const router = useRouter();
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const reel = format.reel;
+
+  const start = async () => {
+    if (starting) return;
+    setStarting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ formatId: format.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "could not start");
+      router.push(`/jobs/${data.jobId}/resources`);
+    } catch (err) {
+      setError((err as Error).message);
+      setStarting(false);
+    }
+  };
+
   return (
-    <Card href={`/templates/${format.id}`} className="flex flex-col gap-5 p-6">
+    <Card
+      onClick={start}
+      className={`flex flex-col gap-5 p-6 ${starting ? "pointer-events-none opacity-60" : ""}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-[family-name:var(--font-display)] text-xl font-bold text-[color:var(--ink)]">
           {format.name}
@@ -234,6 +267,9 @@ function FormatCard({ format }: { format: FormatSummary }) {
           </div>
         </>
       )}
+
+      {starting && <p className="text-xs text-[color:var(--ink-dim)]">Starting…</p>}
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </Card>
   );
 }
