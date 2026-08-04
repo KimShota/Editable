@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, Pill } from "../../_components/ui";
 import type { FormatSummary } from "../../lib/formats";
@@ -153,43 +153,121 @@ function CommentIcon() {
   );
 }
 
+function ExpandIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5">
+      <path
+        d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4">
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Full-size lightbox for a reel, opened by ReelPreview's expand button.
+ *  Rendered as a fixed overlay rather than routing anywhere — this is just
+ *  a look, not a navigation. */
+function ReelLightbox({ formatId, onClose }: { formatId: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-8 backdrop-blur-sm"
+    >
+      <div onClick={(e) => e.stopPropagation()} className="relative aspect-[9/16] h-[min(85vh,800px)]">
+        <video
+          src={`/reels/${formatId}.mp4`}
+          poster={`/reels/${formatId}.jpg`}
+          controls
+          autoPlay
+          loop
+          playsInline
+          className="h-full w-full rounded-xl bg-black object-contain"
+        />
+        <button
+          onClick={onClose}
+          aria-label="Close preview"
+          className="absolute -top-3 -right-3 flex h-8 w-8 items-center justify-center rounded-full bg-white text-black shadow-lg transition-transform hover:scale-105"
+        >
+          <CloseIcon />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Reel preview + hover-to-play — the video is decorative (muted, looped,
  *  no controls) so a click anywhere on it still bubbles up to the Card's
  *  own onClick (starting the job), keeping the whole card a single
  *  click-through target. Play starts on hover rather than autoplaying so
  *  2 cards on screen at once isn't 2 simultaneous decodes running for no
- *  reason. */
+ *  reason. The expand button is the one exception — it stops propagation
+ *  so previewing the reel large doesn't also kick off a job. */
 function ReelPreview({ formatId }: { formatId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [expanded, setExpanded] = useState(false);
   return (
-    <div
-      onMouseEnter={() => {
-        const v = videoRef.current;
-        if (v) {
-          v.currentTime = 0;
-          v.play().catch(() => {});
-        }
-      }}
-      onMouseLeave={() => {
-        const v = videoRef.current;
-        if (v) {
-          v.pause();
-          v.currentTime = 0;
-        }
-      }}
-      className="relative aspect-[9/16] w-32 shrink-0 overflow-hidden rounded-xl bg-black/30 sm:w-36"
-    >
-      <video
-        ref={videoRef}
-        src={`/reels/${formatId}.mp4`}
-        poster={`/reels/${formatId}.jpg`}
-        muted
-        loop
-        playsInline
-        preload="none"
-        className="h-full w-full object-cover"
-      />
-    </div>
+    <>
+      <div
+        onMouseEnter={() => {
+          const v = videoRef.current;
+          if (v) {
+            v.currentTime = 0;
+            v.play().catch(() => {});
+          }
+        }}
+        onMouseLeave={() => {
+          const v = videoRef.current;
+          if (v) {
+            v.pause();
+            v.currentTime = 0;
+          }
+        }}
+        className="group relative aspect-[9/16] w-32 shrink-0 overflow-hidden rounded-xl bg-black/30 sm:w-36"
+      >
+        <video
+          ref={videoRef}
+          src={`/reels/${formatId}.mp4`}
+          poster={`/reels/${formatId}.jpg`}
+          muted
+          loop
+          playsInline
+          preload="none"
+          className="h-full w-full object-cover"
+        />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-transparent opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded(true);
+          }}
+          aria-label="Preview reel"
+          className="absolute top-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-black/40 text-white opacity-0 backdrop-blur-md transition-all duration-150 group-hover:opacity-100 hover:scale-105 hover:bg-black/60"
+        >
+          <ExpandIcon />
+        </button>
+      </div>
+      {expanded && <ReelLightbox formatId={formatId} onClose={() => setExpanded(false)} />}
+    </>
   );
 }
 

@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { Slot } from "@backend/pipeline/types";
 import { LIBRARY_DRAG_MIME, type LibraryDragPayload } from "../../../../lib/dnd";
+import { LineKind } from "../../../../_components/ui";
 
 export type Binding = { file: string } | { files: string[] } | { text: string };
 
@@ -78,10 +79,9 @@ export function SlotDropzone({
 
   if (slot.mediaType === "text") {
     return (
-      <SlotShell slot={slot}>
+      <SlotShell slot={slot} kind="onscreen">
         <textarea
           defaultValue={binding && "text" in binding ? binding.text : ""}
-          placeholder={slot.instructions}
           onBlur={async (e) => {
             const value = e.target.value;
             if (!value.trim()) return;
@@ -97,6 +97,7 @@ export function SlotDropzone({
           rows={3}
           className="w-full resize-none rounded-lg border border-white/12 bg-black/20 p-3 text-sm text-[color:var(--ink)] outline-none focus:border-[color:var(--accent)]"
         />
+        <p className="mt-1 text-[11px] text-[color:var(--ink-dim)]">Example — NO PROJECTS ON MY RESUME</p>
         {busy && <p className="mt-1 text-xs text-[color:var(--ink-dim)]">Saving…</p>}
         {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
       </SlotShell>
@@ -263,10 +264,14 @@ export function SlotDropzone({
 function SlotShell({
   slot,
   coveredNote,
+  kind,
   children,
 }: {
   slot: Slot;
   coveredNote?: string;
+  /** Set only for a text slot — badges it as on-screen text so it isn't
+   *  mistaken for a spoken line (see ScriptLines.tsx for that counterpart). */
+  kind?: "onscreen";
   children: React.ReactNode;
 }) {
   return (
@@ -278,6 +283,7 @@ function SlotShell({
           {slot.mediaType}
           {!slot.required && ", optional"}
         </span>
+        {kind === "onscreen" && <LineKind kind="onscreen" />}
       </div>
       <p className="text-[12px] leading-snug text-[color:var(--ink-dim)]">{slot.instructions}</p>
       {coveredNote && (

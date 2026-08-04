@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { Format } from "@backend/pipeline/types";
 import type { ScriptSuggestion } from "@backend/content/types";
-import { Card, Pill } from "../../../../_components/ui";
+import { Card, LineKind, Pill } from "../../../../_components/ui";
 
 const persistScript = async (jobId: string, script: ScriptSuggestion): Promise<ScriptSuggestion> => {
   const res = await fetch(`/api/jobs/${jobId}/script`, {
@@ -78,14 +78,9 @@ export function ScriptLines({
 
   return (
     <Card className="p-6">
-      <h2 className="mb-1 font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
+      <h2 className="mb-6 font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
         Your lines
       </h2>
-      <p className="mb-6 text-sm text-[color:var(--ink-dim)]">
-        Say each line straight to camera when you film — this is a planning aid, not a script you have
-        to read verbatim. The beats below with no line are silent or auto-generated; nothing to write
-        for those.
-      </p>
       <div className="flex flex-col">
         {format.blocks.map((block, i) => {
           if (block.kind !== "voice") {
@@ -107,9 +102,14 @@ export function ScriptLines({
                 {lineNumber}
               </span>
               <div className="flex-1 pt-1">
+                <div className="mb-2 flex items-center gap-2">
+                  <LineKind kind="spoken" />
+                </div>
+                <p className="mb-2 text-[12px] leading-snug text-[color:var(--ink-dim)]">
+                  {block.slots.find((s) => s.name === block.videoSlot)?.instructions ?? block.title}
+                </p>
                 <textarea
                   defaultValue={text}
-                  placeholder={block.slots.find((s) => s.name === block.videoSlot)?.instructions ?? block.title}
                   onBlur={(e) => {
                     const value = e.target.value;
                     if (value !== text) saveLine(block.id, block.videoSlot, value);
@@ -117,6 +117,9 @@ export function ScriptLines({
                   rows={2}
                   className="w-full resize-none rounded-lg border border-white/12 bg-black/20 p-3 text-sm text-[color:var(--ink)] outline-none focus:border-[color:var(--accent)]"
                 />
+                <p className="mt-1 text-[11px] text-[color:var(--ink-dim)]">
+                  Example — Here are 5 secret ChatGPT codes that nobody is talking about.
+                </p>
                 {saving === block.videoSlot && (
                   <p className="mt-1 text-xs text-[color:var(--ink-dim)]">Saving…</p>
                 )}

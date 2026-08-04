@@ -33,8 +33,8 @@ const allSlots = (format: Format): Slot[] => [
  *  speakingTakeSlot at all — just skips straight from footage to
  *  review+build in Step 3, same step count either way. */
 const STEPS: WizardStepInfo[] = [
-  { id: 1, label: "Write your lines", kicker: "Scripting & planning" },
-  { id: 2, label: "Add your footage & photos", kicker: "Upload & inputs" },
+  { id: 1, label: "Scripting", kicker: "Scripting & planning" },
+  { id: 2, label: "Filming", kicker: "Upload & inputs" },
   { id: 3, label: "Split your take & build", kicker: "Preparation" },
 ];
 
@@ -268,9 +268,8 @@ export function ResourcesBoard({
                 <Card key={block.id} className="p-6">
                   <div className="mb-4 flex items-center gap-2">
                     <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                      {block.title}
+                      {block.title} — on-screen text
                     </h2>
-                    <Pill>{block.kind === "voice" ? "spoken" : "b-roll"}</Pill>
                   </div>
                   <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                     {textSlots.map((slot) => {

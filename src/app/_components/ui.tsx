@@ -17,6 +17,32 @@ export function Pill({ children, tone = "default" }: { children: ReactNode; tone
   );
 }
 
+/** Distinguishes a line the creator speaks on camera from text that's
+ *  rendered onto the video — the two are otherwise easy to conflate since
+ *  both are edited in a plain textarea. */
+export function LineKind({ kind }: { kind: "spoken" | "onscreen" }) {
+  if (kind === "spoken") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--accent)]/40 px-3 py-1 font-[family-name:var(--font-display)] text-[11px] tracking-[0.08em] text-[color:var(--accent)] uppercase">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" className="shrink-0">
+          <rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" strokeWidth="2" />
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+        You say this
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-white/12 px-3 py-1 font-[family-name:var(--font-display)] text-[11px] tracking-[0.08em] text-[color:var(--ink-dim)] uppercase">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" className="shrink-0">
+        <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="2" />
+        <path d="M7 9h10M7 13h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+      Shows on screen
+    </span>
+  );
+}
+
 export function Card({
   children,
   className = "",
