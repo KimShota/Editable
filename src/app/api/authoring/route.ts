@@ -15,11 +15,22 @@ import { draftFormatExists, writeAuthoringStatus, AuthoringStage } from "../../l
 
 const STAGE_LINE = /^ {2}✔ (ingest|analyze|synthesize|verify)/;
 
+// TikTok/YouTube downloads via yt-dlp are unreliable enough (rate limits,
+// signed URLs that expire mid-pipeline) that we only support Instagram
+// Reels for now, even though ingestFromUrl() itself is host-agnostic.
+const INSTAGRAM_REEL_URL = /^https?:\/\/(www\.)?instagram\.com\/(reel|reels)\/[A-Za-z0-9_-]+/i;
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const url = body?.url;
   if (typeof url !== "string" || url.trim().length === 0) {
     return NextResponse.json({ error: "a reel url is required" }, { status: 400 });
+  }
+  if (!INSTAGRAM_REEL_URL.test(url.trim())) {
+    return NextResponse.json(
+      { error: "only Instagram Reel links are supported right now (e.g. https://www.instagram.com/reel/...)" },
+      { status: 400 },
+    );
   }
 
   const draftId = newDraftId();

@@ -8,8 +8,10 @@ import { IngestResult } from "./types";
 
 /**
  * Module A1 — Ingest.
- * Downloads a reference reel (TikTok/Instagram/YouTube Shorts link) via
- * yt-dlp into a fresh authoring/<draftId>/ working directory, then probes
+ * Downloads a reference reel (an Instagram Reel link — see INSTAGRAM_REEL_URL
+ * in api/authoring/route.ts for why only that host is accepted, even though
+ * yt-dlp itself would happily pull from TikTok/YouTube too) into a fresh
+ * authoring/<draftId>/ working directory, then probes
  * it with the same ffprobe-backed probeFile() the real intake stage uses,
  * so a bad/silent/non-video link fails here with a clear message instead
  * of confusing whisper or ffmpeg two stages downstream.

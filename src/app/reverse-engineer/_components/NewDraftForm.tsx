@@ -34,11 +34,11 @@ export function NewDraftForm() {
     <Card className="p-6">
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <div>
-          <label className="mb-2 block text-sm font-medium text-[color:var(--ink)]">Reel URL</label>
+          <label className="mb-2 block text-sm font-medium text-[color:var(--ink)]">Instagram Reel URL</label>
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://www.tiktok.com/@.../video/... or an Instagram Reel / YouTube Shorts link"
+            placeholder="https://www.instagram.com/reel/..."
             className="w-full rounded-lg border border-white/12 bg-black/20 px-4 py-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
             disabled={busy}
           />

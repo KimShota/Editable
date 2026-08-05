@@ -30,8 +30,10 @@ const readStatus = (jobId: string): BuildStatus | null =>
   fs.existsSync(statusPath(jobId))
     ? JSON.parse(fs.readFileSync(statusPath(jobId), "utf8"))
     : null;
-const writeStatus = (jobId: string, status: BuildStatus): void =>
+const writeStatus = (jobId: string, status: BuildStatus): void => {
+  fs.mkdirSync(artifactsDir(jobId), { recursive: true });
   fs.writeFileSync(statusPath(jobId), JSON.stringify(status, null, 2));
+};
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;

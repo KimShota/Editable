@@ -67,7 +67,7 @@ export const ensurePreviewProxy = (sourceAbsPath: string, cacheAbsPath: string):
       "-i",
       sourceAbsPath,
       "-vf",
-      "scale=-2:960:force_original_aspect_ratio=decrease",
+      "scale=-2:960:force_original_aspect_ratio=decrease:force_divisible_by=2",
       "-c:v",
       "libx264",
       "-preset",

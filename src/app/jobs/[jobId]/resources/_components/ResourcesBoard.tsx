@@ -260,7 +260,9 @@ export function ResourcesBoard({
         {step === 1 && (
           <>
             <ScriptPanel jobId={jobId} script={script} onScriptUpdated={setScript} />
-            <ScriptLines jobId={jobId} format={format} script={script} onScriptUpdated={setScript} />
+            {hookBlock && (
+              <ScriptLines jobId={jobId} format={format} script={script} onScriptUpdated={setScript} />
+            )}
             {format.blocks.map((block) => {
               const textSlots = block.slots.filter((s) => s.mediaType === "text");
               if (textSlots.length === 0) return null;

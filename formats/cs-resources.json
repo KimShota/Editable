@@ -18,15 +18,14 @@
     {
       "id": "hook",
       "title": "Hook",
-      "kind": "voice",
+      "kind": "broll",
       "videoSlot": "hook_clip",
-      "captions": true,
-      "maxDurationSec": 6,
+      "brollDurationSec": 2.93,
       "slots": [
         {
           "name": "hook_clip",
           "mediaType": "video",
-          "instructions": "Film yourself chest-up, phone vertical, saying the painpoint out loud and then pivoting to the solution — e.g. \"I have NO projects on my resume... okay, go here.\" Keep it under ~4 seconds, energy high."
+          "instructions": "B-roll/screen footage that plays under the painpoint text, phone vertical — e.g. a shot of a blank resume or an empty screen. No need to say anything on camera; the painpoint and pivot are shown as on-screen text instead."
         },
         {
           "name": "hook_text",
@@ -46,13 +45,6 @@
           "instructions": "A short whoosh/swipe sound effect you own outright or that is CC0. Fires at the pivot."
         }
       ],
-      "roles": [
-        {
-          "id": "resolve",
-          "description": "The moment the speaker pivots from stating the problem to pointing at the solution — usually a short turn word like 'okay', 'so', or 'well', or the start of an instruction like 'go here' / 'check this out'. Return the start of that pivot.",
-          "fallback": { "anchor": "blockEnd", "offsetSec": -0.9 }
-        }
-      ],
       "events": [
         {
           "id": "hook_painpoint_overlay",
@@ -62,7 +54,7 @@
             "params": { "textSlot": "hook_text", "variant": "hook" }
           },
           "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 },
-          "until": { "kind": "role", "roleId": "resolve" }
+          "until": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 2.03 }
         },
         {
           "id": "hook_resolve_overlay",
@@ -71,7 +63,7 @@
             "component": "TextOverlay",
             "params": { "textSlot": "resolve_text", "variant": "resolve" }
           },
-          "timing": { "kind": "role", "roleId": "resolve" }
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 2.03 }
         },
         {
           "id": "hook_resolve_whoosh",
@@ -80,7 +72,7 @@
             "component": "Sfx",
             "params": { "audioSlot": "whoosh_sfx", "volume": 0.9 }
           },
-          "timing": { "kind": "role", "roleId": "resolve" }
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 2.03 }
         }
       ],
       "transitionAfter": { "component": "whooshZoom", "params": { "durationSec": 0.3 } }
