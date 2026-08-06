@@ -25,6 +25,16 @@ export const STICKER_ACCENT = "#EC7A5E";
 export const PLAYFAIR_DISPLAY_FONT = "Playfair Display Black";
 export const PLAYFAIR_DISPLAY_STACK = `"${PLAYFAIR_DISPLAY_FONT}", Georgia, "Times New Roman", serif`;
 
+/** Geometric grotesque (circular bowls, flat-cut terminals) used by the
+ *  cs-resources reference reel's hook/resolve/card/CTA text — measured by
+ *  eye against the source footage, not an exact face match (no on-screen
+ *  attribution to confirm the original), so Poppins stands in as the
+ *  closest freely-licensed substitute. Loaded per-event via TextOverlay's
+ *  "fontFamily" param override, not a global VARIANTS default, so formats
+ *  that don't ask for it keep rendering SYSTEM_FONT exactly as before. */
+export const POPPINS_FONT = "Poppins";
+export const POPPINS_STACK = `"${POPPINS_FONT}", ${SYSTEM_FONT}`;
+
 /** The red used by the reference reel's titles and captions — measured
  *  directly from the reference footage (mean of every nearly-pure-red
  *  pixel in a title-card frame: rgb(248,2,3)), not the prior hand-picked

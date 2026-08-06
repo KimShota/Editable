@@ -6,7 +6,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { KUMAR_RED, PLAYFAIR_DISPLAY_STACK, SYSTEM_FONT, TEXT_SHADOW, fitDidoneFontSize } from "../../components/style";
+import { KUMAR_RED, PLAYFAIR_DISPLAY_STACK, POPPINS_STACK, SYSTEM_FONT, TEXT_SHADOW, fitDidoneFontSize } from "../../components/style";
 import { ensureDisplayFonts } from "../fonts";
 
 /**
@@ -28,12 +28,15 @@ const VARIANTS: Record<
 > = {
   hook: { fontSize: 86, fontWeight: 800, color: "white", offsetY: 0 },
   resolve: { fontSize: 120, fontWeight: 900, color: "white", offsetY: 0 },
-  title: { fontSize: 64, fontWeight: 800, color: "white", offsetY: -60 },
+  // offsetY 0 on both: cs-resources (the only format using either variant)
+  // now gives each its own precisely-measured "layout" box per event
+  // instead of relying on a shared vertical nudge to stack them.
+  title: { fontSize: 64, fontWeight: 800, color: "white", offsetY: 0 },
   description: {
     fontSize: 40,
     fontWeight: 500,
     color: "rgba(255,255,255,0.92)",
-    offsetY: 40,
+    offsetY: 0,
   },
   cta: { fontSize: 60, fontWeight: 800, color: "white", offsetY: 0 },
   // The "KUMAR'S DEBUT" / big-word look: a Didone serif in the reference
@@ -108,16 +111,56 @@ const KumarSplitTitle: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
+/** Shorthand keys a format's JSON can pass as "fontFamily" instead of
+ *  hand-writing a full CSS stack — resolved here so authoring stays
+ *  readable ("poppins") while the actual stack constant lives in
+ *  components/style.ts alongside its font-loading counterpart. Anything
+ *  not in this map is used as a literal CSS font-family value verbatim
+ *  (escape hatch for a one-off stack no shorthand covers). */
+const FONT_FAMILY_SHORTHANDS: Record<string, string> = {
+  system: SYSTEM_FONT,
+  poppins: POPPINS_STACK,
+  playfair: PLAYFAIR_DISPLAY_STACK,
+};
+
 export const TextOverlay: React.FC<{
   text?: string;
   variant?: string;
   fontSize?: number;
-}> = ({ text = "", variant = "hook", fontSize }) => {
+  /** Per-event override of the variant's default typography — a
+   *  shorthand key (see FONT_FAMILY_SHORTHANDS) or a raw CSS stack.
+   *  Lets one format opt into different type (e.g. Poppins for a
+   *  geometric-sans reference) without changing the shared variant
+   *  default every other format's TextOverlay events still render with. */
+  fontFamily?: string;
+  color?: string;
+  fontWeight?: number;
+  /** When set, renders the text as a padded, rounded card behind it (the
+   *  reference reel's white resource-title/description pills) instead of
+   *  bare drop-shadowed text. A CSS color; the box hugs the text content
+   *  (inline-block) rather than needing a hand-measured fixed size. */
+  background?: string;
+  backgroundRadius?: number;
+  paddingX?: number;
+  paddingY?: number;
+}> = ({
+  text = "",
+  variant = "hook",
+  fontSize,
+  fontFamily,
+  color,
+  fontWeight,
+  background,
+  backgroundRadius = 28,
+  paddingX = 40,
+  paddingY = 22,
+}) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   if (variant === "kumarSplitTitle") return <KumarSplitTitle text={text} />;
   const style = VARIANTS[(variant as Variant) in VARIANTS ? (variant as Variant) : "hook"];
-  if (style.fontFamily) ensureDisplayFonts();
+  const resolvedFontFamily = fontFamily ? (FONT_FAMILY_SHORTHANDS[fontFamily] ?? fontFamily) : style.fontFamily;
+  if (resolvedFontFamily && resolvedFontFamily !== SYSTEM_FONT) ensureDisplayFonts();
 
   // The resolve/kumarTitle punch in on the beat; everything else eases in
   // quickly.
@@ -133,17 +176,26 @@ export const TextOverlay: React.FC<{
     >
       <div
         style={{
-          fontFamily: style.fontFamily ?? SYSTEM_FONT,
-          fontWeight: style.fontWeight,
+          fontFamily: resolvedFontFamily ?? SYSTEM_FONT,
+          fontWeight: fontWeight ?? style.fontWeight,
           fontSize: fontSize ?? style.fontSize,
           lineHeight: 1.15,
-          color: style.color,
+          color: color ?? style.color,
           textAlign: "center",
-          textShadow: TEXT_SHADOW,
+          textShadow: background ? "none" : TEXT_SHADOW,
           textTransform: style.uppercase ? "uppercase" : undefined,
           whiteSpace: "pre-line",
           opacity: progress,
           transform: `translateY(${style.offsetY}px) scale(${scale})`,
+          ...(background
+            ? {
+                display: "inline-block",
+                background,
+                borderRadius: backgroundRadius,
+                padding: `${paddingY}px ${paddingX}px`,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+              }
+            : {}),
         }}
       >
         {text}

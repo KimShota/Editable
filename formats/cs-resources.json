@@ -2,10 +2,10 @@
   "id": "cs-resources",
   "name": "3 Resources for [Painpoint]",
   "niche": "AI",
-  "description": "Hook states a painpoint to camera and pivots to the solution; three quick resource cards over screen recordings; follow CTA. Ported from the reference reel (timings at 30fps: hook 2.93s, resources 1.77/1.63/1.60s, cta 1.60s).",
+  "description": "Hook states a painpoint to camera and pivots to the solution; three quick resource cards — white pill title/description overlays over screen recordings; follow CTA. Re-measured directly against the reference reel public/reels/cs-resources.mp4 (720x1280, 30fps): hook 2.933s, resources 1.633/1.667/1.900s, cta 1.467s — all hard cuts, no transitions.",
   "fps": 30,
-  "width": 1080,
-  "height": 1920,
+  "width": 720,
+  "height": 1280,
   "captionStyle": { "component": "Captions", "params": { "position": "lowerThird" } },
   "musicSlot": {
     "name": "music",
@@ -20,7 +20,7 @@
       "title": "Hook",
       "kind": "broll",
       "videoSlot": "hook_clip",
-      "brollDurationSec": 2.93,
+      "brollDurationSec": 2.933,
       "slots": [
         {
           "name": "hook_clip",
@@ -36,13 +36,7 @@
           "name": "resolve_text",
           "mediaType": "text",
           "required": false,
-          "instructions": "The short call that flashes when you pivot to the solution. Default: GO HERE."
-        },
-        {
-          "name": "whoosh_sfx",
-          "mediaType": "audio",
-          "required": false,
-          "instructions": "A short whoosh/swipe sound effect you own outright or that is CC0. Fires at the pivot."
+          "instructions": "The short call that flashes right before the cut to resource 1 (the reference holds it for only ~0.33s). Default: GO HERE."
         }
       ],
       "events": [
@@ -51,53 +45,52 @@
           "kind": "overlay",
           "component": {
             "component": "TextOverlay",
-            "params": { "textSlot": "hook_text", "variant": "hook" }
+            "params": {
+              "textSlot": "hook_text",
+              "variant": "hook",
+              "fontFamily": "poppins"
+            }
           },
           "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 },
-          "until": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 2.03 }
+          "until": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 2.6 },
+          "layout": { "x": 0.05, "y": 0.42, "width": 0.9, "height": 0.38 }
         },
         {
           "id": "hook_resolve_overlay",
           "kind": "overlay",
           "component": {
             "component": "TextOverlay",
-            "params": { "textSlot": "resolve_text", "variant": "resolve" }
+            "params": {
+              "textSlot": "resolve_text",
+              "variant": "resolve",
+              "fontFamily": "poppins"
+            }
           },
-          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 2.03 }
-        },
-        {
-          "id": "hook_resolve_whoosh",
-          "kind": "sfx",
-          "component": {
-            "component": "Sfx",
-            "params": { "audioSlot": "whoosh_sfx", "volume": 0.9 }
-          },
-          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 2.03 }
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 2.6 }
         }
-      ],
-      "transitionAfter": { "component": "whooshZoom", "params": { "durationSec": 0.3 } }
+      ]
     },
     {
       "id": "resource-1",
       "title": "Resource 1",
       "kind": "broll",
       "videoSlot": "resource1_clip",
-      "brollDurationSec": 1.77,
+      "brollDurationSec": 1.633,
       "slots": [
         {
           "name": "resource1_clip",
           "mediaType": "video",
-          "instructions": "Screen recording of the first resource — scroll its page slowly. 2–3 seconds is plenty."
+          "instructions": "Screen recording of the first resource — scroll its page slowly. 2 seconds is plenty."
         },
         {
           "name": "resource1_title",
           "mediaType": "text",
-          "instructions": "The resource's name, short."
+          "instructions": "The resource's name, short — rendered as a numbered white pill card, e.g. \"1. The Odin Project\"."
         },
         {
           "name": "resource1_desc",
           "mediaType": "text",
-          "instructions": "One sentence on why it solves the painpoint."
+          "instructions": "One short sentence (fits two lines) on why it solves the painpoint — rendered as a second white pill card below the title."
         }
       ],
       "events": [
@@ -106,18 +99,40 @@
           "kind": "overlay",
           "component": {
             "component": "TextOverlay",
-            "params": { "textSlot": "resource1_title", "variant": "title" }
+            "params": {
+              "textSlot": "resource1_title",
+              "variant": "title",
+              "fontFamily": "poppins",
+              "color": "#141414",
+              "background": "#fafafa",
+              "backgroundRadius": 24,
+              "paddingX": 36,
+              "paddingY": 24
+            }
           },
-          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 }
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 },
+          "layout": { "x": 0.06, "y": 0.3, "width": 0.88, "height": 0.13 }
         },
         {
           "id": "resource1_desc_overlay",
           "kind": "overlay",
           "component": {
             "component": "TextOverlay",
-            "params": { "textSlot": "resource1_desc", "variant": "description" }
+            "params": {
+              "textSlot": "resource1_desc",
+              "variant": "description",
+              "fontFamily": "poppins",
+              "fontWeight": 800,
+              "fontSize": 40,
+              "color": "#141414",
+              "background": "#fafafa",
+              "backgroundRadius": 24,
+              "paddingX": 32,
+              "paddingY": 20
+            }
           },
-          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0.12 }
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 },
+          "layout": { "x": 0.13, "y": 0.44, "width": 0.74, "height": 0.13 }
         }
       ]
     },
@@ -126,22 +141,22 @@
       "title": "Resource 2",
       "kind": "broll",
       "videoSlot": "resource2_clip",
-      "brollDurationSec": 1.63,
+      "brollDurationSec": 1.667,
       "slots": [
         {
           "name": "resource2_clip",
           "mediaType": "video",
-          "instructions": "Screen recording of the second resource — scroll its page slowly. 2–3 seconds is plenty."
+          "instructions": "Screen recording of the second resource — scroll its page slowly. 2 seconds is plenty."
         },
         {
           "name": "resource2_title",
           "mediaType": "text",
-          "instructions": "The resource's name, short."
+          "instructions": "The resource's name, short — rendered as a numbered white pill card, e.g. \"2. Bro Code\"."
         },
         {
           "name": "resource2_desc",
           "mediaType": "text",
-          "instructions": "One sentence on why it solves the painpoint."
+          "instructions": "One short sentence (fits two lines) on why it solves the painpoint — rendered as a second white pill card below the title."
         }
       ],
       "events": [
@@ -150,18 +165,40 @@
           "kind": "overlay",
           "component": {
             "component": "TextOverlay",
-            "params": { "textSlot": "resource2_title", "variant": "title" }
+            "params": {
+              "textSlot": "resource2_title",
+              "variant": "title",
+              "fontFamily": "poppins",
+              "color": "#141414",
+              "background": "#fafafa",
+              "backgroundRadius": 24,
+              "paddingX": 36,
+              "paddingY": 24
+            }
           },
-          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 }
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 },
+          "layout": { "x": 0.06, "y": 0.3, "width": 0.88, "height": 0.13 }
         },
         {
           "id": "resource2_desc_overlay",
           "kind": "overlay",
           "component": {
             "component": "TextOverlay",
-            "params": { "textSlot": "resource2_desc", "variant": "description" }
+            "params": {
+              "textSlot": "resource2_desc",
+              "variant": "description",
+              "fontFamily": "poppins",
+              "fontWeight": 800,
+              "fontSize": 40,
+              "color": "#141414",
+              "background": "#fafafa",
+              "backgroundRadius": 24,
+              "paddingX": 32,
+              "paddingY": 20
+            }
           },
-          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0.12 }
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 },
+          "layout": { "x": 0.13, "y": 0.44, "width": 0.74, "height": 0.13 }
         }
       ]
     },
@@ -170,22 +207,22 @@
       "title": "Resource 3",
       "kind": "broll",
       "videoSlot": "resource3_clip",
-      "brollDurationSec": 1.6,
+      "brollDurationSec": 1.9,
       "slots": [
         {
           "name": "resource3_clip",
           "mediaType": "video",
-          "instructions": "Screen recording of the third resource — scroll its page slowly. 2–3 seconds is plenty."
+          "instructions": "Screen recording of the third resource — scroll its page slowly. 2 seconds is plenty."
         },
         {
           "name": "resource3_title",
           "mediaType": "text",
-          "instructions": "The resource's name, short."
+          "instructions": "The resource's name, short — rendered as a numbered white pill card, e.g. \"3. Project Based Learning\"."
         },
         {
           "name": "resource3_desc",
           "mediaType": "text",
-          "instructions": "One sentence on why it solves the painpoint."
+          "instructions": "One short sentence (fits two lines) on why it solves the painpoint — rendered as a second white pill card below the title."
         }
       ],
       "events": [
@@ -194,38 +231,59 @@
           "kind": "overlay",
           "component": {
             "component": "TextOverlay",
-            "params": { "textSlot": "resource3_title", "variant": "title" }
+            "params": {
+              "textSlot": "resource3_title",
+              "variant": "title",
+              "fontFamily": "poppins",
+              "color": "#141414",
+              "background": "#fafafa",
+              "backgroundRadius": 24,
+              "paddingX": 36,
+              "paddingY": 24
+            }
           },
-          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 }
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 },
+          "layout": { "x": 0.06, "y": 0.3, "width": 0.88, "height": 0.13 }
         },
         {
           "id": "resource3_desc_overlay",
           "kind": "overlay",
           "component": {
             "component": "TextOverlay",
-            "params": { "textSlot": "resource3_desc", "variant": "description" }
+            "params": {
+              "textSlot": "resource3_desc",
+              "variant": "description",
+              "fontFamily": "poppins",
+              "fontWeight": 800,
+              "fontSize": 40,
+              "color": "#141414",
+              "background": "#fafafa",
+              "backgroundRadius": 24,
+              "paddingX": 32,
+              "paddingY": 20
+            }
           },
-          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0.12 }
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 },
+          "layout": { "x": 0.13, "y": 0.44, "width": 0.74, "height": 0.13 }
         }
-      ],
-      "transitionAfter": { "component": "fade", "params": { "durationSec": 0.25 } }
+      ]
     },
     {
       "id": "cta",
       "title": "Call to Action",
       "kind": "broll",
       "videoSlot": "cta_clip",
-      "brollDurationSec": 1.6,
+      "brollDurationSec": 1.467,
       "slots": [
         {
           "name": "cta_clip",
           "mediaType": "video",
-          "instructions": "A simple closing clip of you (pointing up or smiling works). 2 seconds is plenty."
+          "instructions": "A simple closing clip of you (pointing up or smiling works). 1.5 seconds is plenty."
         },
         {
           "name": "cta_text",
           "mediaType": "text",
-          "instructions": "The follow/comment call to action, max two short lines."
+          "instructions": "The follow/comment call to action — the reference runs 4 short lines, e.g. \"follow &\\ncomment\\n“learn”\\nfor the links\"."
         }
       ],
       "events": [
@@ -234,9 +292,13 @@
           "kind": "overlay",
           "component": {
             "component": "TextOverlay",
-            "params": { "textSlot": "cta_text", "variant": "cta" }
+            "params": {
+              "textSlot": "cta_text",
+              "variant": "cta",
+              "fontFamily": "poppins"
+            }
           },
-          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0 }
+          "timing": { "kind": "fixed", "anchor": "blockStart", "offsetSec": 0.267 }
         }
       ]
     }
