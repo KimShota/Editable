@@ -25,12 +25,13 @@ import { Analysis, Draft, VerifyBlockResult, VerifyResult, VerifyWindowResult } 
  *
  * Two-pass assemble is necessary because resolveComponentParams (inside
  * assemble.ts) silently DROPS any overlay whose slot isn't bound — so pass
- * 1 binds every slot to a throwaway placeholder (video slots to a real cut
- * of the reference, since that's free and gives real timing; everything
- * else to a generated stand-in) purely to discover each overlay's real
- * resolved box/timing/states, then crops the ACTUAL reference pixels at
- * each image overlay's own settled reveal moment and re-assembles with
- * those real crops bound for the real render.
+ * 1 binds every slot to a throwaway placeholder (every block's videoSlot to
+ * the reference file itself — same as a real speakingTakeSlot job, and the
+ * only binding whose timeline origin matches splitTake's take-relative
+ * srcInSec/srcOutSec; everything else to a generated stand-in) purely to
+ * discover each overlay's real resolved box/timing/states, then crops the
+ * ACTUAL reference pixels at each image overlay's own settled reveal moment
+ * and re-assembles with those real crops bound for the real render.
  *
  * v1 scope (deliberately, see the design plan): only "voice" blocks that
  * splitTake actually finds in the reference are self-verified; "broll"
@@ -93,47 +94,24 @@ const makePlaceholderVideo = (outPath: string): void => {
   ]);
 };
 
-const cutClip = (sourcePath: string, srcInSec: number, srcOutSec: number, outPath: string): void => {
-  execFileSync("ffmpeg", [
-    "-y",
-    "-v",
-    "error",
-    "-ss",
-    srcInSec.toFixed(3),
-    "-t",
-    (srcOutSec - srcInSec).toFixed(3),
-    "-i",
-    sourcePath,
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    "18",
-    "-c:a",
-    "aac",
-    outPath,
-  ]);
-};
-
 /** Every slot a self-fillable block (or the format's sharedSlots) declares,
  *  bound to SOMETHING so pass 1's assemble() never drops an event for lack
- *  of a binding: the block's own main clip gets a real cut of the
- *  reference (free, and gives real timing to resolve events against);
- *  every other slot gets a throwaway generated stand-in. Audio slots are
- *  left UNBOUND on purpose — sfx/music fidelity is out of v1 scope, and an
- *  unbound optional/required audio slot just makes assemble.ts skip that
- *  one sfx event, which doesn't affect the image/video geometry this stage
- *  actually measures. */
+ *  of a binding: the block's own main clip gets bound to the WHOLE
+ *  reference file (see this module's own doc comment on why — splitTake's
+ *  srcInSec/srcOutSec are take-relative, i.e. absolute within the full
+ *  source, so only a binding sharing that same timeline origin resolves to
+ *  the right pixels); every other slot gets a throwaway generated stand-in.
+ *  Audio slots are left UNBOUND on purpose — sfx/music fidelity is out of
+ *  v1 scope, and an unbound optional/required audio slot just makes
+ *  assemble.ts skip that one sfx event, which doesn't affect the
+ *  image/video geometry this stage actually measures. */
 const buildPlaceholderBindings = (
   verifyFormat: Format,
   splitBlocks: Map<string, { srcInSec: number; srcOutSec: number }>,
   sourcePath: string,
   workDir: string,
 ): Record<string, BoundAsset> => {
-  const cutsDir = path.join(workDir, "cuts");
   const placeholdersDir = path.join(workDir, "placeholders");
-  fs.mkdirSync(cutsDir, { recursive: true });
   fs.mkdirSync(placeholdersDir, { recursive: true });
 
   const bindings: Record<string, BoundAsset> = {};
@@ -165,9 +143,13 @@ const buildPlaceholderBindings = (
   for (const block of verifyFormat.blocks) {
     const span = splitBlocks.get(block.id);
     if (span) {
-      const cutPath = path.join(cutsDir, `${block.id}.mp4`);
-      cutClip(sourcePath, span.srcInSec, span.srcOutSec, cutPath);
-      bindings[block.videoSlot] = boundFileFrom(block.videoSlot, cutPath);
+      // splitTake's srcInSec/srcOutSec are measured against the WHOLE
+      // source file, not a per-block slice of it — so the binding must
+      // share that same timeline origin (exactly like a real
+      // speakingTakeSlot job) for those spans to resolve to the right
+      // pixels. Binding a per-block cut here instead double-counts the
+      // block's own start offset against the cut's own zeroed timeline.
+      bindings[block.videoSlot] = boundFileFrom(block.videoSlot, sourcePath);
     }
     for (const slot of block.slots) {
       if (slot.name === block.videoSlot) continue;
