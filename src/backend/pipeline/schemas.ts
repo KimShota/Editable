@@ -1082,8 +1082,11 @@ export const EdlVideoSegmentSchema = z.object({
   tlOutSec: z.number().positive(),
   muted: z.boolean().default(false),
   /** Independent of `muted` (which is all-or-nothing) — lets a clip's own
-   *  audio be dialed down/up rather than only ever fully on or fully off. */
-  volume: z.number().min(0).max(1).default(1),
+   *  audio be dialed down/up rather than only ever fully on or fully off.
+   *  Linear gain; 1 is unity (the source's own recorded level). The editor's
+   *  slider works in dB (-60..+20, see decibels.ts) — 10 is +20dB headroom
+   *  for boosting a quiet take. */
+  volume: z.number().min(0).max(10).default(1),
   /** public/-relative path to this segment's own fg-alpha layer (subject
    *  cutout + desk foreground, transparent elsewhere — see matte.ts's
    *  compositeSubjectAlphaVideo), when backgroundReplace.ts built one.
@@ -1115,7 +1118,8 @@ export const EdlVoiceoverSchema = z.object({
   srcOutSec: z.number().positive(),
   tlInSec: z.number().min(0),
   tlOutSec: z.number().positive(),
-  volume: z.number().min(0).max(1).default(1),
+  /** Linear gain — see EdlVideoSegmentSchema.volume's doc comment. */
+  volume: z.number().min(0).max(10).default(1),
 });
 
 export const EdlOverlaySchema = z.object({
@@ -1164,7 +1168,8 @@ export const EdlSfxSchema = z.object({
   srcInSec: z.number().min(0).default(0),
   /** Cut the effect after this long (span-aligned SFX). Omitted = play out. */
   durationSec: z.number().positive().optional(),
-  volume: z.number().min(0).max(1).default(1),
+  /** Linear gain — see EdlVideoSegmentSchema.volume's doc comment. */
+  volume: z.number().min(0).max(10).default(1),
 });
 
 export const EdlCaptionWordSchema = z.object({
@@ -1243,7 +1248,8 @@ export const EdlTransitionSchema = z.object({
 export const EdlMusicSchema = z.object({
   id: z.string(),
   src: z.string(),
-  volume: z.number().min(0).max(1).default(0.5),
+  /** Linear gain — see EdlVideoSegmentSchema.volume's doc comment. */
+  volume: z.number().min(0).max(10).default(0.5),
   /** Where this bed starts on the timeline — movable/trimmable like any
    *  other clip, independent of the source audio file. */
   tlInSec: z.number().min(0).default(0),

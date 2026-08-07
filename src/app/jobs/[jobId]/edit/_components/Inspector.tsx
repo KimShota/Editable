@@ -5,6 +5,7 @@ import type { Edl, EdlCaptionGroup } from "@backend/pipeline/types";
 import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import { Selection } from "./selection";
 import { CloseIcon, ScissorsIcon, TrashIcon } from "./Icons";
+import { dbToLinear, formatDb, linearToDb, MAX_DB, MIN_DB } from "./decibels";
 import {
   FONT_FAMILY_SHORTHANDS,
   FONT_OPTIONS,
@@ -28,6 +29,36 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
     <label className="text-[11px] tracking-wide text-[color:var(--ed-ink-dim)] uppercase">{label}</label>
     {children}
   </div>
+);
+
+/** A clip/sfx/music-bed's own gain, dialed in dB (-60..+20, CapCut's own
+ *  range) rather than the 0-100% a linear slider would imply — 100% reads
+ *  as "the loudest this can go," which was true back when volume topped out
+ *  at 1 (unity) but is no longer, now that a clip can be boosted past its
+ *  own recorded level. Stores/reads the underlying EDL field as linear gain
+ *  (see EdlVideoSegmentSchema.volume's doc comment); only this control's
+ *  own display and slider math are in dB. */
+const VolumeField = ({
+  volume,
+  disabled,
+  onCommit,
+}: {
+  volume: number;
+  disabled?: boolean;
+  onCommit: (linearVolume: number) => void;
+}) => (
+  <Field label={`Volume — ${formatDb(linearToDb(volume))} dB`}>
+    <input
+      type="range"
+      min={MIN_DB}
+      max={MAX_DB}
+      step={0.5}
+      defaultValue={linearToDb(volume)}
+      disabled={disabled}
+      onChange={(e) => onCommit(dbToLinear(Number(e.target.value)))}
+      className="w-full accent-[color:var(--ed-accent)] disabled:opacity-40"
+    />
+  </Field>
 );
 
 const inputClass =
@@ -373,20 +404,11 @@ export function Inspector({
             />
             Muted
           </label>
-          <Field label={`Volume — ${Math.round(clip.volume * 100)}%`}>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              defaultValue={clip.volume}
-              disabled={clip.muted}
-              onChange={(e) =>
-                onOp({ type: "setProp", track: "video", id: clip.id, patch: { volume: Number(e.target.value) } })
-              }
-              className="w-full accent-[color:var(--ed-accent)] disabled:opacity-40"
-            />
-          </Field>
+          <VolumeField
+            volume={clip.volume}
+            disabled={clip.muted}
+            onCommit={(volume) => onOp({ type: "setProp", track: "video", id: clip.id, patch: { volume } })}
+          />
 
           {!isLast && (
             <Field label="Transition after this clip">
@@ -508,19 +530,10 @@ export function Inspector({
       <div className="flex h-full flex-col">
         {header("Sound effect", clip.src.split("/").pop())}
         <div className={sectionClass}>
-          <Field label={`Volume — ${Math.round(clip.volume * 100)}%`}>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              defaultValue={clip.volume}
-              onChange={(e) =>
-                onOp({ type: "setProp", track: "sfx", id: clip.id, patch: { volume: Number(e.target.value) } })
-              }
-              className="w-full accent-[color:var(--ed-accent)]"
-            />
-          </Field>
+          <VolumeField
+            volume={clip.volume}
+            onCommit={(volume) => onOp({ type: "setProp", track: "sfx", id: clip.id, patch: { volume } })}
+          />
           <div className={actionsClass}>
             <button onClick={() => onOp({ type: "delete", track: "sfx", id: clip.id })} className={dangerButtonClass}>
               <TrashIcon className="h-4 w-4" />
@@ -606,19 +619,10 @@ export function Inspector({
               <span className="text-[color:var(--ed-ink-dim)]"> ({durationSec.toFixed(2)}s)</span>
             </p>
           </Field>
-          <Field label={`Volume — ${Math.round(music.volume * 100)}%`}>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              defaultValue={music.volume}
-              onChange={(e) =>
-                onOp({ type: "setProp", track: "music", id: music.id, patch: { volume: Number(e.target.value) } })
-              }
-              className="w-full accent-[color:var(--ed-accent)]"
-            />
-          </Field>
+          <VolumeField
+            volume={music.volume}
+            onCommit={(volume) => onOp({ type: "setProp", track: "music", id: music.id, patch: { volume } })}
+          />
           <div className={actionsClass}>
             <button onClick={() => onOp({ type: "delete", track: "music", id: music.id })} className={dangerButtonClass}>
               <TrashIcon className="h-4 w-4" />

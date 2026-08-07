@@ -1,0 +1,59 @@
+export type DecodedAudio = { channelData: Float32Array; sampleRate: number };
+
+const cache = new Map<string, Promise<DecodedAudio | null>>();
+
+async function decode(url: string): Promise<DecodedAudio | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const arrayBuffer = await res.arrayBuffer();
+    const AudioCtx =
+      window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const ctx = new AudioCtx();
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const decoded = { channelData: audioBuffer.getChannelData(0), sampleRate: audioBuffer.sampleRate };
+    ctx.close();
+    return decoded;
+  } catch {
+    // A muted/non-audio source, an unsupported codec, or a fetch failure —
+    // the waveform is a nicety over the plain color clip, so fail silently.
+    return null;
+  }
+}
+
+/** One decode per source file, shared across every clip that points at it —
+ *  a timeline commonly has several clips (segments, repeats) referencing the
+ *  same underlying video, and decoding a whole file's audio track is too
+ *  expensive to repeat per clip. */
+export function getDecodedAudio(url: string): Promise<DecodedAudio | null> {
+  let entry = cache.get(url);
+  if (!entry) {
+    entry = decode(url);
+    cache.set(url, entry);
+  }
+  return entry;
+}
+
+/** Downsamples a slice of decoded audio into per-bin peak amplitudes (0..1,
+ *  normalized to the loudest bin in the slice) — one bar per bin rather than
+ *  one per sample. */
+export function computePeaks(channelData: Float32Array, bins: number): Float32Array {
+  const samplesPerBin = Math.max(1, Math.floor(channelData.length / bins));
+  const peaks = new Float32Array(bins);
+  let max = 0;
+  for (let i = 0; i < bins; i++) {
+    const start = i * samplesPerBin;
+    const end = i === bins - 1 ? channelData.length : start + samplesPerBin;
+    let peak = 0;
+    for (let j = start; j < end; j++) {
+      const abs = Math.abs(channelData[j]);
+      if (abs > peak) peak = abs;
+    }
+    peaks[i] = peak;
+    if (peak > max) max = peak;
+  }
+  if (max > 0) {
+    for (let i = 0; i < bins; i++) peaks[i] /= max;
+  }
+  return peaks;
+}

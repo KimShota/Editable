@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { ClipWaveform } from "./ClipWaveform";
 
 /**
  * One clip box on the timeline. Drag/trim gestures are ephemeral (a local
@@ -21,6 +22,9 @@ export function TimelineClip({
   label,
   sublabel,
   thumbnailSrc,
+  waveformSrc,
+  waveformInSec,
+  waveformOutSec,
   colorClass,
   selected,
   locked = false,
@@ -43,6 +47,12 @@ export function TimelineClip({
    *  fill so it reads as "that picture" at a glance instead of a plain
    *  color box with a filename. */
   thumbnailSrc?: string;
+  /** A video/audio clip's own source (public/-relative), decoded client-side
+   *  into a waveform drawn across the bottom of the clip — omitted (e.g. a
+   *  muted video segment) just renders the plain color box. */
+  waveformSrc?: string;
+  waveformInSec?: number;
+  waveformOutSec?: number;
   colorClass: string;
   selected: boolean;
   locked?: boolean;
@@ -129,6 +139,15 @@ export function TimelineClip({
           <img src={thumbnailSrc} alt="" className="absolute inset-0 h-full w-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
         </>
+      )}
+      {waveformSrc && (
+        <ClipWaveform
+          src={waveformSrc}
+          srcInSec={waveformInSec ?? 0}
+          srcOutSec={waveformOutSec ?? 0}
+          widthPx={width}
+          className="absolute inset-x-1.5 bottom-1 h-[45%]"
+        />
       )}
       <p className="relative truncate text-[11px] leading-tight font-medium text-white">{label}</p>
       {sublabel && <p className="relative truncate text-[10px] leading-tight text-white/70">{sublabel}</p>}

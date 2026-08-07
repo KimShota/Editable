@@ -53,6 +53,11 @@ type ClipView = {
   label: string;
   sublabel?: string;
   thumbnailSrc?: string;
+  /** A video/audio clip's own source — decoded client-side into a waveform
+   *  drawn inside the clip. See TimelineClip's own doc comment. */
+  waveformSrc?: string;
+  waveformInSec?: number;
+  waveformOutSec?: number;
 };
 
 type FloatTrack = "overlay" | "sfx" | "captions" | "music";
@@ -182,6 +187,9 @@ function TrackRow({
             label={c.label}
             sublabel={c.sublabel}
             thumbnailSrc={c.thumbnailSrc}
+            waveformSrc={c.waveformSrc}
+            waveformInSec={c.waveformInSec}
+            waveformOutSec={c.waveformOutSec}
             colorClass={colorClass}
             selected={isSelected(selection, track, c.id)}
             locked={locked}
@@ -509,6 +517,12 @@ export function Timeline({
         tlOutSec: v.tlOutSec,
         label: v.blockId,
         sublabel: v.muted ? "muted" : undefined,
+        // Muted segments never play audio, so a waveform there would just
+        // be misleading — skip it and let the "muted" sublabel speak for
+        // itself.
+        waveformSrc: v.muted ? undefined : `/${v.src}`,
+        waveformInSec: v.srcInSec,
+        waveformOutSec: v.srcOutSec,
       })),
     [edl.video],
   );

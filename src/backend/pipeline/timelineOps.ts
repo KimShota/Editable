@@ -37,6 +37,10 @@ const MIN_CLIP_SEC = 0.1;
  *  composition — small enough to feel unconstrained, large enough that a
  *  handle never shrinks to something you can no longer grab. */
 const MIN_OVERLAY_SIZE = 0.03;
+/** Linear-gain ceiling for a clip/sfx/music volume patch — matches the
+ *  +20dB top of the editor's own dB slider (see decibels.ts) and the
+ *  EDL schemas' own volume field max. */
+const MAX_VOLUME = 10;
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
 
@@ -597,7 +601,7 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
   if (op.track === "video") {
     const clip = edl.video[findIndexOrThrow(edl.video, op.id!, "video clip")];
     if (typeof op.patch.muted === "boolean") clip.muted = op.patch.muted;
-    if (typeof op.patch.volume === "number") clip.volume = clamp(op.patch.volume, 0, 1);
+    if (typeof op.patch.volume === "number") clip.volume = clamp(op.patch.volume, 0, MAX_VOLUME);
     return;
   }
   if (op.track === "overlay") {
@@ -625,7 +629,7 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
   }
   if (op.track === "sfx") {
     const clip = edl.sfx[findIndexOrThrow(edl.sfx, op.id!, "sfx")];
-    if (typeof op.patch.volume === "number") clip.volume = clamp(op.patch.volume, 0, 1);
+    if (typeof op.patch.volume === "number") clip.volume = clamp(op.patch.volume, 0, MAX_VOLUME);
     return;
   }
   if (op.track === "transition") {
@@ -699,7 +703,7 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
   }
   // music
   const m = edl.music[findIndexOrThrow(edl.music, op.id!, "music bed")];
-  if (typeof op.patch.volume === "number") m.volume = clamp(op.patch.volume, 0, 1);
+  if (typeof op.patch.volume === "number") m.volume = clamp(op.patch.volume, 0, MAX_VOLUME);
 };
 
 const applyAddMusic = (edl: Edl, op: Extract<TimelineOp, { type: "addMusic" }>): void => {

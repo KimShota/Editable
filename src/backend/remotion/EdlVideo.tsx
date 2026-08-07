@@ -46,7 +46,10 @@ const musicVolumeAt = (music: Edl["music"][number], fps: number) => (frame: numb
     break;
   }
 
-  return clamp01(music.volume * mult);
+  // mult (fade/duck envelope) is already 0..1 from the clamp01 calls above —
+  // don't clamp the product too, or a boosted music.volume (>1, +dB gain)
+  // would get capped right back down to unity.
+  return music.volume * mult;
 };
 import { TextOverlay } from "./components/TextOverlay";
 import { ImageOverlay } from "./components/ImageOverlay";
