@@ -604,7 +604,15 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
     const clip = edl.overlays[findIndexOrThrow(edl.overlays, op.id!, "overlay")];
     if (typeof op.patch.component === "string") clip.component = op.patch.component;
     if (op.patch.params && typeof op.patch.params === "object") {
-      Object.assign(clip.params, op.patch.params as Record<string, unknown>);
+      // An explicit null deletes the key (back to the component's own
+      // default — see TextOverlay's variant fallback) rather than setting
+      // a literal null param; anything else sets/replaces it. Plain
+      // Object.assign couldn't express "delete", which the Inspector's
+      // "Reset to template style" needs per-field.
+      for (const [key, value] of Object.entries(op.patch.params as Record<string, unknown>)) {
+        if (value === null) delete clip.params[key];
+        else clip.params[key] = value;
+      }
     }
     // On-canvas box (see EdlOverlaySchema) — x/y are deliberately
     // unclamped (partially off-frame is a valid CapCut-style placement);
@@ -673,6 +681,19 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
       // position it can't be grabbed back from.
       clip.x = clamp(op.patch.x, 0, 1);
       clip.y = clamp(op.patch.y, 0, 1);
+    }
+    // Typography override (see EdlCaptionGroupSchema doc comment) — same
+    // "explicit null deletes the field, back to the template's own
+    // automatic style" contract as x/y above and as the overlay branch's
+    // params loop, so the Inspector's "Reset to template style" and a
+    // corner-drag's resize-the-font both work the same way here as they
+    // do for a TextOverlay event.
+    const captionStyleKeys = ["fontSize", "fontFamily", "color", "fontWeight", "italic", "underline", "textCase"] as const;
+    for (const key of captionStyleKeys) {
+      if (!(key in op.patch)) continue;
+      const value = op.patch[key];
+      if (value === null) delete clip[key];
+      else (clip as Record<string, unknown>)[key] = value;
     }
     return;
   }

@@ -8,6 +8,9 @@ import { LineKind } from "../../../../_components/ui";
 export type Binding = { file: string } | { files: string[] } | { text: string };
 
 const mediaUrl = (jobId: string, file: string) => `/api/media/jobs/${jobId}/${file}`;
+/** A format's own checked-in default asset (see SlotSchema's defaultAsset)
+ *  — served from formats/assets/<formatId>/, not a job's own assets/. */
+const formatAssetUrl = (formatId: string, file: string) => `/api/media/formats/assets/${formatId}/${file}`;
 
 /** Binds one or more files at once — a multi-take slot APPENDS to whatever
  *  is already bound; a single-file slot replaces it (see the API route). */
@@ -25,6 +28,16 @@ async function bindLibraryRef(jobId: string, slotName: string, ref: LibraryDragP
   const body = new FormData();
   body.set("slot", slotName);
   body.set("libraryRef", JSON.stringify({ category: ref.category, filename: ref.filename }));
+  const res = await fetch(`/api/jobs/${jobId}/assets`, { method: "POST", body });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "bind failed");
+  return data.binding;
+}
+
+async function bindFormatDefault(jobId: string, slotName: string): Promise<Binding> {
+  const body = new FormData();
+  body.set("slot", slotName);
+  body.set("formatDefault", "1");
   const res = await fetch(`/api/jobs/${jobId}/assets`, { method: "POST", body });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "bind failed");
@@ -51,6 +64,7 @@ async function clearSlot(jobId: string, slotName: string, index?: number): Promi
 
 export function SlotDropzone({
   jobId,
+  formatId,
   slot,
   binding,
   onChange,
@@ -58,6 +72,10 @@ export function SlotDropzone({
   coveredNote,
 }: {
   jobId: string;
+  /** Needed only to preview/bind slot.defaultAsset, which lives under
+   *  formats/assets/<formatId>/ — omit for a call site whose slots never
+   *  declare one (harmless either way, the choice just won't render). */
+  formatId?: string;
   slot: Slot;
   binding?: Binding;
   onChange: (slotName: string, binding: Binding | undefined) => void;
@@ -135,6 +153,18 @@ export function SlotDropzone({
       return;
     }
     handleFiles(Array.from(e.dataTransfer.files ?? []));
+  };
+
+  const useDefault = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      onChange(slot.name, await bindFormatDefault(jobId, slot.name));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const clear = async (index?: number) => {
@@ -239,25 +269,90 @@ export function SlotDropzone({
           </div>
         </div>
       ) : (
-        <div
-          onClick={() => fileInput.current?.click()}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          className={`flex min-h-[110px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed p-4 text-center transition-colors ${
-            dragOver ? "border-[color:var(--accent)] bg-[color:var(--accent)]/5" : "border-white/15 hover:border-white/30"
-          }`}
-        >
-          <p className="text-xs text-[color:var(--ink-dim)]">
-            {busy ? "Uploading…" : "Drop a file, drag from Library, or click"}
-          </p>
+        <div className="flex flex-col gap-2">
+          <div
+            onClick={() => fileInput.current?.click()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            className={`flex min-h-[110px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed p-4 text-center transition-colors ${
+              dragOver ? "border-[color:var(--accent)] bg-[color:var(--accent)]/5" : "border-white/15 hover:border-white/30"
+            }`}
+          >
+            <p className="text-xs text-[color:var(--ink-dim)]">
+              {busy ? "Uploading…" : "Drop a file, drag from Library, or click"}
+            </p>
+          </div>
+          {formatId && slot.defaultAsset && (
+            <DefaultAssetOption
+              formatId={formatId}
+              slot={slot}
+              defaultAsset={slot.defaultAsset}
+              busy={busy}
+              onUse={useDefault}
+            />
+          )}
         </div>
       )}
       {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
     </SlotShell>
+  );
+}
+
+/** The "or use our template clip" alternative to filming your own — shown
+ *  only while the slot is unbound (once filled, Replace/Clear cover the
+ *  same ground, whichever source it came from). */
+function DefaultAssetOption({
+  formatId,
+  slot,
+  defaultAsset,
+  busy,
+  onUse,
+}: {
+  formatId: string;
+  slot: Slot;
+  defaultAsset: NonNullable<Slot["defaultAsset"]>;
+  busy: boolean;
+  onUse: () => void;
+}) {
+  const [preview, setPreview] = useState(false);
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-[color:var(--ink-dim)]">
+          Don&apos;t want to film this? {defaultAsset.label ?? "Use our template clip"} instead.
+        </p>
+        <div className="flex shrink-0 gap-1.5">
+          <button
+            onClick={() => setPreview((p) => !p)}
+            className="rounded-full border border-white/15 px-2.5 py-1 text-[11px] text-[color:var(--ink)] hover:border-white/30"
+          >
+            {preview ? "Hide" : "Preview"}
+          </button>
+          <button
+            onClick={onUse}
+            disabled={busy}
+            className="rounded-full bg-[color:var(--accent)] px-2.5 py-1 text-[11px] font-medium text-black disabled:opacity-50"
+          >
+            {busy ? "Using…" : "Use this clip"}
+          </button>
+        </div>
+      </div>
+      {preview && (
+        <div className="mt-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+          {slot.mediaType === "video" ? (
+            <video src={formatAssetUrl(formatId, defaultAsset.file)} controls muted className="max-h-[220px] w-full object-contain" />
+          ) : slot.mediaType === "image" ? (
+            <img src={formatAssetUrl(formatId, defaultAsset.file)} alt="" className="max-h-[220px] w-full object-contain" />
+          ) : (
+            <audio src={formatAssetUrl(formatId, defaultAsset.file)} controls className="w-full p-3" />
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

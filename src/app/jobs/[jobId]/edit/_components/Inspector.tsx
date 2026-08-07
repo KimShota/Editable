@@ -1,9 +1,21 @@
 "use client";
 
-import type { Edl } from "@backend/pipeline/types";
+import { useEffect, useState } from "react";
+import type { Edl, EdlCaptionGroup } from "@backend/pipeline/types";
 import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import { Selection } from "./selection";
 import { CloseIcon, ScissorsIcon, TrashIcon } from "./Icons";
+import {
+  FONT_FAMILY_SHORTHANDS,
+  FONT_OPTIONS,
+  KUMAR_RED,
+  TEXT_VARIANTS,
+  TextVariant,
+  defaultLowerThirdColor,
+  defaultLowerThirdFontSize,
+  defaultLowerThirdFontWeight,
+  fitDidoneFontSize,
+} from "@backend/components/style";
 
 const TRANSITIONS = [
   { value: "cut", label: "Cut" },
@@ -29,6 +41,199 @@ const dangerButtonClass =
 
 const sectionClass = "flex flex-col gap-4 overflow-y-auto p-4";
 const actionsClass = "mt-2 flex flex-col gap-2 border-t border-[color:var(--ed-border)] pt-4";
+
+const toggleButtonClass = (active: boolean) =>
+  `flex h-8 w-8 items-center justify-center rounded-lg border text-sm font-semibold transition-colors ${
+    active
+      ? "border-[color:var(--ed-accent)] bg-[color:var(--ed-accent)]/15 text-[color:var(--ed-accent)]"
+      : "border-[color:var(--ed-border-strong)] text-[color:var(--ed-ink)] hover:border-[color:var(--ed-accent)]/50"
+  }`;
+
+/** Everything a TextOverlay event or a caption group might carry as an
+ *  explicit style override — see TextOverlay.tsx's props / EdlCaptionGroupSchema.
+ *  Absent field = following the component's own default for that field.
+ *  A patch may set `null` for a field to DELETE the override (see
+ *  timelineOps.ts's applySetProp) — used by "Reset to template style". */
+type TextStyleOverride = {
+  fontSize?: number | null;
+  fontFamily?: string | null;
+  color?: string | null;
+  fontWeight?: number | null;
+  italic?: boolean | null;
+  underline?: boolean | null;
+  textCase?: "upper" | "lower" | "none" | null;
+};
+
+/** The effective values TextStyleFields shows when the override above
+ *  doesn't set a given field — i.e. what's ACTUALLY rendering right now
+ *  (the variant/theme's own house style), computed by the caller since
+ *  overlay vs. caption defaults come from different places (see
+ *  effectiveOverlayDefaults / effectiveCaptionDefaults below). */
+type TextStyleDefaults = { fontSize: number; fontFamily: string; color: string; fontWeight: number };
+
+/**
+ * Font/size/bold/underline/italic/case/color controls shared by a
+ * TextOverlay event and a caption group — "captions and text are the
+ * same thing" — the caller supplies the current override + resolved
+ * defaults and wraps the emitted patch into whatever shape its own track
+ * needs (overlay: nested under `params`; captions: top-level fields).
+ *
+ * A field is written explicitly on every interaction and DELETED (patch
+ * value `null`) only via "Reset to template style" — there's no
+ * per-field reset control, matching how position reset already works
+ * (Inspector's caption Position section, one button for the whole group).
+ */
+function TextStyleFields({
+  override,
+  defaults,
+  onPatch,
+  onResetAll,
+}: {
+  override: TextStyleOverride;
+  defaults: TextStyleDefaults;
+  onPatch: (patch: TextStyleOverride) => void;
+  onResetAll: () => void;
+}) {
+  const fontSize = override.fontSize ?? defaults.fontSize;
+  const [liveFontSize, setLiveFontSize] = useState(fontSize);
+  useEffect(() => setLiveFontSize(fontSize), [fontSize]);
+
+  const fontFamily = override.fontFamily ?? defaults.fontFamily;
+  const color = override.color ?? defaults.color;
+  const isBold = (override.fontWeight ?? defaults.fontWeight) >= 700;
+  const isOverridden =
+    override.fontSize !== undefined ||
+    override.fontFamily !== undefined ||
+    override.color !== undefined ||
+    override.fontWeight !== undefined ||
+    override.italic !== undefined ||
+    override.underline !== undefined ||
+    override.textCase !== undefined;
+
+  const commitFontSize = (value: number) => onPatch({ fontSize: Math.max(8, Math.round(value)) });
+
+  return (
+    <>
+      <Field label="Font">
+        <select value={fontFamily} onChange={(e) => onPatch({ fontFamily: e.target.value })} className={inputClass}>
+          {FONT_OPTIONS.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field label={`Font size — ${liveFontSize}px`}>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={12}
+            max={200}
+            step={1}
+            value={liveFontSize}
+            onChange={(e) => setLiveFontSize(Number(e.target.value))}
+            onMouseUp={(e) => commitFontSize(Number((e.target as HTMLInputElement).value))}
+            onTouchEnd={(e) => commitFontSize(Number((e.target as HTMLInputElement).value))}
+            className="w-full accent-[color:var(--ed-accent)]"
+          />
+          <input
+            type="number"
+            min={8}
+            max={400}
+            value={liveFontSize}
+            onChange={(e) => setLiveFontSize(Number(e.target.value))}
+            onBlur={(e) => commitFontSize(Number(e.target.value))}
+            className="w-16 rounded-lg border border-[color:var(--ed-border-strong)] bg-[color:var(--ed-raised)] px-2 py-1 text-sm text-[color:var(--ed-ink)] outline-none focus:border-[color:var(--ed-accent)]"
+          />
+        </div>
+      </Field>
+
+      <Field label="Style">
+        <div className="flex gap-1.5">
+          <button
+            title="Bold"
+            onClick={() => onPatch({ fontWeight: isBold ? 400 : 800 })}
+            className={toggleButtonClass(isBold)}
+          >
+            B
+          </button>
+          <button
+            title="Underline"
+            onClick={() => onPatch({ underline: !override.underline })}
+            className={`${toggleButtonClass(!!override.underline)} underline`}
+          >
+            U
+          </button>
+          <button
+            title="Italic"
+            onClick={() => onPatch({ italic: !override.italic })}
+            className={`${toggleButtonClass(!!override.italic)} italic`}
+          >
+            I
+          </button>
+        </div>
+      </Field>
+
+      <Field label="Case">
+        <div className="flex gap-1.5">
+          <button title="UPPERCASE" onClick={() => onPatch({ textCase: "upper" })} className={toggleButtonClass(override.textCase === "upper")}>
+            TT
+          </button>
+          <button title="lowercase" onClick={() => onPatch({ textCase: "lower" })} className={toggleButtonClass(override.textCase === "lower")}>
+            tt
+          </button>
+          <button title="As typed" onClick={() => onPatch({ textCase: "none" })} className={toggleButtonClass(override.textCase === "none")}>
+            Tt
+          </button>
+        </div>
+      </Field>
+
+      <Field label="Color">
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : "#ffffff"}
+            onChange={(e) => onPatch({ color: e.target.value })}
+            className="h-8 w-12 cursor-pointer rounded-md border border-[color:var(--ed-border-strong)] bg-transparent p-0.5"
+          />
+          <span className="text-xs text-[color:var(--ed-ink-dim)]">{color}</span>
+        </div>
+      </Field>
+
+      <button disabled={!isOverridden} onClick={onResetAll} className={secondaryButtonClass}>
+        Reset to template style
+      </button>
+    </>
+  );
+}
+
+/** A TextOverlay event's own effective style — its params override, or the
+ *  variant's house default (see TEXT_VARIANTS) for whatever it doesn't set.
+ *  A variant's own fontFamily (only kumarTitle sets one) is a raw CSS
+ *  stack, not a Font-dropdown shorthand key — reverse-looked-up against
+ *  FONT_FAMILY_SHORTHANDS so the dropdown shows "Playfair Display"
+ *  selected instead of falling back to "System". */
+const effectiveOverlayDefaults = (params: Record<string, unknown>): TextStyleDefaults => {
+  const variant = (typeof params.variant === "string" ? params.variant : "hook") as TextVariant;
+  const v = TEXT_VARIANTS[variant] ?? TEXT_VARIANTS.hook;
+  const familyKey = v.fontFamily ? Object.entries(FONT_FAMILY_SHORTHANDS).find(([, stack]) => stack === v.fontFamily)?.[0] : undefined;
+  return { fontSize: v.fontSize, fontFamily: familyKey ?? "system", color: v.color, fontWeight: v.fontWeight };
+};
+
+/** A caption group's own effective style — mirrors Captions.tsx's own
+ *  fallback formulas exactly (see style.ts's defaultLowerThird* helpers
+ *  and BigTitleCard's fitDidoneFontSize call) so the panel shows what's
+ *  actually rendering, not a guess. */
+const effectiveCaptionDefaults = (group: EdlCaptionGroup, edl: Edl): TextStyleDefaults =>
+  group.variant === "bigTitle"
+    ? { fontSize: fitDidoneFontSize(group.words[0]?.text ?? "", edl.width, edl.height), fontFamily: "playfair", color: KUMAR_RED, fontWeight: 900 }
+    : {
+        fontSize: defaultLowerThirdFontSize(group.theme),
+        fontFamily: "system",
+        color: defaultLowerThirdColor(group.theme),
+        fontWeight: defaultLowerThirdFontWeight(group.theme),
+      };
 
 /** Word-count-preserving edit → each word keeps its original timing (the
  *  precise "fix a mis-transcription" case, e.g. "cloak coats" -> "Claude
@@ -229,6 +434,9 @@ export function Inspector({
     if (!clip) return null;
     const canSplit = currentTimeSec > clip.tlInSec + 0.1 && currentTimeSec < clip.tlOutSec - 0.1;
     const hasText = typeof clip.params.text === "string";
+    const isTextOverlay = clip.component === "TextOverlay";
+    const patchTextStyle = (patch: TextStyleOverride) =>
+      onOp({ type: "setProp", track: "overlay", id: clip.id, patch: { params: patch } });
 
     return (
       <div className="flex h-full flex-col">
@@ -255,6 +463,24 @@ export function Inspector({
                 className={inputClass}
               />
             </Field>
+          )}
+          {isTextOverlay && (
+            <TextStyleFields
+              override={clip.params as TextStyleOverride}
+              defaults={effectiveOverlayDefaults(clip.params)}
+              onPatch={patchTextStyle}
+              onResetAll={() =>
+                patchTextStyle({
+                  fontSize: null,
+                  fontFamily: null,
+                  color: null,
+                  fontWeight: null,
+                  italic: null,
+                  underline: null,
+                  textCase: null,
+                })
+              }
+            />
           )}
           <div className={actionsClass}>
             <button
@@ -412,6 +638,7 @@ export function Inspector({
     // exact position no longer decides it.
     const canSplit = group.words.length >= 2;
     const isPositioned = group.x !== undefined && group.y !== undefined;
+    const patchCaptionStyle = (patch: TextStyleOverride) => onOp({ type: "setProp", track: "captions", id: group.id, patch });
     return (
       <div className="flex h-full flex-col">
         {header("Caption group", `${group.tlInSec.toFixed(2)}s – ${group.tlOutSec.toFixed(2)}s`)}
@@ -436,6 +663,30 @@ export function Inspector({
             mis-transcription). Adding or removing words spreads the new text evenly across the group&apos;s span
             instead.
           </p>
+          {/* "Captions and text are the same thing" — same font/size/style
+              controls a TextOverlay event gets, just reading/writing the
+              caption group's own top-level fields instead of `params`.
+              karaokeTitle isn't wired up here yet — see KaraokeTitleLayer.tsx,
+              which doesn't even support the move/position editing every
+              other variant already has. */}
+          {group.variant !== "karaokeTitle" && (
+            <TextStyleFields
+              override={group as TextStyleOverride}
+              defaults={effectiveCaptionDefaults(group, edl)}
+              onPatch={patchCaptionStyle}
+              onResetAll={() =>
+                patchCaptionStyle({
+                  fontSize: null,
+                  fontFamily: null,
+                  color: null,
+                  fontWeight: null,
+                  italic: null,
+                  underline: null,
+                  textCase: null,
+                })
+              }
+            />
+          )}
           <Field label="Position">
             <p className="text-xs text-[color:var(--ed-ink-dim)]">
               {isPositioned

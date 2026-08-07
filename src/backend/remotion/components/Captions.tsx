@@ -1,7 +1,14 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { EdlCaptionGroup } from "../../pipeline/types";
-import { KUMAR_RED, PLAYFAIR_DISPLAY_STACK, SYSTEM_FONT, TEXT_SHADOW, fitDidoneFontSize } from "../../components/style";
+import {
+  FONT_FAMILY_SHORTHANDS,
+  KUMAR_RED,
+  PLAYFAIR_DISPLAY_STACK,
+  SYSTEM_FONT,
+  TEXT_SHADOW,
+  fitDidoneFontSize,
+} from "../../components/style";
 import { ensureDisplayFonts } from "../fonts";
 
 /**
@@ -53,6 +60,18 @@ const BIG_TITLE_GUTTER_PX = 40;
 const positionOf = (group: EdlCaptionGroup): { x: number; y: number } | null =>
   group.x !== undefined && group.y !== undefined ? { x: group.x, y: group.y } : null;
 
+/** Resolves a group's own textCase override against the variant's default
+ *  casing (bigTitle/karaokeTitle are always uppercase unless a group opts
+ *  out with "none") — same override-over-default shape TextOverlay uses. */
+const resolveTextTransform = (
+  textCase: EdlCaptionGroup["textCase"],
+  defaultUppercase: boolean,
+): React.CSSProperties["textTransform"] =>
+  textCase === "upper" ? "uppercase" : textCase === "lower" ? "lowercase" : textCase === "none" ? "none" : defaultUppercase ? "uppercase" : undefined;
+
+const resolveFontFamily = (fontFamily: string | undefined, fallback: string): string =>
+  fontFamily ? (FONT_FAMILY_SHORTHANDS[fontFamily] ?? fontFamily) : fallback;
+
 /** Absolutely-positioned wrapper centered on the group's own point — the
  *  one shape both caption variants share when hand-positioned.
  *
@@ -81,8 +100,10 @@ const BigTitleCard: React.FC<{ group: EdlCaptionGroup }> = ({ group }) => {
   const progress = spring({ frame: localFrame, fps, config: { damping: 12, stiffness: 200 } });
   const scale = interpolate(progress, [0, 1], [1.35, 1]);
   const text = group.words[0].text;
-  const fontSize = fitDidoneFontSize(text, width, height);
+  const fontSize = group.fontSize ?? fitDidoneFontSize(text, width, height);
   const at = positionOf(group);
+  const fontFamily = resolveFontFamily(group.fontFamily, PLAYFAIR_DISPLAY_STACK);
+  if (group.fontFamily) ensureDisplayFonts();
 
   return (
     <AbsoluteFill style={at ? undefined : { justifyContent: "center", alignItems: "center", padding: 40 }}>
@@ -93,14 +114,16 @@ const BigTitleCard: React.FC<{ group: EdlCaptionGroup }> = ({ group }) => {
         data-caption-group={group.id}
         style={{
           ...(at ? pinnedStyle(at, width - BIG_TITLE_GUTTER_PX * 2) : null),
-          fontFamily: PLAYFAIR_DISPLAY_STACK,
-          fontWeight: 900,
+          fontFamily,
+          fontWeight: group.fontWeight ?? 900,
+          fontStyle: group.italic ? "italic" : undefined,
+          textDecoration: group.underline ? "underline" : undefined,
           fontSize,
           lineHeight: 1.1,
-          color: KUMAR_RED,
+          color: group.color ?? KUMAR_RED,
           textAlign: "center",
           textShadow: TEXT_SHADOW,
-          textTransform: "uppercase",
+          textTransform: resolveTextTransform(group.textCase, true),
           whiteSpace: "nowrap",
           opacity: progress,
           // A pinned card centers itself with its own translate, so the
@@ -129,6 +152,9 @@ const LowerThirdLine: React.FC<{ group: EdlCaptionGroup; position: string; theme
   // (mid-frame, over the subject's chest, not hugging the bottom edge).
   const paddingBottomFrac = position === "center" ? 0 : isKumar ? 0.42 : 0.24;
   const at = positionOf(group);
+  const fontFamily = resolveFontFamily(group.fontFamily, SYSTEM_FONT);
+  if (group.fontFamily) ensureDisplayFonts();
+  const textTransform = resolveTextTransform(group.textCase, false);
 
   return (
     <AbsoluteFill
@@ -152,16 +178,24 @@ const LowerThirdLine: React.FC<{ group: EdlCaptionGroup; position: string; theme
         {group.words.map((w, i) => {
           const isActive = tSec >= w.tlStartSec && tSec < w.tlEndSec;
           const isKeywordHit = isActive && w.emphasis;
-          const color = isKumar ? KUMAR_RED : isOutro ? OUTRO_YELLOW : isKeywordHit ? HIGHLIGHT : "white";
+          // An explicit color override is the user's own pick for this
+          // caption — it replaces the automatic keyword/theme coloring
+          // entirely rather than only recoloring the inactive words,
+          // since a caption someone deliberately restyled is no longer
+          // meant to track the template's own emphasis palette.
+          const color = group.color ?? (isKumar ? KUMAR_RED : isOutro ? OUTRO_YELLOW : isKeywordHit ? HIGHLIGHT : "white");
           return (
             <span
               key={i}
               style={{
-                fontFamily: SYSTEM_FONT,
-                fontWeight: isOutro ? 700 : 800,
-                fontSize: isKumar ? 64 : isOutro ? 46 : 52,
+                fontFamily,
+                fontWeight: group.fontWeight ?? (isOutro ? 700 : 800),
+                fontStyle: group.italic ? "italic" : undefined,
+                textDecoration: group.underline ? "underline" : undefined,
+                fontSize: group.fontSize ?? (isKumar ? 64 : isOutro ? 46 : 52),
                 color,
                 textShadow: TEXT_SHADOW,
+                textTransform,
                 display: "inline-block",
                 transform: isKeywordHit ? "scale(1.08)" : isActive ? "scale(1.03)" : "scale(1)",
                 margin: "0 8px",

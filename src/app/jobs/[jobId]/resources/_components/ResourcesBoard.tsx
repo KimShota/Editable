@@ -296,6 +296,7 @@ export function ResourcesBoard({
                           )}
                           <SlotDropzone
                             jobId={jobId}
+                            formatId={format.id}
                             slot={slot}
                             binding={bindings[slot.name]}
                             onChange={setBinding}
@@ -337,6 +338,7 @@ export function ResourcesBoard({
                 <div className="max-w-md">
                   <SlotDropzone
                     jobId={jobId}
+                    formatId={format.id}
                     slot={takeSlot}
                     binding={bindings[takeSlot.name]}
                     onChange={setBinding}
@@ -367,6 +369,7 @@ export function ResourcesBoard({
                         <SlotDropzone
                           key={slot.name}
                           jobId={jobId}
+                          formatId={format.id}
                           slot={slot}
                           binding={bindings[slot.name]}
                           onChange={setBinding}
@@ -404,6 +407,7 @@ export function ResourcesBoard({
                 <div className="max-w-sm">
                   <SlotDropzone
                     jobId={jobId}
+                    formatId={format.id}
                     slot={format.finalClipSlot}
                     binding={bindings[format.finalClipSlot.name]}
                     onChange={setBinding}
@@ -425,6 +429,7 @@ export function ResourcesBoard({
                     <SlotDropzone
                       key={slot.name}
                       jobId={jobId}
+                      formatId={format.id}
                       slot={slot}
                       binding={bindings[slot.name]}
                       onChange={setBinding}
@@ -442,6 +447,7 @@ export function ResourcesBoard({
                 <div className="max-w-sm">
                   <SlotDropzone
                     jobId={jobId}
+                    formatId={format.id}
                     slot={format.musicSlot}
                     binding={bindings[format.musicSlot.name]}
                     onChange={setBinding}

@@ -5,6 +5,7 @@ import { jobExists, readJobManifest, writeJobManifest, jobDir, invalidateTakeArt
 import { isLibraryCategory, libraryDir } from "../../../../lib/library";
 import { loadFormat } from "@backend/pipeline/loader";
 import { allSlots } from "@backend/pipeline/intake";
+import { formatAssetsDir } from "@backend/pipeline/paths";
 
 /** Binds one slot: a file upload, or a text string for text-typed slots. */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
@@ -59,6 +60,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
         : [];
   let takeCount = existingFiles.length;
   const nextRelPath = (ext: string) => path.posix.join("assets", `${slotName}-${++takeCount}${ext}`);
+
+  // Picking the format's own checked-in fallback for this slot (see
+  // SlotSchema's defaultAsset doc comment) — same copy-by-reference
+  // treatment as a Library drag below, just sourced from
+  // formats/assets/<formatId>/ instead of library/<category>/, so the user
+  // can explicitly choose "use the template clip" over filming their own.
+  const formatDefault = formData.get("formatDefault");
+  if (typeof formatDefault === "string") {
+    if (!slot.defaultAsset) {
+      return NextResponse.json({ error: `slot "${slotName}" has no default asset` }, { status: 400 });
+    }
+    const srcPath = path.join(formatAssetsDir(format.id), slot.defaultAsset.file);
+    if (!fs.existsSync(srcPath)) {
+      return NextResponse.json({ error: "default asset not found" }, { status: 404 });
+    }
+    const ext = path.extname(slot.defaultAsset.file);
+    const relPath = isMultiSlot ? nextRelPath(ext) : path.posix.join("assets", `${slotName}${ext}`);
+    const absPath = path.join(jobDir(jobId), relPath);
+    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    fs.copyFileSync(srcPath, absPath);
+    manifest.bindings[slotName] = isMultiSlot
+      ? { files: [...existingFiles, relPath] }
+      : { file: relPath };
+    writeJobManifest(jobId, manifest);
+    if (isTakeSlot) invalidateTakeArtifacts(jobId);
+    return NextResponse.json({ slot: slotName, binding: manifest.bindings[slotName] });
+  }
 
   // Dragged in from the Library: copy by reference instead of re-uploading bytes.
   const libraryRef = formData.get("libraryRef");

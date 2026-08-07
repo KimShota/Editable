@@ -292,7 +292,11 @@
           "name": "c-broll",
           "mediaType": "video",
           "required": true,
-          "instructions": "Moody, lonely b-roll to lay over the whole monologue — e.g. a lone figure in a dark alley or empty street at night. Slow, quiet, no people talking."
+          "instructions": "Moody, lonely b-roll to lay over the whole monologue — e.g. a lone figure in a dark alley or empty street at night. Slow, quiet, no people talking.",
+          "defaultAsset": {
+            "file": "c-broll-template.mp4",
+            "label": "Our template clip — a lone figure in a dark alley at night"
+          }
         }
       ],
       "captions": true,
@@ -389,9 +393,9 @@
         },
         {
           "name": "d-broll",
-          "mediaType": "video",
+          "mediaType": "image",
           "required": true,
-          "instructions": "A short comedic b-roll clip of the mundane option (e.g. someone hauling all the grocery bags in one heroic trip), fills the frame."
+          "instructions": "A comedic photo of the mundane option (e.g. someone hauling all the grocery bags in one heroic trip), fills the frame."
         }
       ],
       "captions": false,
@@ -443,9 +447,9 @@
           "id": "d-broll-ov",
           "kind": "overlay",
           "component": {
-            "component": "VideoOverlay",
+            "component": "ImageOverlay",
             "params": {
-              "videoSlot": "d-broll"
+              "imageSlot": "d-broll"
             }
           },
           "timing": {
@@ -453,11 +457,6 @@
             "roleId": "d-marker",
             "edge": "start",
             "offsetSec": 0.5
-          },
-          "until": {
-            "kind": "fixed",
-            "anchor": "blockEnd",
-            "offsetSec": 0
           },
           "layout": {
             "x": 0,

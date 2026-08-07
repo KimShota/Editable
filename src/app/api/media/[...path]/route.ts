@@ -7,16 +7,18 @@ import { repoRoot } from "@backend/pipeline/paths";
 /**
  * Generic file streamer for content that lives outside public/ (which Next
  * only serves as-is): rendered videos in out/, a job's own uploaded assets
- * in jobs/<id>/assets/, library/ assets, and an authoring draft's reference
- * reel in authoring/<draftId>/. One route covers all of these so every page
- * — gallery preview, resources dropzone thumbnail, editor player, library
- * grid, draft review's verify comparison — can just point an
+ * in jobs/<id>/assets/, library/ assets, an authoring draft's reference
+ * reel in authoring/<draftId>/, and a format's own checked-in template
+ * assets in formats/assets/<formatId>/ (e.g. a slot's defaultAsset — see
+ * SlotSchema). One route covers all of these so every page — gallery
+ * preview, resources dropzone thumbnail, editor player, library grid,
+ * draft review's verify comparison — can just point an
  * <video>/<img>/<audio> src here.
  *
- * URL shape: /api/media/<root>/<...rest>, root ∈ out | jobs | library | authoring.
+ * URL shape: /api/media/<root>/<...rest>, root ∈ out | jobs | library | authoring | formats.
  */
 
-const ALLOWED_ROOTS = new Set(["out", "jobs", "library", "authoring"]);
+const ALLOWED_ROOTS = new Set(["out", "jobs", "library", "authoring", "formats"]);
 
 const CONTENT_TYPES: Record<string, string> = {
   ".mp4": "video/mp4",

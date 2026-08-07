@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Edl, EdlCaptionGroup } from "@backend/pipeline/types";
 import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import { Selection, toggleSelect } from "./selection";
+import { TEXT_VARIANTS, TextVariant, defaultLowerThirdFontSize, fitDidoneFontSize } from "@backend/components/style";
 
 /**
  * The CapCut-style move/resize layer over the video preview: renders a
@@ -59,6 +60,13 @@ type DragState =
       startFreeX: number;
       startFreeY: number;
       aspectRatio: number | null;
+      /** The box's own size when the drag began — resize scales font size
+       *  by how much this grows/shrinks (see endDrag), so it has to be
+       *  captured once at gesture start, not re-derived from anchor/free
+       *  corners (which move as the drag progresses). Only set for a
+       *  TextOverlay resize — image/video overlays don't carry a font. */
+      startBox?: Box;
+      startFontSize?: number;
     };
 
 /** Loads an image/video just to read its natural pixel aspect ratio — used
@@ -91,31 +99,68 @@ const useNaturalAspectRatio = (src: string | undefined, isVideo: boolean): numbe
 };
 
 /**
- * The selected caption group's own move box on the preview.
+ * The selected caption group's own move + resize box on the preview.
  *
- * Move-only, deliberately: a caption's size comes from its text, theme and
- * variant (Captions.tsx), so a resize handle here would have nothing
- * well-defined to write back — unlike an overlay, which owns its box.
+ * Move is a plain drag, same as an overlay. Resize is different from an
+ * overlay's: a caption group has no box of its own (schema-wise) — its
+ * size comes from its text, theme and variant (Captions.tsx) — so
+ * dragging a corner here doesn't write a width/height at all, it scales
+ * the group's own `fontSize` override (see EdlCaptionGroupSchema) by how
+ * much the box grew/shrank, then lets Captions.tsx re-render at that size
+ * and this component re-measure the result next frame. "Captions and text
+ * are the same thing" — this is the same font-scale-on-resize gesture
+ * OverlayCanvas's own beginResize/endDrag give a TextOverlay.
  *
  * The box is MEASURED from the caption node the Player actually rendered
  * (Captions.tsx tags each group with data-caption-group) rather than
  * re-derived from font metrics in the editor. Re-deriving would mean a
  * second copy of the renderer's layout math — font stack, per-theme size,
  * word margins, wrapping — that silently drifts from the real thing the
- * first time either side changes. Measuring can't drift.
+ * first time either side changes. Measuring can't drift; only the ONE
+ * NUMBER a resize gesture needs before any measurement exists yet (the
+ * starting font size, to scale from) is computed from the same constants
+ * Captions.tsx itself falls back to (see effectiveFontSize below) rather
+ * than measured, since there's nothing on screen to measure until a
+ * fontSize is actually set.
  */
 const CaptionMoveBox = ({
   group,
   containerRef,
   onOp,
+  frameWidth,
+  frameHeight,
 }: {
   group: EdlCaptionGroup;
   containerRef: React.RefObject<HTMLDivElement | null>;
   onOp: (op: TimelineOp) => void;
+  frameWidth: number;
+  frameHeight: number;
 }) => {
   const [box, setBox] = useState<Box | null>(null);
   const [delta, setDelta] = useState<{ dx: number; dy: number } | null>(null);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const [resizeDrag, setResizeDrag] = useState<{
+    corner: Corner;
+    startClientX: number;
+    startClientY: number;
+    anchorX: number;
+    anchorY: number;
+    startFreeX: number;
+    startFreeY: number;
+    aspectRatio: number;
+    startFontSize: number;
+  } | null>(null);
+  const [liveResizeBox, setLiveResizeBox] = useState<Box | null>(null);
+
+  /** The size this group is ACTUALLY rendering at right now — its own
+   *  fontSize override, or the same default Captions.tsx itself falls
+   *  back to for its variant/theme (see style.ts). The baseline a resize
+   *  drag scales up or down from. */
+  const effectiveFontSize =
+    group.fontSize ??
+    (group.variant === "bigTitle"
+      ? fitDidoneFontSize(group.words[0]?.text ?? "", frameWidth, frameHeight)
+      : defaultLowerThirdFontSize(group.theme));
 
   // Re-measured every frame: the active-word highlight scales words as the
   // playhead moves, so the line's real bounds change continuously and a
@@ -159,6 +204,73 @@ const CaptionMoveBox = ({
 
   const dx = delta?.dx ?? 0;
   const dy = delta?.dy ?? 0;
+  // While resizing, the drawn box previews the live drag; the actual text
+  // doesn't visually grow until the gesture commits and Captions.tsx
+  // re-renders at the new fontSize — same "box previews, content updates
+  // on release" contract OverlayCanvas's own overlay resize already uses.
+  const drawnBox = liveResizeBox ?? box;
+
+  const beginCaptionResize = (e: React.PointerEvent, corner: Corner) => {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture(e.pointerId);
+    const c = CORNERS.find((cc) => cc.id === corner)!;
+    setResizeDrag({
+      corner,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      anchorX: c.dirX === 1 ? box.x : box.x + box.width,
+      anchorY: c.dirY === 1 ? box.y : box.y + box.height,
+      startFreeX: c.dirX === 1 ? box.x + box.width : box.x,
+      startFreeY: c.dirY === 1 ? box.y + box.height : box.y,
+      // A caption's fontSize is one number, so corner drag always
+      // preserves the box's own starting aspect ratio — never a free,
+      // non-uniform stretch (unlike an overlay's free-resizing text box).
+      aspectRatio: box.width / box.height,
+      startFontSize: effectiveFontSize,
+    });
+  };
+
+  const onCaptionResizeMove = (e: React.PointerEvent) => {
+    if (!resizeDrag) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const dxFrac = (e.clientX - resizeDrag.startClientX) / rect.width;
+    const corner = CORNERS.find((c) => c.id === resizeDrag.corner)!;
+    const freeX = resizeDrag.startFreeX + dxFrac;
+    // Height derived from width in pixel space (see OverlayCanvas's own
+    // aspect-locked resize for why fraction space alone would skew this).
+    const widthPx = Math.abs(freeX - resizeDrag.anchorX) * frameWidth;
+    const heightPx = widthPx / resizeDrag.aspectRatio;
+    const freeY = resizeDrag.anchorY + corner.dirY * (heightPx / frameHeight);
+    const x = Math.min(resizeDrag.anchorX, freeX);
+    const y = Math.min(resizeDrag.anchorY, freeY);
+    setLiveResizeBox({
+      x,
+      y,
+      width: Math.max(Math.abs(freeX - resizeDrag.anchorX), MIN_SIZE),
+      height: Math.max(Math.abs(freeY - resizeDrag.anchorY), MIN_SIZE),
+    });
+  };
+
+  const endCaptionResize = () => {
+    if (!resizeDrag) return;
+    if (liveResizeBox) {
+      const scale = liveResizeBox.width / box.width;
+      onOp({
+        type: "setProp",
+        track: "captions",
+        id: group.id,
+        patch: {
+          x: liveResizeBox.x + liveResizeBox.width / 2,
+          y: liveResizeBox.y + liveResizeBox.height / 2,
+          fontSize: Math.max(8, Math.round(resizeDrag.startFontSize * scale)),
+        },
+      });
+    }
+    setResizeDrag(null);
+    setLiveResizeBox(null);
+  };
 
   return (
     <div
@@ -193,13 +305,30 @@ const CaptionMoveBox = ({
       }}
       style={{
         position: "absolute",
-        left: `${(box.x + dx) * 100}%`,
-        top: `${(box.y + dy) * 100}%`,
-        width: `${box.width * 100}%`,
-        height: `${box.height * 100}%`,
+        left: `${(drawnBox.x + dx) * 100}%`,
+        top: `${(drawnBox.y + dy) * 100}%`,
+        width: `${drawnBox.width * 100}%`,
+        height: `${drawnBox.height * 100}%`,
       }}
       className="pointer-events-auto cursor-grab border-2 border-dashed border-[color:var(--ed-accent)] active:cursor-grabbing"
-    />
+    >
+      {CORNERS.map((c) => (
+        <div
+          key={c.id}
+          onPointerDown={(e) => beginCaptionResize(e, c.id)}
+          onPointerMove={onCaptionResizeMove}
+          onPointerUp={endCaptionResize}
+          style={{
+            position: "absolute",
+            left: c.dirX === 1 ? "100%" : 0,
+            top: c.dirY === 1 ? "100%" : 0,
+            transform: "translate(-50%, -50%)",
+            cursor: c.cursor,
+          }}
+          className="pointer-events-auto h-3.5 w-3.5 rounded-full border-2 border-[color:var(--ed-accent)] bg-white shadow-md"
+        />
+      ))}
+    </div>
   );
 };
 
@@ -240,6 +369,17 @@ export function OverlayCanvas({
       ? singleOverlay.params.src
       : undefined;
   const naturalAspect = useNaturalAspectRatio(src, singleOverlay?.component === "VideoOverlay");
+
+  const isTextOverlay = singleOverlay?.component === "TextOverlay";
+  /** The size a TextOverlay is ACTUALLY rendering at right now — its own
+   *  params.fontSize override if it has one, else the variant's house
+   *  default (see TEXT_VARIANTS) — the baseline a resize drag scales up
+   *  or down from. */
+  const effectiveFontSize = (o: Edl["overlays"][number]): number => {
+    const variant = (typeof o.params.variant === "string" ? o.params.variant : "hook") as TextVariant;
+    const fallback = (TEXT_VARIANTS[variant] ?? TEXT_VARIANTS.hook).fontSize;
+    return typeof o.params.fontSize === "number" ? o.params.fontSize : fallback;
+  };
 
   // Other overlays visible right now, behind the selection — clicking one
   // selects it (Shift adds it), matching CapCut's "click the element on
@@ -313,11 +453,24 @@ export function OverlayCanvas({
       }
       setLiveGroupDelta(null);
     } else if (liveBox && singleOverlay) {
+      const patch: Record<string, unknown> = { x: liveBox.x, y: liveBox.y, width: liveBox.width, height: liveBox.height };
+      // Corner-resizing a text box scales its font size along with the
+      // box, the same "drag the handle, the text gets bigger" gesture
+      // CapCut uses — derived from how much the box's own area changed
+      // (geometric mean of the width/height ratios, so a uniform corner
+      // drag scales cleanly and a stretched one still lands on a sensible
+      // single number) rather than a separate, disconnected control.
+      if (drag.kind === "resize" && drag.startBox && drag.startFontSize) {
+        const widthRatio = liveBox.width / drag.startBox.width;
+        const heightRatio = liveBox.height / drag.startBox.height;
+        const scale = Math.sqrt(widthRatio * heightRatio);
+        patch.params = { fontSize: Math.max(8, Math.round(drag.startFontSize * scale)) };
+      }
       onOp({
         type: "setProp",
         track: "overlay",
         id: singleOverlay.id,
-        patch: { x: liveBox.x, y: liveBox.y, width: liveBox.width, height: liveBox.height },
+        patch,
       });
     }
     setDrag(null);
@@ -334,7 +487,13 @@ export function OverlayCanvas({
     return (
       <div ref={containerRef} className="pointer-events-none absolute inset-0">
         {othersVisible.map(renderClickableOverlay)}
-        <CaptionMoveBox group={selectedCaption} containerRef={containerRef} onOp={onOp} />
+        <CaptionMoveBox
+          group={selectedCaption}
+          containerRef={containerRef}
+          onOp={onOp}
+          frameWidth={edl.width}
+          frameHeight={edl.height}
+        />
       </div>
     );
   }
@@ -395,6 +554,7 @@ export function OverlayCanvas({
     const anchorY = c.dirY === 1 ? box.y : box.y + box.height;
     const startFreeX = c.dirX === 1 ? box.x + box.width : box.x;
     const startFreeY = c.dirY === 1 ? box.y + box.height : box.y;
+    const startFontSize = isTextOverlay ? effectiveFontSize(singleOverlay!) : undefined;
     setDrag({
       kind: "resize",
       corner,
@@ -404,6 +564,8 @@ export function OverlayCanvas({
       anchorY,
       startFreeX,
       startFreeY,
+      startBox: isTextOverlay ? box : undefined,
+      startFontSize,
       aspectRatio: aspectLocked ? (naturalAspect ?? box.width / box.height) : null,
     });
   };

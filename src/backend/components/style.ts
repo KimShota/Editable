@@ -58,3 +58,68 @@ export const fitDidoneFontSize = (text: string, frameWidth: number, frameHeight?
   const heightCap = frameHeight !== undefined ? frameHeight * 0.16 : maxPx;
   return Math.min(maxPx, heightCap, Math.max(minPx, raw));
 };
+
+// ---------------------------------------------------------------------------
+// TextOverlay / Captions shared typography — framework-free (no remotion
+// import) so the editor's Inspector/OverlayCanvas can read the same
+// defaults a render uses, instead of hand-copied numbers that silently
+// drift the first time either side changes.
+// ---------------------------------------------------------------------------
+
+export type TextVariant = "hook" | "resolve" | "title" | "description" | "cta" | "kumarTitle";
+
+/** TextOverlay's per-variant house styles — the values an event falls back
+ *  to when it doesn't (or, once user-edited, no longer) set its own
+ *  fontSize/color/etc. See TextOverlay.tsx for how these compose with a
+ *  per-event override. */
+export const TEXT_VARIANTS: Record<
+  TextVariant,
+  { fontSize: number; fontWeight: number; color: string; fontFamily?: string; uppercase?: boolean }
+> = {
+  hook: { fontSize: 86, fontWeight: 800, color: "white" },
+  resolve: { fontSize: 120, fontWeight: 900, color: "white" },
+  title: { fontSize: 64, fontWeight: 800, color: "white" },
+  description: { fontSize: 40, fontWeight: 500, color: "rgba(255,255,255,0.92)" },
+  cta: { fontSize: 60, fontWeight: 800, color: "white" },
+  kumarTitle: { fontSize: 96, fontWeight: 900, color: KUMAR_RED, fontFamily: PLAYFAIR_DISPLAY_STACK, uppercase: true },
+};
+
+/** Shorthand keys a format (or the editor's Font picker) can pass as
+ *  "fontFamily" instead of hand-writing a full CSS stack. Anything not in
+ *  this map is used as a literal CSS font-family value verbatim (escape
+ *  hatch for a one-off stack no shorthand covers). */
+export const FONT_FAMILY_SHORTHANDS: Record<string, string> = {
+  system: SYSTEM_FONT,
+  poppins: POPPINS_STACK,
+  playfair: PLAYFAIR_DISPLAY_STACK,
+  archivo: ARCHIVO_BLACK_STACK,
+  montserrat: MONTSERRAT_ITALIC_STACK,
+};
+
+/** The Font picker's own option list — shorthand key + display label,
+ *  ordered the way they should appear in the dropdown. */
+export const FONT_OPTIONS: { value: string; label: string }[] = [
+  { value: "system", label: "System" },
+  { value: "poppins", label: "Poppins" },
+  { value: "playfair", label: "Playfair Display" },
+  { value: "archivo", label: "Archivo Black" },
+  { value: "montserrat", label: "Montserrat Italic" },
+];
+
+/** A lowerThird caption group's default per-word font size before any
+ *  user override — mirrors Captions.tsx's own LowerThirdLine formula
+ *  exactly (isKumar ? 64 : isOutro ? 46 : 52), duplicated here (not
+ *  measured from the DOM) since it's three fixed constants keyed only by
+ *  theme, not layout that could plausibly drift underneath a hand copy. */
+export const defaultLowerThirdFontSize = (theme: string | undefined): number =>
+  theme === "kumar" ? 64 : theme === "outroYellow" ? 46 : 52;
+
+/** Mirrors LowerThirdLine's own non-active-word color (isKumar ? KUMAR_RED
+ *  : isOutro ? yellow : white) — the base color the Inspector's swatch
+ *  should show before any per-group override. Doesn't attempt to mirror
+ *  the active-word keyword-highlight pop (yellow), which is a per-frame
+ *  animation state, not a static "current color" a picker can represent. */
+export const defaultLowerThirdColor = (theme: string | undefined): string =>
+  theme === "kumar" ? KUMAR_RED : theme === "outroYellow" ? "#FFD400" : "white";
+
+export const defaultLowerThirdFontWeight = (theme: string | undefined): number => (theme === "outroYellow" ? 700 : 800);

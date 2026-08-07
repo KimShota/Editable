@@ -277,6 +277,21 @@ export const SlotSchema = z.object({
   instructions: z.string(),
   /** Present = this slot is a generated insert, not user-filmed footage. */
   generation: GenerationSpecSchema.optional(),
+  /** A checked-in fallback (formatAssetsDir(formatId)-relative file) the
+   *  user can pick in the resources UI instead of filming/uploading their
+   *  own — the same "ships with a default" idea as Format.musicSlot's
+   *  fallback to the checked-in music bed, just offered as an explicit
+   *  choice at the slot level rather than a silent fallback, since unlike
+   *  music this is something the user visibly sees and may want to shoot
+   *  themselves instead. Bound the same way a Library drag-in is (copied
+   *  into the job's own assets/, see /api/jobs/[jobId]/assets), so nothing
+   *  downstream of intake needs to know the file didn't come from the user. */
+  defaultAsset: z
+    .object({
+      file: z.string(),
+      label: z.string().optional(),
+    })
+    .optional(),
 });
 
 /**
@@ -1191,6 +1206,23 @@ export const EdlCaptionGroupSchema = z.object({
    *  together — a half-positioned group has no meaningful placement. */
   x: z.number().optional(),
   y: z.number().optional(),
+  /**
+   * Per-group typography override, set by the editor's Inspector/
+   * OverlayCanvas (dragging a caption's own resize handles, or the style
+   * fields in its panel) — same idea as TextOverlay's per-event params,
+   * just as explicit schema fields instead of a free-form bag since a
+   * caption group has no `params`. Absent (the normal case) means
+   * "whatever this variant/theme renders automatically" (see
+   * Captions.tsx/KaraokeTitleLayer.tsx) — only a group the user actually
+   * restyled carries any of these.
+   */
+  fontSize: z.number().positive().optional(),
+  fontFamily: z.string().optional(),
+  color: z.string().optional(),
+  fontWeight: z.number().optional(),
+  italic: z.boolean().optional(),
+  underline: z.boolean().optional(),
+  textCase: z.enum(["upper", "lower", "none"]).optional(),
 });
 
 export const EdlTransitionSchema = z.object({
