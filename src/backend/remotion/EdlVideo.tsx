@@ -163,6 +163,14 @@ const Segment: React.FC<{
         src={src}
         muted={seg.muted}
         volume={() => seg.volume}
+        // A boosted volume (>1, i.e. +dB gain in the Inspector) is inaudible
+        // through the plain HTML <video> element the Player otherwise uses
+        // — its native `.volume` is hard-clamped to 1 by the browser, no
+        // matter what's assigned to it. Routing through a Web Audio
+        // GainNode (preview only; export mixes audio via ffmpeg separately
+        // and doesn't go through this DOM element at all) is what actually
+        // lets it exceed unity.
+        useWebAudioApi={previewMode}
         startFrom={Math.round(seg.srcInSec * fps)}
         endAt={Math.round(seg.srcOutSec * fps)}
         style={{ width: "100%", height: "100%", objectFit: "cover" }}
@@ -313,6 +321,8 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
           <Audio
             src={previewMode ? previewProxySrc(edl.jobId, v.src) : staticFile(v.src)}
             volume={() => v.volume}
+            // See Segment's own useWebAudioApi doc comment — same reason.
+            useWebAudioApi={previewMode}
             trimBefore={toFrames(v.srcInSec)}
           />
         </Sequence>
@@ -329,7 +339,13 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
           }
           name={`sfx:${s.id}`}
         >
-          <Audio src={staticFile(s.src)} volume={() => s.volume} trimBefore={toFrames(s.srcInSec)} />
+          <Audio
+            src={staticFile(s.src)}
+            volume={() => s.volume}
+            // See Segment's own useWebAudioApi doc comment — same reason.
+            useWebAudioApi={previewMode}
+            trimBefore={toFrames(s.srcInSec)}
+          />
         </Sequence>
       ))}
 
@@ -347,6 +363,8 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
           <Audio
             src={staticFile(m.src)}
             volume={musicVolumeAt(m, fps)}
+            // See Segment's own useWebAudioApi doc comment — same reason.
+            useWebAudioApi={previewMode}
             trimBefore={toFrames(m.srcInSec)}
             // The bed's own natural length may be shorter than
             // m.durationSec (see assemble.ts's buildMusic) — looping
