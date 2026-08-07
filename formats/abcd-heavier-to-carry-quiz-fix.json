@@ -1,0 +1,540 @@
+{
+  "id": "abcd-heavier-to-carry-quiz-fix",
+  "name": "What's [Heavier] to Carry? A/B/C/D Quiz",
+  "niche": "trending",
+  "description": "A talking-head poses a simple either/or question, then reveals answers A/B/C/D — each flagged by a big centered letter and a full-screen b-roll cut. Options A, B and D are mundane/literal objects that frame option C, a slow emotional metaphor delivered as voiceover over moody b-roll with captions; ends on a comedic option D and a 'follow for more' CTA.",
+  "fps": 30,
+  "width": 720,
+  "height": 1280,
+  "captionStyle": {
+    "component": "Captions",
+    "params": {
+      "position": "lowerThird"
+    }
+  },
+  "musicVolume": 0.5,
+  "sharedSlots": [],
+  "blocks": [
+    {
+      "id": "hook",
+      "title": "Hook Question",
+      "kind": "voice",
+      "videoSlot": "hook-clip",
+      "slots": [
+        {
+          "name": "hook-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Film yourself chest-up, casual and curious, asking the setup question straight to camera. Say a literal opener like 'What do you think is heavier to carry?' — keep it short and let the last word hang."
+        },
+        {
+          "name": "hook-text",
+          "mediaType": "text",
+          "required": true,
+          "instructions": "The big top-of-screen question, with the key word emphasized in CAPS, e.g. 'What do you think is HEAVIER to carry?'"
+        }
+      ],
+      "captions": false,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "hook-marker",
+          "kind": "literal",
+          "phrases": [
+            "What do you think",
+            "What do you think is",
+            "What's"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "hook-text-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "hook-text",
+              "variant": "hook"
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.03,
+            "y": 0.1,
+            "width": 0.94,
+            "height": 0.12
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "option-a",
+      "title": "Option A (literal)",
+      "kind": "voice",
+      "videoSlot": "a-clip",
+      "slots": [
+        {
+          "name": "a-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Film yourself saying the answer marker then the first light/literal option, e.g. 'A: a suitcase?' Say it playfully, like it's the obvious answer."
+        },
+        {
+          "name": "a-letter",
+          "mediaType": "text",
+          "required": false,
+          "instructions": "The big centered letter label. Leave as 'A:'."
+        },
+        {
+          "name": "a-image",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "A clean product-style photo of the light/literal object you name (e.g. a suitcase on a white background), fills the frame."
+        }
+      ],
+      "captions": false,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "a-marker",
+          "kind": "literal",
+          "phrases": [
+            "A.",
+            "A",
+            "Option A",
+            "Letter A"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "a-letter-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "a-letter",
+              "variant": "title",
+              "fontSize": 120
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "a-marker",
+            "edge": "start",
+            "offsetSec": 0
+          },
+          "durationSec": 0.3,
+          "states": []
+        },
+        {
+          "id": "a-image-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "a-image"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "a-marker",
+            "edge": "start",
+            "offsetSec": 0.3
+          },
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "option-b",
+      "title": "Option B (literal)",
+      "kind": "voice",
+      "videoSlot": "b-clip",
+      "slots": [
+        {
+          "name": "b-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Film yourself saying the second answer marker then a slightly heavier everyday object, e.g. 'B: a full laundry basket?'"
+        },
+        {
+          "name": "b-letter",
+          "mediaType": "text",
+          "required": false,
+          "instructions": "The big centered letter label. Leave as 'B:'."
+        },
+        {
+          "name": "b-image",
+          "mediaType": "image",
+          "required": true,
+          "instructions": "A photo of the everyday object you name (e.g. someone carrying an overflowing laundry basket), fills the frame."
+        }
+      ],
+      "captions": false,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "b-marker",
+          "kind": "literal",
+          "phrases": [
+            "B.",
+            "B",
+            "Option B",
+            "Letter B"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "b-letter-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "b-letter",
+              "variant": "title",
+              "fontSize": 120
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "b-marker",
+            "edge": "start",
+            "offsetSec": 0
+          },
+          "durationSec": 0.3,
+          "states": []
+        },
+        {
+          "id": "b-image-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "ImageOverlay",
+            "params": {
+              "imageSlot": "b-image"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "b-marker",
+            "edge": "start",
+            "offsetSec": 0.3
+          },
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "option-c",
+      "title": "Option C (emotional payload)",
+      "kind": "voice",
+      "videoSlot": "c-clip",
+      "slots": [
+        {
+          "name": "c-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Film the letter beat on camera ('C:') then deliver the real, emotional 'answer' as one slow continuous voiceover — the gut-punch metaphor that reframes the question. Speak calmly and low; this plays over moody b-roll."
+        },
+        {
+          "name": "c-letter",
+          "mediaType": "text",
+          "required": false,
+          "instructions": "The big centered letter label. Leave as 'C:'."
+        },
+        {
+          "name": "c-broll",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Moody, lonely b-roll to lay over the whole monologue — e.g. a lone figure in a dark alley or empty street at night. Slow, quiet, no people talking."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "c-marker",
+          "kind": "literal",
+          "phrases": [
+            "C.",
+            "C",
+            "Option C",
+            "Letter C"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "c-letter-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "c-letter",
+              "variant": "title",
+              "fontSize": 120
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "c-marker",
+            "edge": "start",
+            "offsetSec": 0
+          },
+          "durationSec": 0.47,
+          "states": []
+        },
+        {
+          "id": "c-broll-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "VideoOverlay",
+            "params": {
+              "videoSlot": "c-broll"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "c-marker",
+            "edge": "start",
+            "offsetSec": 0.47
+          },
+          "until": {
+            "kind": "fixed",
+            "anchor": "blockEnd",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "option-d",
+      "title": "Option D (comedic reset)",
+      "kind": "voice",
+      "videoSlot": "d-clip",
+      "slots": [
+        {
+          "name": "d-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Snap back to camera, lighter energy, and say the final answer marker with a funny/mundane option, e.g. 'Or D: all the groceries in one trip.'"
+        },
+        {
+          "name": "d-letter",
+          "mediaType": "text",
+          "required": false,
+          "instructions": "The big centered letter label. Leave as 'D:'."
+        },
+        {
+          "name": "d-broll",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "A short comedic b-roll clip of the mundane option (e.g. someone hauling all the grocery bags in one heroic trip), fills the frame."
+        }
+      ],
+      "captions": false,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "d-marker",
+          "kind": "literal",
+          "phrases": [
+            "D.",
+            "D",
+            "Or D",
+            "Option D",
+            "Letter D"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "d-letter-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "d-letter",
+              "variant": "title",
+              "fontSize": 120
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "d-marker",
+            "edge": "start",
+            "offsetSec": 0
+          },
+          "durationSec": 0.5,
+          "states": []
+        },
+        {
+          "id": "d-broll-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "VideoOverlay",
+            "params": {
+              "videoSlot": "d-broll"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "d-marker",
+            "edge": "start",
+            "offsetSec": 0.5
+          },
+          "until": {
+            "kind": "fixed",
+            "anchor": "blockEnd",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1
+          },
+          "states": []
+        }
+      ]
+    },
+    {
+      "id": "cta",
+      "title": "CTA",
+      "kind": "voice",
+      "videoSlot": "cta-clip",
+      "slots": [
+        {
+          "name": "cta-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Back on camera, warm and quick: say your follow line, e.g. 'follow for more.'"
+        },
+        {
+          "name": "cta-text",
+          "mediaType": "text",
+          "required": false,
+          "instructions": "Top-of-screen CTA text. Leave as 'Follow for more'."
+        }
+      ],
+      "captions": false,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "cta-marker",
+          "kind": "literal",
+          "phrases": [
+            "follow for more",
+            "follow",
+            "follow me"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "cta-text-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "cta-text",
+              "variant": "cta"
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.03,
+            "y": 0.09,
+            "width": 0.94,
+            "height": 0.1
+          },
+          "states": []
+        }
+      ]
+    }
+  ]
+}
