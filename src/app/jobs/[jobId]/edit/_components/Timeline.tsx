@@ -37,6 +37,13 @@ const MARQUEE_THRESHOLD_PX = 4;
  *  there, so a modest drag reorders instead of snapping back to the same
  *  slot. See commitVideoMove. */
 const FREE_MOVE_BIAS = 0.65;
+/** How long a discrete zoom step (the toolbar's buttons) takes to play
+ *  out. Long enough to read as the timeline expanding around a fixed
+ *  point rather than cutting to a new scale, short enough not to feel
+ *  sluggish — and since every frame of it re-renders the track rows (the
+ *  very thing TimelineTracks' memoization exists to avoid), it's
+ *  deliberately brief. */
+const ZOOM_ANIM_MS = 180;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
@@ -499,15 +506,80 @@ export function Timeline({
     }
   }, [pxPerSec]);
 
-  const zoomAround = (clientX: number, zoomFactor: number) => {
+  /**
+   * Zoom always holds ONE point of the timeline fixed on screen. Changing
+   * pxPerSec alone doesn't do that: scrollLeft is a pixel offset, so
+   * leaving it alone pins the viewport's LEFT EDGE and everything you were
+   * actually looking at slides out from under you as the scale grows.
+   * Every zoom path below therefore re-derives scrollLeft from the second
+   * it wants to keep put.
+   */
+  const zoomAnimation = useRef<number | null>(null);
+  const cancelZoomAnimation = () => {
+    if (zoomAnimation.current !== null) {
+      cancelAnimationFrame(zoomAnimation.current);
+      zoomAnimation.current = null;
+    }
+  };
+  useEffect(() => cancelZoomAnimation, []);
+
+  /** The scroll offset that puts `sec` at `anchorX` px from the scroll
+   *  container's left edge, at scale `px`. */
+  const scrollLeftFor = (sec: number, px: number, anchorX: number) =>
+    Math.max(0, sec * px + TRACK_LABEL_WIDTH - anchorX);
+
+  /** Which screen x a toolbar zoom should hold fixed. The playhead is the
+   *  point of interest whenever it's actually visible — that's the frame
+   *  being worked on — but pinning it when it's scrolled out of view (or
+   *  hidden under the sticky label gutter) would drag the viewport off to
+   *  somewhere the user isn't looking, so that case falls back to holding
+   *  the middle of whatever IS on screen. */
+  const toolbarAnchorX = () => {
+    const el = scrollRef.current;
+    if (!el) return 0;
+    const playheadX = currentTimeSec * pxPerSec + TRACK_LABEL_WIDTH - el.scrollLeft;
+    const visibleWidth = el.clientWidth;
+    return playheadX >= TRACK_LABEL_WIDTH && playheadX <= visibleWidth ? playheadX : visibleWidth / 2;
+  };
+
+  /** Anchored zoom, applied at once — for the continuous gestures (wheel
+   *  and slider drag), where the gesture itself is already supplying the
+   *  gradual change and a tween could only lag behind the input. */
+  const zoomImmediate = (next: number, anchorX: number) => {
     const el = scrollRef.current;
     if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const pointerX = clientX - rect.left;
-    const cursorSec = (pointerX + el.scrollLeft - TRACK_LABEL_WIDTH) / pxPerSec;
-    const next = clamp(pxPerSec * zoomFactor, minPxPerSec, maxPxPerSec);
-    pendingScrollLeft.current = Math.max(0, cursorSec * next + TRACK_LABEL_WIDTH - pointerX);
-    setPxPerSec(next);
+    cancelZoomAnimation();
+    const target = clamp(next, minPxPerSec, maxPxPerSec);
+    const anchorSec = (anchorX + el.scrollLeft - TRACK_LABEL_WIDTH) / pxPerSec;
+    pendingScrollLeft.current = scrollLeftFor(anchorSec, target, anchorX);
+    setPxPerSec(target);
+  };
+
+  /** Anchored zoom, eased over ZOOM_ANIM_MS — for the discrete steps (the
+   *  zoom buttons, fit), which otherwise land as a cut with nothing tying
+   *  the before and after together. The anchored second is captured once,
+   *  up front, so every frame re-projects from the same fixed point
+   *  instead of re-deriving it from a scrollLeft the browser may have
+   *  clamped at either end of the track. */
+  const zoomAnimated = (next: number, anchorX: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    cancelZoomAnimation();
+    const from = pxPerSec;
+    const to = clamp(next, minPxPerSec, maxPxPerSec);
+    if (Math.abs(to - from) < 0.01) return;
+    const anchorSec = (anchorX + el.scrollLeft - TRACK_LABEL_WIDTH) / from;
+    const startedAt = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - startedAt) / ZOOM_ANIM_MS);
+      // easeOutCubic — most of the travel up front, settling into the
+      // final scale rather than stopping dead on it.
+      const value = from + (to - from) * (1 - Math.pow(1 - t, 3));
+      pendingScrollLeft.current = scrollLeftFor(anchorSec, value, anchorX);
+      setPxPerSec(value);
+      zoomAnimation.current = t < 1 ? requestAnimationFrame(step) : null;
+    };
+    zoomAnimation.current = requestAnimationFrame(step);
   };
 
   // Ctrl/Cmd+scroll (trackpad pinch maps to this too) zooms, centered on
@@ -518,7 +590,9 @@ export function Timeline({
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
-      zoomAround(e.clientX, Math.exp(-e.deltaY * 0.0025));
+      // Anchored on the cursor: the pointer is over the timeline, so
+      // whatever's under it is by definition the point of interest.
+      zoomImmediate(pxPerSec * Math.exp(-e.deltaY * 0.0025), e.clientX - el.getBoundingClientRect().left);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -861,11 +935,15 @@ export function Timeline({
         </div>
 
         <div className="flex items-center gap-1.5">
-          <button onClick={() => setPxPerSec(minPxPerSec)} title="Fit whole video to view" className={toolbarBtnClass}>
+          <button
+            onClick={() => zoomAnimated(minPxPerSec, toolbarAnchorX())}
+            title="Fit whole video to view"
+            className={toolbarBtnClass}
+          >
             <FitIcon className="h-4 w-4" />
           </button>
           <button
-            onClick={() => setPxPerSec((v) => clamp(v / 1.4, minPxPerSec, maxPxPerSec))}
+            onClick={() => zoomAnimated(pxPerSec / 1.4, toolbarAnchorX())}
             title="Zoom out"
             className={toolbarBtnClass}
           >
@@ -877,12 +955,12 @@ export function Timeline({
             max={maxPxPerSec}
             step={(maxPxPerSec - minPxPerSec) / 200 || 1}
             value={pxPerSec}
-            onChange={(e) => setPxPerSec(Number(e.target.value))}
+            onChange={(e) => zoomImmediate(Number(e.target.value), toolbarAnchorX())}
             className="w-24 accent-[color:var(--ed-accent)]"
             title="Zoom"
           />
           <button
-            onClick={() => setPxPerSec((v) => clamp(v * 1.4, minPxPerSec, maxPxPerSec))}
+            onClick={() => zoomAnimated(pxPerSec * 1.4, toolbarAnchorX())}
             title="Zoom in"
             className={toolbarBtnClass}
           >
