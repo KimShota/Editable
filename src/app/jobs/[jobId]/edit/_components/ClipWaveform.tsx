@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
 import { computePeaks, getDecodedAudio } from "./waveform";
 
 const MIN_BARS = 6;
@@ -9,8 +9,9 @@ const PX_PER_BAR = 3;
 
 /**
  * A clip's own audio, drawn as bars inside its timeline box. `widthPx` sets
- * bar density (not layout — the canvas itself fills `className`'s box) so a
- * trimmed-down clip doesn't render bars finer than the eye can resolve.
+ * bar density (not layout — the canvas itself fills its box, sized by
+ * `className`/`style`) so a trimmed-down clip doesn't render bars finer
+ * than the eye can resolve.
  */
 export function ClipWaveform({
   src,
@@ -18,12 +19,14 @@ export function ClipWaveform({
   srcOutSec,
   widthPx,
   className,
+  style,
 }: {
   src: string;
   srcInSec: number;
   srcOutSec: number;
   widthPx: number;
   className?: string;
+  style?: CSSProperties;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [peaks, setPeaks] = useState<Float32Array | null>(null);
@@ -35,11 +38,11 @@ export function ClipWaveform({
     getDecodedAudio(src)
       .then((audio) => {
         if (cancelled || !audio) return;
-        const { channelData, sampleRate } = audio;
+        const { channelData, sampleRate, peakAbs } = audio;
         const startSample = Math.max(0, Math.floor(srcInSec * sampleRate));
         const endSample = Math.min(channelData.length, Math.ceil(srcOutSec * sampleRate));
         if (endSample <= startSample) return;
-        setPeaks(computePeaks(channelData.subarray(startSample, endSample), bars));
+        setPeaks(computePeaks(channelData.subarray(startSample, endSample), bars, peakAbs));
       })
       .catch(() => {});
     return () => {
@@ -73,7 +76,7 @@ export function ClipWaveform({
   if (!peaks) return null;
 
   return (
-    <div className={className}>
+    <div className={className} style={style}>
       <canvas ref={canvasRef} className="block h-full w-full" />
     </div>
   );

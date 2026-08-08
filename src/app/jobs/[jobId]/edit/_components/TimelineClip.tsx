@@ -13,6 +13,12 @@ import { ClipWaveform } from "./ClipWaveform";
  */
 
 const CLICK_THRESHOLD_PX = 3;
+/** Waveform's own inset from the clip box's edges — matches the old
+ *  `inset-x-1.5`/`bottom-1` Tailwind classes (1.5 * 4px, 1 * 4px), now
+ *  computed inline since a live trim drag needs to offset the left inset
+ *  by hand (see the waveform's own doc comment below). */
+const WAVEFORM_PAD_PX = 6;
+const WAVEFORM_BOTTOM_PX = 4;
 
 export function TimelineClip({
   left,
@@ -141,12 +147,28 @@ export function TimelineClip({
         </>
       )}
       {waveformSrc && (
+        // Anchored to the clip's own COMMITTED geometry (`width`, fixed),
+        // not the live previewWidth the box itself is resizing to — so a
+        // trim drag reads as the box's edge sliding over a fixed waveform
+        // and clipping it (via the box's own overflow-hidden), the same way
+        // an NLE does it, rather than the whole waveform rescaling to fit
+        // the shrinking box. An "in" drag also has to shift the waveform's
+        // own left inset by -dragPx to hold it in place while the box
+        // (positioned at previewLeft = left + dragPx) slides out from
+        // under it; an "out" drag needs no such offset since previewLeft
+        // never moves.
         <ClipWaveform
           src={waveformSrc}
           srcInSec={waveformInSec ?? 0}
           srcOutSec={waveformOutSec ?? 0}
           widthPx={width}
-          className="absolute inset-x-1.5 bottom-1 h-[45%]"
+          style={{
+            position: "absolute",
+            left: WAVEFORM_PAD_PX + (trimEdge === "in" ? -dragPx : 0),
+            width: Math.max(width - WAVEFORM_PAD_PX * 2, 0),
+            bottom: WAVEFORM_BOTTOM_PX,
+            height: "45%",
+          }}
         />
       )}
       <p className="relative truncate text-[11px] leading-tight font-medium text-white">{label}</p>

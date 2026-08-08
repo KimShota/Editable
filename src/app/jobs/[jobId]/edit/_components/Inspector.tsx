@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Edl, EdlCaptionGroup } from "@backend/pipeline/types";
 import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import { Selection } from "./selection";
@@ -38,6 +38,114 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
  *  own recorded level. Stores/reads the underlying EDL field as linear gain
  *  (see EdlVideoSegmentSchema.volume's doc comment); only this control's
  *  own display and slider math are in dB. */
+/** Where 0dB (unity gain) falls along the MIN_DB..MAX_DB track, as a percent
+ *  from the left — used both to draw a tick mark and to anchor the magnetic
+ *  stop below. */
+const ZERO_DB_PERCENT = ((0 - MIN_DB) / (MAX_DB - MIN_DB)) * 100;
+
+/** Pixel radius (not dB) around the 0dB position that a drag gets pulled
+ *  into. Pixel-based rather than dB-based so the stop feels the same size
+ *  under the pointer no matter how wide the track renders. */
+const ZERO_DB_MAGNET_PX = 6;
+
+const DB_STEP = 0.5;
+
+/** A div/pointer-events slider rather than `<input type="range">`, for two
+ *  things a native range can't do: (1) a real magnetic stop at 0dB — setting
+ *  `.value` mid-drag fights the browser's own pointer tracking instead of
+ *  resisting it, so it never felt like a stop, only a jump; (2) the label
+ *  can update every pointermove instead of waiting on the caller's onCommit
+ *  round trip (VolumeField below commits only on release), so the number
+ *  visibly keeps up with a fast drag instead of catching up after. */
+const DbSlider = ({
+  db,
+  disabled,
+  onLiveChange,
+  onCommit,
+}: {
+  db: number;
+  disabled?: boolean;
+  onLiveChange: (db: number) => void;
+  onCommit: (db: number) => void;
+}) => {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+
+  const dbFromClientX = (clientX: number) => {
+    const rect = trackRef.current!.getBoundingClientRect();
+    const zeroX = rect.left + (ZERO_DB_PERCENT / 100) * rect.width;
+    if (Math.abs(clientX - zeroX) < ZERO_DB_MAGNET_PX) return 0;
+    const frac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const raw = MIN_DB + frac * (MAX_DB - MIN_DB);
+    return Math.round(raw / DB_STEP) * DB_STEP;
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (disabled) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    draggingRef.current = true;
+    onLiveChange(dbFromClientX(e.clientX));
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!draggingRef.current) return;
+    onLiveChange(dbFromClientX(e.clientX));
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    onCommit(dbFromClientX(e.clientX));
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (disabled) return;
+    let next: number | null = null;
+    if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = Math.max(MIN_DB, db - DB_STEP);
+    else if (e.key === "ArrowRight" || e.key === "ArrowUp") next = Math.min(MAX_DB, db + DB_STEP);
+    else if (e.key === "Home") next = MIN_DB;
+    else if (e.key === "End") next = MAX_DB;
+    if (next === null) return;
+    e.preventDefault();
+    onLiveChange(next);
+    onCommit(next);
+  };
+
+  const pct = ((db - MIN_DB) / (MAX_DB - MIN_DB)) * 100;
+
+  return (
+    <div
+      ref={trackRef}
+      role="slider"
+      aria-orientation="horizontal"
+      aria-valuemin={MIN_DB}
+      aria-valuemax={MAX_DB}
+      aria-valuenow={db}
+      aria-disabled={disabled}
+      tabIndex={disabled ? -1 : 0}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onKeyDown={handleKeyDown}
+      className={`relative h-4 w-full touch-none select-none ${disabled ? "pointer-events-none opacity-40" : "cursor-pointer"}`}
+    >
+      <div className="absolute top-1/2 h-1.5 w-full -translate-y-1/2 rounded-full bg-[color:var(--ed-border-strong)]" />
+      <div
+        className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[color:var(--ed-accent)]"
+        style={{ width: `${pct}%` }}
+      />
+      <div
+        className="pointer-events-none absolute top-1/2 h-2.5 w-px -translate-x-1/2 -translate-y-1/2 bg-[color:var(--ed-ink-dim)]"
+        style={{ left: `${ZERO_DB_PERCENT}%` }}
+      />
+      <div
+        className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[color:var(--ed-accent)] shadow"
+        style={{ left: `${pct}%` }}
+      />
+    </div>
+  );
+};
+
 const VolumeField = ({
   volume,
   disabled,
@@ -46,20 +154,26 @@ const VolumeField = ({
   volume: number;
   disabled?: boolean;
   onCommit: (linearVolume: number) => void;
-}) => (
-  <Field label={`Volume — ${formatDb(linearToDb(volume))} dB`}>
-    <input
-      type="range"
-      min={MIN_DB}
-      max={MAX_DB}
-      step={0.5}
-      defaultValue={linearToDb(volume)}
-      disabled={disabled}
-      onChange={(e) => onCommit(dbToLinear(Number(e.target.value)))}
-      className="w-full accent-[color:var(--ed-accent)] disabled:opacity-40"
-    />
-  </Field>
-);
+}) => {
+  const [liveDb, setLiveDb] = useState(() => linearToDb(volume));
+
+  // Keeps the slider in sync with external changes (undo/redo, another
+  // client) — safe to always run since we now only call onCommit on
+  // release/keypress, never mid-drag, so `volume` can't change out from
+  // under an in-progress drag.
+  useEffect(() => setLiveDb(linearToDb(volume)), [volume]);
+
+  return (
+    <Field label={`Volume — ${formatDb(liveDb)} dB`}>
+      <DbSlider
+        db={liveDb}
+        disabled={disabled}
+        onLiveChange={setLiveDb}
+        onCommit={(nextDb) => onCommit(dbToLinear(nextDb))}
+      />
+    </Field>
+  );
+};
 
 const inputClass =
   "w-full rounded-lg border border-[color:var(--ed-border-strong)] bg-[color:var(--ed-raised)] px-2.5 py-1.5 text-sm text-[color:var(--ed-ink)] outline-none focus:border-[color:var(--ed-accent)]";

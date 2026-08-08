@@ -1,4 +1,13 @@
-export type DecodedAudio = { channelData: Float32Array; sampleRate: number };
+export type DecodedAudio = {
+  channelData: Float32Array;
+  sampleRate: number;
+  /** Loudest sample across the WHOLE decoded file, not just whatever slice
+   *  is currently visible — every clip's bars are normalized against this
+   *  one shared value (see computePeaks) so a trim doesn't restretch the
+   *  remaining waveform to fill the height, which would read as "the sound
+   *  changed" rather than "the clip got shorter." */
+  peakAbs: number;
+};
 
 const cache = new Map<string, Promise<DecodedAudio | null>>();
 
@@ -11,7 +20,13 @@ async function decode(url: string): Promise<DecodedAudio | null> {
       window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const ctx = new AudioCtx();
     const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-    const decoded = { channelData: audioBuffer.getChannelData(0), sampleRate: audioBuffer.sampleRate };
+    const channelData = audioBuffer.getChannelData(0);
+    let peakAbs = 0;
+    for (let i = 0; i < channelData.length; i++) {
+      const abs = Math.abs(channelData[i]);
+      if (abs > peakAbs) peakAbs = abs;
+    }
+    const decoded = { channelData, sampleRate: audioBuffer.sampleRate, peakAbs };
     ctx.close();
     return decoded;
   } catch {
@@ -34,13 +49,14 @@ export function getDecodedAudio(url: string): Promise<DecodedAudio | null> {
   return entry;
 }
 
-/** Downsamples a slice of decoded audio into per-bin peak amplitudes (0..1,
- *  normalized to the loudest bin in the slice) — one bar per bin rather than
- *  one per sample. */
-export function computePeaks(channelData: Float32Array, bins: number): Float32Array {
+/** Downsamples a slice of decoded audio into per-bin peak amplitudes (0..1),
+ *  one bar per bin rather than one per sample. `normalizeTo` is the WHOLE
+ *  file's own peak (DecodedAudio.peakAbs), not this slice's — so trimming a
+ *  clip shows fewer bars of the same shape/height instead of the remaining
+ *  bars rescaling to fill the box. */
+export function computePeaks(channelData: Float32Array, bins: number, normalizeTo: number): Float32Array {
   const samplesPerBin = Math.max(1, Math.floor(channelData.length / bins));
   const peaks = new Float32Array(bins);
-  let max = 0;
   for (let i = 0; i < bins; i++) {
     const start = i * samplesPerBin;
     const end = i === bins - 1 ? channelData.length : start + samplesPerBin;
@@ -49,11 +65,7 @@ export function computePeaks(channelData: Float32Array, bins: number): Float32Ar
       const abs = Math.abs(channelData[j]);
       if (abs > peak) peak = abs;
     }
-    peaks[i] = peak;
-    if (peak > max) max = peak;
-  }
-  if (max > 0) {
-    for (let i = 0; i < bins; i++) peaks[i] /= max;
+    peaks[i] = normalizeTo > 0 ? peak / normalizeTo : 0;
   }
   return peaks;
 }
