@@ -8,6 +8,7 @@ import { assignLanes, laneCount } from "./lanes";
 import { isSelected, Selection, SelectionTrack, toggleSelect } from "./selection";
 import { buildMajorLadder, chooseTickScale, formatTick } from "./tickScale";
 import { FitIcon, MagnetIcon, ScissorsIcon, TrashIcon, ZoomInIcon, ZoomOutIcon } from "./Icons";
+import { TEXT_OVERLAY_DRAG_TYPE, buildAddTextOverlayOp } from "./textOverlay";
 
 /** One hue family (indigo → violet → purple) so tracks read as a system;
  *  transitions get the one intentional exception (amber) since they're a
@@ -58,6 +59,12 @@ type ClipView = {
   waveformSrc?: string;
   waveformInSec?: number;
   waveformOutSec?: number;
+  /** Which EDL array this clip actually lives in — only set where a row
+   *  mixes clips from more than one track (the merged Audio row: sfx and
+   *  music clips share one lane visually but are still two different
+   *  arrays underneath). Every other row's clips all share the row's own
+   *  fixed `track` prop, so this stays unset there. */
+  track?: "sfx" | "music";
 };
 
 type FloatTrack = "overlay" | "sfx" | "captions" | "music";
@@ -85,8 +92,13 @@ function TrackRow({
   clips: ClipView[];
   colorClass: string;
   handlers: {
-    move?: (id: string, deltaSec: number) => void;
-    trim?: (id: string, edge: "in" | "out", deltaSec: number) => void;
+    // The track argument is only meaningful for a row that mixes clips
+    // from more than one EDL array (the merged Audio row) — it's each
+    // clip's own resolved track (c.track ?? the row's fixed `track` prop),
+    // so a single-track row's handlers can just ignore the third arg,
+    // same as they always have.
+    move?: (id: string, deltaSec: number, track: SelectionTrack) => void;
+    trim?: (id: string, edge: "in" | "out", deltaSec: number, track: SelectionTrack) => void;
   };
   track: SelectionTrack;
   selection: Selection;
@@ -142,25 +154,31 @@ function TrackRow({
       if (!additive) onSelect(null);
       return;
     }
-    const hitIds = clips
-      .filter((c) => {
-        const left = c.tlInSec * pxPerSec;
-        const width = (c.tlOutSec - c.tlInSec) * pxPerSec;
-        const top = (lanes.get(c.id) ?? 0) * LANE_HEIGHT;
-        return left < x1 && left + width > x0 && top < y1 && top + LANE_HEIGHT > y0;
-      })
-      .map((c) => c.id);
+    const hitClips = clips.filter((c) => {
+      const left = c.tlInSec * pxPerSec;
+      const width = (c.tlOutSec - c.tlInSec) * pxPerSec;
+      const top = (lanes.get(c.id) ?? 0) * LANE_HEIGHT;
+      return left < x1 && left + width > x0 && top < y1 && top + LANE_HEIGHT > y0;
+    });
 
-    if (hitIds.length === 0) {
+    if (hitClips.length === 0) {
       if (!additive) onSelect(null);
       return;
     }
-    if (additive && selection?.track === track) {
+    // A row that mixes tracks (the merged Audio row) can sweep over both
+    // sfx and music clips at once — a Selection only ever spans one real
+    // track (see selection.ts), so a mixed sweep keeps just whichever
+    // track the FIRST swept clip belongs to, same as clicking it alone
+    // would. Every other row's clips all share one track already, so this
+    // is a no-op there.
+    const primaryTrack = hitClips[0].track ?? track;
+    const hitIds = hitClips.filter((c) => (c.track ?? track) === primaryTrack).map((c) => c.id);
+    if (additive && selection?.track === primaryTrack) {
       const merged = new Set(selection.ids);
       for (const id of hitIds) merged.add(id);
-      onSelect({ track, ids: Array.from(merged) });
+      onSelect({ track: primaryTrack, ids: Array.from(merged) });
     } else {
-      onSelect({ track, ids: hitIds });
+      onSelect({ track: primaryTrack, ids: hitIds });
     }
   };
 
@@ -177,7 +195,10 @@ function TrackRow({
         onPointerMove={onMarqueeMove}
         onPointerUp={endMarquee}
       >
-        {clips.map((c) => (
+        {clips.map((c) => {
+          const clipTrack = c.track ?? track;
+          const clipColorClass = c.track === "music" ? TRACK_COLOR.music : c.track === "sfx" ? TRACK_COLOR.sfx : colorClass;
+          return (
           <TimelineClip
             key={c.id}
             left={c.tlInSec * pxPerSec}
@@ -190,8 +211,8 @@ function TrackRow({
             waveformSrc={c.waveformSrc}
             waveformInSec={c.waveformInSec}
             waveformOutSec={c.waveformOutSec}
-            colorClass={colorClass}
-            selected={isSelected(selection, track, c.id)}
+            colorClass={clipColorClass}
+            selected={isSelected(selection, clipTrack, c.id)}
             locked={locked}
             trimEdges={trimEdges}
             pxPerSec={pxPerSec}
@@ -202,9 +223,12 @@ function TrackRow({
               // pointerdown would collapse to just this one clip before it
               // could ever move the group together.
               const inExistingGroup =
-                !additive && selection?.track === track && selection.ids.length > 1 && selection.ids.includes(c.id);
+                !additive &&
+                selection?.track === clipTrack &&
+                selection.ids.length > 1 &&
+                selection.ids.includes(c.id);
               if (inExistingGroup) return;
-              onSelect(toggleSelect(selection, track, c.id, additive));
+              onSelect(toggleSelect(selection, clipTrack, c.id, additive));
             }}
             onCommitMove={
               handlers.move
@@ -214,20 +238,21 @@ function TrackRow({
                     // atomic edit — otherwise it's just that one clip.
                     if (
                       onGroupMove &&
-                      selection?.track === track &&
+                      selection?.track === clipTrack &&
                       selection.ids.length > 1 &&
                       selection.ids.includes(c.id)
                     ) {
-                      onGroupMove(track as FloatTrack, selection.ids, d);
+                      onGroupMove(clipTrack as FloatTrack, selection.ids, d);
                     } else {
-                      handlers.move!(c.id, d);
+                      handlers.move!(c.id, d, clipTrack);
                     }
                   }
                 : undefined
             }
-            onCommitTrim={handlers.trim ? (edge, d) => handlers.trim!(c.id, edge, d) : undefined}
+            onCommitTrim={handlers.trim ? (edge, d) => handlers.trim!(c.id, edge, d, clipTrack) : undefined}
           />
-        ))}
+          );
+        })}
         {marquee &&
           (() => {
             const x0 = Math.min(marquee.startX, marquee.curX);
@@ -248,7 +273,7 @@ function TrackRow({
 
 /**
  * Everything on the timeline that does NOT depend on the playhead position:
- * the ruler and all six track rows (~126 clips at a typical job's size).
+ * the ruler and all the track rows (~126 clips at a typical job's size).
  * Split out and memoized so playback — which only moves the playhead, 30
  * times a second — doesn't re-render this whole subtree on every frame.
  */
@@ -260,10 +285,9 @@ const TimelineTracks = memo(function TimelineTracks({
   fps,
   videoClips,
   overlayClips,
-  sfxClips,
+  audioClips,
   transitionClips,
   captionClips,
-  musicClips,
   selection,
   onSelect,
   onRulerPointerDown,
@@ -283,10 +307,9 @@ const TimelineTracks = memo(function TimelineTracks({
   fps: number;
   videoClips: ClipView[];
   overlayClips: ClipView[];
-  sfxClips: ClipView[];
+  audioClips: ClipView[];
   transitionClips: ClipView[];
   captionClips: ClipView[];
-  musicClips: ClipView[];
   selection: Selection;
   onSelect: (s: Selection) => void;
   onRulerPointerDown: (e: React.PointerEvent) => void;
@@ -373,20 +396,29 @@ const TimelineTracks = memo(function TimelineTracks({
         onGroupMove={commitGroupMove}
         pxPerSec={pxPerSec}
       />
-      <TrackRow
-        label="SFX"
-        clips={sfxClips}
-        colorClass={TRACK_COLOR.sfx}
-        handlers={{
-          move: (id, d) => commitFloatMove("sfx", id, d),
-          trim: (id, edge, d) => commitFloatTrim("sfx", id, edge, d),
-        }}
-        track="sfx"
-        selection={selection}
-        onSelect={onSelect}
-        onGroupMove={commitGroupMove}
-        pxPerSec={pxPerSec}
-      />
+      {/* Sound effects and music beds are both just audio clips — CapCut
+          treats them as independent layers on one audio timeline rather
+          than splitting them by file type — so they share this one lane.
+          Each clip still remembers its own underlying track (sfx vs
+          music, tagged in `audioClips` below) purely so drag/trim/delete
+          and the Inspector's per-track panel keep routing correctly; nothing
+          about the EDL itself changed, only how it's drawn. */}
+      {audioClips.length > 0 && (
+        <TrackRow
+          label="Audio"
+          clips={audioClips}
+          colorClass={TRACK_COLOR.music}
+          handlers={{
+            move: (id, d, track) => commitFloatMove(track as FloatTrack, id, d),
+            trim: (id, edge, d, track) => commitFloatTrim(track as FloatTrack, id, edge, d),
+          }}
+          track="sfx"
+          selection={selection}
+          onSelect={onSelect}
+          onGroupMove={commitGroupMove}
+          pxPerSec={pxPerSec}
+        />
+      )}
       {captionClips.length > 0 && (
         <TrackRow
           label="Captions"
@@ -397,22 +429,6 @@ const TimelineTracks = memo(function TimelineTracks({
             trim: (id, edge, d) => commitFloatTrim("captions", id, edge, d),
           }}
           track="captions"
-          selection={selection}
-          onSelect={onSelect}
-          onGroupMove={commitGroupMove}
-          pxPerSec={pxPerSec}
-        />
-      )}
-      {musicClips.length > 0 && (
-        <TrackRow
-          label="Music"
-          clips={musicClips}
-          colorClass={TRACK_COLOR.music}
-          handlers={{
-            move: (id, d) => commitFloatMove("music", id, d),
-            trim: (id, edge, d) => commitFloatTrim("music", id, edge, d),
-          }}
-          track="music"
           selection={selection}
           onSelect={onSelect}
           onGroupMove={commitGroupMove}
@@ -558,6 +574,7 @@ export function Timeline({
         tlInSec: s.tlInSec,
         tlOutSec: s.tlInSec + (s.durationSec ?? edl.durationSec - s.tlInSec),
         label: s.src.split("/").pop() ?? s.src,
+        sublabel: "sfx",
       })),
     [edl.sfx, edl.durationSec],
   );
@@ -591,8 +608,20 @@ export function Timeline({
         tlInSec: m.tlInSec,
         tlOutSec: m.tlInSec + (m.durationSec ?? edl.durationSec - m.tlInSec),
         label: m.src.split("/").pop() ?? "music",
+        sublabel: "music",
       })),
     [edl.music, edl.durationSec],
+  );
+
+  // Sound effects and music beds drawn as one lane (see TimelineTracks'
+  // own Audio row) — each tagged with its real underlying track so
+  // selection/drag/trim still route to the correct EDL array per clip.
+  const audioClips: ClipView[] = useMemo(
+    () => [
+      ...musicClips.map((c) => ({ ...c, track: "music" as const })),
+      ...sfxClips.map((c) => ({ ...c, track: "sfx" as const })),
+    ],
+    [musicClips, sfxClips],
   );
 
   const contentWidth = Math.max(600, (edl.durationSec + 3) * pxPerSec);
@@ -862,7 +891,23 @@ export function Timeline({
         </div>
       </div>
 
-      <div ref={scrollRef} className="relative flex-1 overflow-x-auto overflow-y-auto" onClick={() => onSelect(null)}>
+      <div
+        ref={scrollRef}
+        className="relative flex-1 overflow-x-auto overflow-y-auto"
+        onClick={() => onSelect(null)}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes(TEXT_OVERLAY_DRAG_TYPE)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(e) => {
+          if (!e.dataTransfer.types.includes(TEXT_OVERLAY_DRAG_TYPE)) return;
+          e.preventDefault();
+          const rect = e.currentTarget.getBoundingClientRect();
+          const x = e.clientX - rect.left + e.currentTarget.scrollLeft - TRACK_LABEL_WIDTH;
+          onOp(buildAddTextOverlayOp(Math.max(0, x / pxPerSec)));
+        }}
+      >
         <div style={{ width: contentWidth }} className="relative">
           <TimelineTracks
             pxPerSec={pxPerSec}
@@ -872,10 +917,9 @@ export function Timeline({
             fps={edl.fps}
             videoClips={videoClips}
             overlayClips={overlayClips}
-            sfxClips={sfxClips}
+            audioClips={audioClips}
             transitionClips={transitionClips}
             captionClips={captionClips}
-            musicClips={musicClips}
             selection={selection}
             onSelect={onSelect}
             onRulerPointerDown={onRulerPointerDown}

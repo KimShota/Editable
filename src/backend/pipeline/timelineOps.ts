@@ -148,13 +148,18 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
     tlInSec: z.number().min(0),
     durationSec: z.number().positive().optional(),
   }),
-  /** Wire a newly-uploaded image/video file into the timeline as an
-   *  overlay. Box (x/y/width/height) is precomputed by the caller from the
-   *  media's own aspect ratio, same as assemble.ts's defaultOverlayBox. */
+  /** Wire a newly-uploaded image/video file — or a brand-new TextOverlay,
+   *  which has no file at all — into the timeline as an overlay. Box
+   *  (x/y/width/height) is precomputed by the caller: from the media's own
+   *  aspect ratio for Image/VideoOverlay (same as assemble.ts's own
+   *  defaultOverlayBox), or from wherever the editor dropped it for a
+   *  TextOverlay. `src` is absent for TextOverlay; `text` is ignored for
+   *  the other two. */
   z.object({
     type: z.literal("addOverlay"),
-    src: z.string(),
-    component: z.enum(["ImageOverlay", "VideoOverlay"]),
+    src: z.string().optional(),
+    component: z.enum(["ImageOverlay", "VideoOverlay", "TextOverlay"]),
+    text: z.string().optional(),
     tlInSec: z.number().min(0),
     tlOutSec: z.number().positive(),
     x: z.number().default(0),
@@ -738,7 +743,7 @@ const applyAddOverlay = (edl: Edl, op: Extract<TimelineOp, { type: "addOverlay" 
   edl.overlays.push({
     id: newClipId("overlay"),
     component: op.component,
-    params: { src: op.src },
+    params: op.component === "TextOverlay" ? { text: op.text ?? "Text" } : { src: op.src },
     tlInSec: op.tlInSec,
     tlOutSec: op.tlOutSec,
     x: op.x,

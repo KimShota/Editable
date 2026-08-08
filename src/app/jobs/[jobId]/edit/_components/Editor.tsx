@@ -14,6 +14,7 @@ import { RenderPanel } from "./RenderPanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { MediaKind, Selection } from "./selection";
 import { formatTimecode } from "./timeFormat";
+import { TEXT_OVERLAY_DRAG_TYPE, buildAddTextOverlayOp } from "./textOverlay";
 import {
   ArrowLeftIcon,
   CheckIcon,
@@ -393,13 +394,36 @@ export function Editor({
       <div className="flex min-h-0 flex-1 flex-col p-2.5">
         <div className="flex min-h-0 flex-1">
           <div style={{ width: layout.mediaPanelWidth }} className={`shrink-0 ${panelClass}`}>
-            <MediaPanel edl={edl} onJumpTo={jumpTo} onUpload={uploadMedia} currentTimeSec={currentTimeSec} pending={pending} />
+            <MediaPanel
+              edl={edl}
+              onJumpTo={jumpTo}
+              onUpload={uploadMedia}
+              onOp={submitOp}
+              currentTimeSec={currentTimeSec}
+              pending={pending}
+            />
           </div>
           <ResizeHandle orientation="vertical" onResize={resizeMediaPanel} />
 
           <div className={`flex min-w-0 flex-1 flex-col ${panelClass}`}>
             <div className="flex flex-1 items-center justify-center overflow-hidden bg-black p-6">
-              <div className="relative h-full max-h-full" style={{ aspectRatio: `${edl.width} / ${edl.height}` }}>
+              <div
+                className="relative h-full max-h-full"
+                style={{ aspectRatio: `${edl.width} / ${edl.height}` }}
+                onDragOver={(e) => {
+                  if (!e.dataTransfer.types.includes(TEXT_OVERLAY_DRAG_TYPE)) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "copy";
+                }}
+                onDrop={(e) => {
+                  if (!e.dataTransfer.types.includes(TEXT_OVERLAY_DRAG_TYPE)) return;
+                  e.preventDefault();
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const x = (e.clientX - rect.left) / rect.width;
+                  const y = (e.clientY - rect.top) / rect.height;
+                  submitOp(buildAddTextOverlayOp(currentTimeSec, { x, y }));
+                }}
+              >
                 <Player
                   ref={playerRef}
                   component={EdlVideo}
