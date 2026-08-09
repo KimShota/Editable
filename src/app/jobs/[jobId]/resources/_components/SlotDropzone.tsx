@@ -262,7 +262,7 @@ export function SlotDropzone({
                     : "Drop 1 or more clear reference photos, or click"
                   : takeFiles?.length
                     ? "Drop another take, or click"
-                    : "Drop 1 or more takes, drag from Library, or click — filmed the marker line and the explanation separately? Drop both, they'll be auto-ordered and stitched together"}
+                    : "Drop 1 or more clips, drag from Library, or click"}
             </p>
           </div>
         </div>

@@ -76,9 +76,9 @@ const withImplicitSpeakingTake = (raw: unknown): unknown => {
       name: IMPLICIT_SPEAKING_TAKE_SLOT_NAME,
       mediaType: "video",
       required: false,
-      label: "Speaking take (all lines in one clip)",
+      label: "All your lines, one clip",
       instructions:
-        "Optional: film all your lines in one continuous take, in order, with a brief pause between each — we'll automatically find where each one starts (fine-tune it afterward). Prefer filming each part separately? Skip this and fill in each block's own clip below instead — you can even mix the two, filming most of it as one take and re-filming a line or two on its own.",
+        "Film everything in one go with a short pause between lines — we'll find where each one starts automatically. Filming separately instead? Skip this and use each block's own clip below.",
     },
   };
 };

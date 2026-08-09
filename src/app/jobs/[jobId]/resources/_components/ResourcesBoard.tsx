@@ -319,16 +319,6 @@ export function ResourcesBoard({
                       : "optional — film it all in one take instead"}
                   </Pill>
                 </div>
-                {!takeRequired && (
-                  <p className="mb-4 text-[12px] leading-snug text-[color:var(--ink-dim)]">
-                    Filmed each line separately? Skip this and fill in each block&apos;s own clip below
-                    instead. Throw in one whole take here and we&apos;ll automatically find where each
-                    line starts — you can even mix the two, using this for most of it and re-filming a
-                    line or two on its own below. Didn&apos;t film it in one go? Drop in several clips —
-                    even a clip that only covers one word — and we&apos;ll figure out what&apos;s said in
-                    each, put them in order, and stitch them into one continuous take.
-                  </p>
-                )}
                 <div className="max-w-md">
                   <SlotDropzone
                     jobId={jobId}
