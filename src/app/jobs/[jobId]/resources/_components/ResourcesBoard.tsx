@@ -7,7 +7,7 @@ import type { HookFeedbackResult, ScriptSuggestion } from "@backend/content/type
 import { Button, Card, Pill } from "../../../../_components/ui";
 import { LibraryPanel } from "../../../../_components/library/LibraryPanel";
 import { Binding, SlotDropzone, bindText } from "./SlotDropzone";
-import { ScriptPanel } from "./ScriptPanel";
+// import { ScriptPanel } from "./ScriptPanel"; // hidden for now
 import { ScriptLines } from "./ScriptLines";
 import { IdentityPhotoGrid } from "./IdentityPhotoGrid";
 import { SplitLines } from "./SplitLines";
@@ -259,7 +259,8 @@ export function ResourcesBoard({
 
         {step === 1 && (
           <>
-            <ScriptPanel jobId={jobId} script={script} onScriptUpdated={setScript} />
+            {/* Script suggestions — hidden for now */}
+            {/* <ScriptPanel jobId={jobId} script={script} onScriptUpdated={setScript} /> */}
             {hookBlock && (
               <ScriptLines jobId={jobId} format={format} script={script} onScriptUpdated={setScript} />
             )}
