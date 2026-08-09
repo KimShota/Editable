@@ -275,6 +275,14 @@ export const SlotSchema = z.object({
   required: z.boolean().default(true),
   /** Filming / sourcing instructions shown to the user. */
   instructions: z.string(),
+  /** Human-friendly field name shown in the resources UI in place of the
+   *  raw slot name (e.g. "Painpoint — hook text" instead of "hook_text").
+   *  Falls back to a prettified `name` when omitted — see slotLabel(). */
+  label: z.string().optional(),
+  /** A real example value for THIS slot, shown as the textarea placeholder
+   *  and caption in the resources UI — replaces the old one-size-fits-all
+   *  hardcoded example that used to repeat under every text field. */
+  example: z.string().optional(),
   /** Present = this slot is a generated insert, not user-filmed footage. */
   generation: GenerationSpecSchema.optional(),
   /** A checked-in fallback (formatAssetsDir(formatId)-relative file) the

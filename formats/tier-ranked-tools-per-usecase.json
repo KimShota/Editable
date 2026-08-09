@@ -18,6 +18,7 @@
       "name": "cardPop",
       "mediaType": "audio",
       "required": false,
+      "label": "Card reveal sound",
       "instructions": "A short, clean 'pop'/'whoosh' UI sound that fires each time a ranking card reveals its logo. Keep it snappy (<250ms) so three can fire in quick succession."
     }
   ],
@@ -32,25 +33,30 @@
           "name": "clip1",
           "mediaType": "video",
           "required": true,
-          "instructions": "Talking-head, centered, looking at camera with empty space above your head. Open by naming the first use case as a question, e.g. 'For research?', then rank three options worst-to-best: 'this is bad, this is okay, this one's amazing.' Point up-left, up-center, up-right in time with each so the cards feel tied to your gesture."
+          "label": "Use case 1 — spoken line",
+          "example": "For research? This is bad, this is okay, this one's amazing.",
+          "instructions": "Talking-head, centered, looking at camera with empty space above your head. Open by naming the first use case as a question, then rank three options worst-to-best. Point up-left, up-center, up-right in time with each so the cards feel tied to your gesture."
         },
         {
           "name": "badImg1",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the WORST/most basic option for this use case on a clean white rounded card (e.g. the outdated default everyone already uses)."
+          "label": "Use case 1 — BAD logo",
+          "instructions": "Logo of the worst/most basic option for this use case, on a clean white rounded card (e.g. the outdated default everyone already uses)."
         },
         {
           "name": "goodImg1",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GOOD/mainstream option for this use case on a clean white rounded card."
+          "label": "Use case 1 — GOOD logo",
+          "instructions": "Logo of the good/mainstream option for this use case, on a clean white rounded card."
         },
         {
           "name": "greatImg1",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GREAT/secret best option for this use case on a clean white rounded card — this is the payoff pick."
+          "label": "Use case 1 — GREAT logo",
+          "instructions": "Logo of the great/secret best option for this use case, on a clean white rounded card — this is the payoff pick."
         }
       ],
       "captions": true,
@@ -255,25 +261,30 @@
           "name": "clip2",
           "mediaType": "video",
           "required": true,
-          "instructions": "Same framing. Name the second use case as a question, e.g. 'For writing?', then rank worst-to-best: 'this is bad, this is good, this one's great.'"
+          "label": "Use case 2 — spoken line",
+          "example": "For writing? This is bad, this is good, this one's great.",
+          "instructions": "Same framing. Name the second use case as a question, then rank worst-to-best."
         },
         {
           "name": "badImg2",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the WORST option for this use case on a white rounded card."
+          "label": "Use case 2 — BAD logo",
+          "instructions": "Logo of the worst option for this use case, on a white rounded card."
         },
         {
           "name": "goodImg2",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GOOD option for this use case on a white rounded card."
+          "label": "Use case 2 — GOOD logo",
+          "instructions": "Logo of the good option for this use case, on a white rounded card."
         },
         {
           "name": "greatImg2",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GREAT best option for this use case on a white rounded card."
+          "label": "Use case 2 — GREAT logo",
+          "instructions": "Logo of the great, best option for this use case, on a white rounded card."
         }
       ],
       "captions": true,
@@ -478,25 +489,30 @@
           "name": "clip3",
           "mediaType": "video",
           "required": true,
-          "instructions": "Same framing. Name the third use case as a question, e.g. 'For coding?', then rank worst-to-best: 'this is terrible, this is good, this one's insane.'"
+          "label": "Use case 3 — spoken line",
+          "example": "For coding? This is terrible, this is good, this one's insane.",
+          "instructions": "Same framing. Name the third use case as a question, then rank worst-to-best."
         },
         {
           "name": "badImg3",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the WORST option for this use case on a white rounded card."
+          "label": "Use case 3 — BAD logo",
+          "instructions": "Logo of the worst option for this use case, on a white rounded card."
         },
         {
           "name": "goodImg3",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GOOD option for this use case on a white rounded card."
+          "label": "Use case 3 — GOOD logo",
+          "instructions": "Logo of the good option for this use case, on a white rounded card."
         },
         {
           "name": "greatImg3",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GREAT best option for this use case on a white rounded card."
+          "label": "Use case 3 — GREAT logo",
+          "instructions": "Logo of the great, best option for this use case, on a white rounded card."
         }
       ],
       "captions": true,
@@ -701,25 +717,30 @@
           "name": "clip4",
           "mediaType": "video",
           "required": true,
-          "instructions": "Same framing. Name the fourth use case as a question, e.g. 'For content creation?', then rank worst-to-best: 'this is trash, this one's decent, this one will make you go viral.'"
+          "label": "Use case 4 — spoken line",
+          "example": "For content creation? This is trash, this one's decent, this one will make you go viral.",
+          "instructions": "Same framing. Name the fourth use case as a question, then rank worst-to-best."
         },
         {
           "name": "badImg4",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the WORST option for this use case on a white rounded card."
+          "label": "Use case 4 — BAD logo",
+          "instructions": "Logo of the worst option for this use case, on a white rounded card."
         },
         {
           "name": "goodImg4",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GOOD option for this use case on a white rounded card."
+          "label": "Use case 4 — GOOD logo",
+          "instructions": "Logo of the good option for this use case, on a white rounded card."
         },
         {
           "name": "greatImg4",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GREAT best option for this use case on a white rounded card."
+          "label": "Use case 4 — GREAT logo",
+          "instructions": "Logo of the great, best option for this use case, on a white rounded card."
         }
       ],
       "captions": true,
@@ -924,25 +945,30 @@
           "name": "clip5",
           "mediaType": "video",
           "required": true,
-          "instructions": "Same framing. Name the fifth use case as a question, e.g. 'For building websites and apps?', then rank worst-to-best: 'this is terrible, this is okay, this one is insane.'"
+          "label": "Use case 5 — spoken line",
+          "example": "For building websites and apps? This is terrible, this is okay, this one is insane.",
+          "instructions": "Same framing. Name the fifth use case as a question, then rank worst-to-best."
         },
         {
           "name": "badImg5",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the WORST option for this use case on a white rounded card."
+          "label": "Use case 5 — BAD logo",
+          "instructions": "Logo of the worst option for this use case, on a white rounded card."
         },
         {
           "name": "goodImg5",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GOOD option for this use case on a white rounded card."
+          "label": "Use case 5 — GOOD logo",
+          "instructions": "Logo of the good option for this use case, on a white rounded card."
         },
         {
           "name": "greatImg5",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GREAT best option for this use case on a white rounded card."
+          "label": "Use case 5 — GREAT logo",
+          "instructions": "Logo of the great, best option for this use case, on a white rounded card."
         }
       ],
       "captions": true,
@@ -1147,25 +1173,30 @@
           "name": "clip6",
           "mediaType": "video",
           "required": true,
-          "instructions": "Same framing. Name the final, highest-stakes use case as a question, e.g. 'For making money with AI?', then rank worst-to-best with an emphatic finish: 'this is terrible, this one's good, but this one will make you rich.'"
+          "label": "Use case 6 — spoken line (payoff)",
+          "example": "For making money with AI? This is terrible, this one's good, but this one will make you rich.",
+          "instructions": "Same framing. Name the final, highest-stakes use case as a question, then rank worst-to-best with an emphatic finish."
         },
         {
           "name": "badImg6",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the WORST option for this use case on a white rounded card."
+          "label": "Use case 6 — BAD logo",
+          "instructions": "Logo of the worst option for this use case, on a white rounded card."
         },
         {
           "name": "goodImg6",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GOOD option for this use case on a white rounded card."
+          "label": "Use case 6 — GOOD logo",
+          "instructions": "Logo of the good option for this use case, on a white rounded card."
         },
         {
           "name": "greatImg6",
           "mediaType": "image",
           "required": true,
-          "instructions": "Logo of the GREAT best option for this use case on a white rounded card — your strongest recommendation."
+          "label": "Use case 6 — GREAT logo",
+          "instructions": "Logo of the great, best option for this use case, on a white rounded card — your strongest recommendation."
         }
       ],
       "captions": true,
@@ -1370,19 +1401,25 @@
           "name": "clip7",
           "mediaType": "video",
           "required": true,
-          "instructions": "Hard cut to a clean talking-head with no cards above your head. Deliver the CTA: 'Follow me and comment [keyword], and I'll send you [your lead magnet].' Keep hands gesturing naturally."
+          "label": "CTA — spoken line",
+          "example": "Follow me and comment TOOLS, and I'll send you the full list.",
+          "instructions": "Hard cut to a clean talking-head with no cards above your head. Deliver the CTA — tell viewers to follow you and comment a keyword for the payoff. Keep hands gesturing naturally."
         },
         {
           "name": "followText",
           "mediaType": "text",
           "required": false,
-          "instructions": "Leave as 'Follow' — this recreates the platform Follow button that taps itself in the reference."
+          "label": "Follow button — before tap",
+          "example": "Follow",
+          "instructions": "Leave blank to use \"Follow\" — this recreates the platform Follow button that taps itself on screen."
         },
         {
           "name": "followingText",
           "mediaType": "text",
           "required": false,
-          "instructions": "Leave as 'Following' — this is the post-tap state the button switches to."
+          "label": "Follow button — after tap",
+          "example": "Following",
+          "instructions": "Leave blank to use \"Following\" — this is the state the button switches to right after it taps itself."
         }
       ],
       "captions": true,

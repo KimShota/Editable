@@ -11,6 +11,7 @@
     "name": "music",
     "mediaType": "audio",
     "required": false,
+    "label": "Background music (optional)",
     "instructions": "Optional music bed that you own or that is licensed to you. For posting, prefer adding trending audio inside Instagram/TikTok — it is licensed there and the render never bakes it in."
   },
   "musicVolume": 0.4,
@@ -25,18 +26,24 @@
         {
           "name": "hook_clip",
           "mediaType": "video",
-          "instructions": "B-roll/screen footage that plays under the painpoint text, phone vertical — e.g. a shot of a blank resume or an empty screen. No need to say anything on camera; the painpoint and pivot are shown as on-screen text instead."
+          "label": "Hook background clip",
+          "example": "A shot of a blank resume, or an empty job-search screen",
+          "instructions": "A vertical video clip that plays behind your hook text. It just needs to relate to the problem — you don't need to say anything on camera; the words on screen do the talking."
         },
         {
           "name": "hook_text",
           "mediaType": "text",
-          "instructions": "The painpoint as it should appear on screen, first person, in quotes, max two short lines."
+          "label": "Painpoint — big hook text",
+          "example": "\"NO PROJECTS ON MY RESUME\"",
+          "instructions": "The problem your viewer has, written in their own words, in quotes. Keep it to two short lines — this is the first thing they read."
         },
         {
           "name": "resolve_text",
           "mediaType": "text",
           "required": false,
-          "instructions": "The short call that flashes right before the cut to resource 1 (the reference holds it for only ~0.33s). Default: GO HERE."
+          "label": "Pivot word (flashes briefly)",
+          "example": "GO HERE",
+          "instructions": "A short phrase that flashes on screen for a split second right before your first resource appears — like a punchline. Leave this blank to use \"GO HERE\"."
         }
       ],
       "events": [
@@ -80,17 +87,23 @@
         {
           "name": "resource1_clip",
           "mediaType": "video",
-          "instructions": "Screen recording of the first resource — scroll its page slowly. 2 seconds is plenty."
+          "label": "Resource 1 — screen recording",
+          "example": "A slow scroll through the resource's website or app, about 2 seconds",
+          "instructions": "A short screen recording of this resource — scroll its page slowly so it's clearly visible. 2 seconds is plenty."
         },
         {
           "name": "resource1_title",
           "mediaType": "text",
-          "instructions": "The resource's name, short — rendered as a numbered white pill card, e.g. \"1. The Odin Project\"."
+          "label": "Resource 1 — name",
+          "example": "1. The Odin Project",
+          "instructions": "The resource's name, short and numbered. Shown as a white card near the top of the screen."
         },
         {
           "name": "resource1_desc",
           "mediaType": "text",
-          "instructions": "One short sentence (fits two lines) on why it solves the painpoint — rendered as a second white pill card below the title."
+          "label": "Resource 1 — why it helps",
+          "example": "Learn full-stack web dev for free, step by step",
+          "instructions": "One short sentence on why this fixes the painpoint. Fits about two lines. Shown as a second white card below the title."
         }
       ],
       "events": [
@@ -146,17 +159,23 @@
         {
           "name": "resource2_clip",
           "mediaType": "video",
-          "instructions": "Screen recording of the second resource — scroll its page slowly. 2 seconds is plenty."
+          "label": "Resource 2 — screen recording",
+          "example": "A slow scroll through the resource's website or app, about 2 seconds",
+          "instructions": "A short screen recording of this resource — scroll its page slowly so it's clearly visible. 2 seconds is plenty."
         },
         {
           "name": "resource2_title",
           "mediaType": "text",
-          "instructions": "The resource's name, short — rendered as a numbered white pill card, e.g. \"2. Bro Code\"."
+          "label": "Resource 2 — name",
+          "example": "2. Bro Code",
+          "instructions": "The resource's name, short and numbered. Shown as a white card near the top of the screen."
         },
         {
           "name": "resource2_desc",
           "mediaType": "text",
-          "instructions": "One short sentence (fits two lines) on why it solves the painpoint — rendered as a second white pill card below the title."
+          "label": "Resource 2 — why it helps",
+          "example": "Beginner-friendly coding tutorials on YouTube",
+          "instructions": "One short sentence on why this fixes the painpoint. Fits about two lines. Shown as a second white card below the title."
         }
       ],
       "events": [
@@ -212,17 +231,23 @@
         {
           "name": "resource3_clip",
           "mediaType": "video",
-          "instructions": "Screen recording of the third resource — scroll its page slowly. 2 seconds is plenty."
+          "label": "Resource 3 — screen recording",
+          "example": "A slow scroll through the resource's website or app, about 2 seconds",
+          "instructions": "A short screen recording of this resource — scroll its page slowly so it's clearly visible. 2 seconds is plenty."
         },
         {
           "name": "resource3_title",
           "mediaType": "text",
-          "instructions": "The resource's name, short — rendered as a numbered white pill card, e.g. \"3. Project Based Learning\"."
+          "label": "Resource 3 — name",
+          "example": "3. Project Based Learning",
+          "instructions": "The resource's name, short and numbered. Shown as a white card near the top of the screen."
         },
         {
           "name": "resource3_desc",
           "mediaType": "text",
-          "instructions": "One short sentence (fits two lines) on why it solves the painpoint — rendered as a second white pill card below the title."
+          "label": "Resource 3 — why it helps",
+          "example": "Build real projects instead of just watching tutorials",
+          "instructions": "One short sentence on why this fixes the painpoint. Fits about two lines. Shown as a second white card below the title."
         }
       ],
       "events": [
@@ -278,12 +303,16 @@
         {
           "name": "cta_clip",
           "mediaType": "video",
-          "instructions": "A simple closing clip of you (pointing up or smiling works). 1.5 seconds is plenty."
+          "label": "Closing clip",
+          "example": "A quick clip of you pointing up or smiling at the camera",
+          "instructions": "A simple closing shot of you — pointing up or smiling both work well. 1.5 seconds is plenty."
         },
         {
           "name": "cta_text",
           "mediaType": "text",
-          "instructions": "The follow/comment call to action — the reference runs 4 short lines, e.g. \"follow &\\ncomment\\n“learn”\\nfor the links\"."
+          "label": "Follow prompt",
+          "example": "follow &\ncomment \"learn\"\nfor the links",
+          "instructions": "Tell viewers what to do next. One short phrase per line works best — up to about 4 lines."
         }
       ],
       "events": [

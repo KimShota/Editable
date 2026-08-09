@@ -5,10 +5,12 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Edl, Format, Slot } from "@backend/pipeline/types";
 import type { HookFeedbackResult, ScriptSuggestion } from "@backend/content/types";
 import { Button, Card, Pill } from "../../../../_components/ui";
+import { slotLabel } from "../../../../lib/slotLabel";
 import { LibraryPanel } from "../../../../_components/library/LibraryPanel";
 import { Binding, SlotDropzone, bindText } from "./SlotDropzone";
 // import { ScriptPanel } from "./ScriptPanel"; // hidden for now
 import { ScriptLines } from "./ScriptLines";
+import { ScriptingBlockCard } from "./ScriptingBlockCard";
 import { IdentityPhotoGrid } from "./IdentityPhotoGrid";
 import { SplitLines } from "./SplitLines";
 import { HookFeedbackPanel } from "./HookFeedbackPanel";
@@ -33,9 +35,24 @@ const allSlots = (format: Format): Slot[] => [
  *  speakingTakeSlot at all — just skips straight from footage to
  *  review+build in Step 3, same step count either way. */
 const STEPS: WizardStepInfo[] = [
-  { id: 1, label: "Scripting", kicker: "Scripting & planning" },
-  { id: 2, label: "Filming", kicker: "Upload & inputs" },
-  { id: 3, label: "Split your take & build", kicker: "Preparation" },
+  {
+    id: 1,
+    label: "Write your script",
+    kicker: "What's said & shown on screen",
+    description: "Fill in the text below — the preview shows exactly how it'll look in your video.",
+  },
+  {
+    id: 2,
+    label: "Add your footage",
+    kicker: "Clips, photos & sounds",
+    description: "Upload or film the clips each slot asks for, or drag one in from your Library.",
+  },
+  {
+    id: 3,
+    label: "Review & build",
+    kicker: "Final check",
+    description: "Check everything's filled in, then build your video.",
+  },
 ];
 
 /** Mirrors the build API route's status shape (build/route.ts) — the build
@@ -242,7 +259,7 @@ export function ResourcesBoard({
     <div key={slot.name} className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]" />
-        <p className="text-sm font-medium text-[color:var(--ink)]">{slot.name}</p>
+        <p className="text-sm font-medium text-[color:var(--ink)]">{slotLabel(slot)}</p>
         <Pill>auto-generated</Pill>
       </div>
       <p className="text-[12px] leading-snug text-[color:var(--ink-dim)]">
@@ -264,51 +281,27 @@ export function ResourcesBoard({
             {hookBlock && (
               <ScriptLines jobId={jobId} format={format} script={script} onScriptUpdated={setScript} />
             )}
-            {format.blocks.map((block) => {
-              const textSlots = block.slots.filter((s) => s.mediaType === "text");
-              if (textSlots.length === 0) return null;
-              return (
-                <Card key={block.id} className="p-6">
-                  <div className="mb-4 flex items-center gap-2">
-                    <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                      {block.title} — on-screen text
-                    </h2>
-                  </div>
-                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                    {textSlots.map((slot) => {
-                      const suggestion = suggestionFor(block.id, slot.name);
-                      return (
-                        <div key={slot.name} className="flex flex-col gap-2">
-                          {suggestion && (
-                            <div className="rounded-lg border border-dashed border-[color:var(--accent)]/40 bg-[color:var(--accent)]/5 p-3">
-                              <p className="mb-1 text-[11px] tracking-wide text-[color:var(--accent)] uppercase">
-                                Suggested
-                              </p>
-                              <p className="text-sm text-[color:var(--ink-dim)] italic">
-                                &ldquo;{suggestion.text}&rdquo;
-                              </p>
-                              <button
-                                onClick={() => applySuggestion(slot.name, suggestion.text)}
-                                className="mt-1 text-xs font-medium text-[color:var(--accent)]"
-                              >
-                                Use this
-                              </button>
-                            </div>
-                          )}
-                          <SlotDropzone
-                            jobId={jobId}
-                            formatId={format.id}
-                            slot={slot}
-                            binding={bindings[slot.name]}
-                            onChange={setBinding}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </Card>
-              );
-            })}
+            {(() => {
+              let cardIndex = 0;
+              return format.blocks.map((block) => {
+                const textSlots = block.slots.filter((s) => s.mediaType === "text");
+                if (textSlots.length === 0) return null;
+                cardIndex += 1;
+                return (
+                  <ScriptingBlockCard
+                    key={block.id}
+                    jobId={jobId}
+                    format={format}
+                    block={block}
+                    index={cardIndex}
+                    bindings={bindings}
+                    onChange={setBinding}
+                    suggestionFor={(slotName) => suggestionFor(block.id, slotName)}
+                    onApplySuggestion={applySuggestion}
+                  />
+                );
+              });
+            })()}
           </>
         )}
 

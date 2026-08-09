@@ -2,7 +2,15 @@
 
 import { Button } from "../../../../_components/ui";
 
-export type WizardStepInfo = { id: number; label: string; kicker: string };
+export type WizardStepInfo = {
+  id: number;
+  label: string;
+  kicker: string;
+  /** One plain-language sentence explaining what to do on this step —
+   *  shown under the step title so the wizard tells you what it wants
+   *  instead of you inferring it from the fields alone. */
+  description?: string;
+};
 
 /**
  * Step header + clickable progress bar + Back/Next footer for the
@@ -29,14 +37,18 @@ export function WizardHeader({
         </p>
         <p className="text-xs text-[color:var(--ink-dim)]">{step.kicker}</p>
       </div>
-      <h2 className="px-6 pt-2 pb-5 font-[family-name:var(--font-display)] text-2xl font-bold text-[color:var(--ink)]">
+      <h2 className="px-6 pt-2 font-[family-name:var(--font-display)] text-2xl font-bold text-[color:var(--ink)]">
         {step.label}
       </h2>
-      <div className="flex gap-1.5 px-6 pb-6">
+      {step.description && (
+        <p className="px-6 pt-2 text-sm text-[color:var(--ink-dim)]">{step.description}</p>
+      )}
+      <div className="flex gap-1.5 px-6 pt-5 pb-6">
         {steps.map((s) => (
           <button
             key={s.id}
             onClick={() => onSelect(s.id)}
+            title={s.label}
             aria-label={`Go to step ${s.id}: ${s.label}`}
             className={`h-1.5 flex-1 rounded-full transition-colors ${
               s.id <= current ? "bg-[color:var(--accent)]" : "bg-white/10 hover:bg-white/20"
