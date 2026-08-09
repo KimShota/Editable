@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, Pill } from "../../_components/ui";
 import type { FormatSummary } from "../../lib/formats";
-import type { JobSummary } from "../../lib/jobs";
 
 /** Compact social-count formatting: 2649446 -> "2.6M", 10616 -> "10.6K".
  *  Truncates rather than rounds up (34898 -> "34.8K", not "34.9K") to match
@@ -14,8 +13,6 @@ const formatCount = (n: number): string => {
   if (n >= 1_000) return `${Math.floor((n / 1_000) * 10) / 10}K`;
   return String(n);
 };
-
-type Tab = "browse" | "mine";
 
 /** Bigger, more legible than the old 11px Pill-in-a-button (the redesign's
  *  whole point) — real button padding, a filled accent state, and a count
@@ -45,14 +42,7 @@ function NicheButton({
   );
 }
 
-export function TemplateGallery({
-  formats,
-  pastJobs,
-}: {
-  formats: FormatSummary[];
-  pastJobs: JobSummary[];
-}) {
-  const [tab, setTab] = useState<Tab>("browse");
+export function TemplateGallery({ formats }: { formats: FormatSummary[] }) {
   const [query, setQuery] = useState("");
   const [niche, setNiche] = useState<string | null>(null);
 
@@ -68,70 +58,46 @@ export function TemplateGallery({
   return (
     <div>
       <div className="mb-8 flex flex-col gap-5 border-b border-white/10 pb-6">
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex gap-1 rounded-full border border-white/10 p-1">
-            {(["browse", "mine"] as Tab[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`rounded-full px-4 py-1.5 font-[family-name:var(--font-display)] text-[13px] tracking-wide transition-colors ${
-                  tab === t ? "bg-[color:var(--accent)] text-[color:var(--accent-ink)]" : "text-[color:var(--ink-dim)] hover:text-[color:var(--ink)]"
-                }`}
-              >
-                {t === "browse" ? "Browse" : `My templates (${pastJobs.length})`}
-              </button>
-            ))}
-          </div>
-
-          {tab === "browse" && (
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search niche or format…"
-              className="min-w-[220px] flex-1 rounded-full border border-white/12 bg-transparent px-4 py-2 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
-            />
-          )}
-        </div>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search niche or format…"
+          className="min-w-[220px] rounded-full border border-white/12 bg-transparent px-4 py-2 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
+        />
 
         {/* Niche filter gets its own labeled row, in real buttons (not
             11px Pills) with counts — the old cramped-in-with-search Pill
             row was easy to miss entirely (the whole point of this redesign). */}
-        {tab === "browse" && (
-          <div>
-            <p className="mb-2 font-[family-name:var(--font-display)] text-[11px] tracking-[0.2em] text-[color:var(--ink-dim)] uppercase">
-              Niche
-            </p>
-            <div className="flex flex-wrap gap-2.5">
-              <NicheButton active={niche === null} onClick={() => setNiche(null)} count={formats.length}>
-                All
+        <div>
+          <p className="mb-2 font-[family-name:var(--font-display)] text-[11px] tracking-[0.2em] text-[color:var(--ink-dim)] uppercase">
+            Niche
+          </p>
+          <div className="flex flex-wrap gap-2.5">
+            <NicheButton active={niche === null} onClick={() => setNiche(null)} count={formats.length}>
+              All
+            </NicheButton>
+            {niches.map((n) => (
+              <NicheButton
+                key={n}
+                active={niche === n}
+                onClick={() => setNiche(n)}
+                count={formats.filter((f) => f.niche === n).length}
+              >
+                {n}
               </NicheButton>
-              {niches.map((n) => (
-                <NicheButton
-                  key={n}
-                  active={niche === n}
-                  onClick={() => setNiche(n)}
-                  count={formats.filter((f) => f.niche === n).length}
-                >
-                  {n}
-                </NicheButton>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {tab === "browse" ? (
-        filtered.length === 0 ? (
-          <p className="text-[color:var(--ink-dim)]">No formats match that search.</p>
-        ) : (
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            {filtered.map((f) => (
-              <FormatCard key={f.id} format={f} />
             ))}
           </div>
-        )
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-[color:var(--ink-dim)]">No formats match that search.</p>
       ) : (
-        <PastJobsList jobs={pastJobs} />
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          {filtered.map((f) => (
+            <FormatCard key={f.id} format={f} />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -349,33 +315,5 @@ function FormatCard({ format }: { format: FormatSummary }) {
       {starting && <p className="text-xs text-[color:var(--ink-dim)]">Starting…</p>}
       {error && <p className="text-xs text-red-400">{error}</p>}
     </Card>
-  );
-}
-
-const STATUS_LABEL = (job: JobSummary): string => {
-  if (job.rendered) return "Rendered";
-  if (job.completedStages.includes("edl")) return "Ready to edit";
-  if (job.completedStages.length > 0) return "In progress";
-  return "Draft";
-};
-
-function PastJobsList({ jobs }: { jobs: JobSummary[] }) {
-  if (jobs.length === 0) {
-    return <p className="text-[color:var(--ink-dim)]">Nothing here yet — start from a template to see it show up.</p>;
-  }
-  return (
-    <div className="flex flex-col gap-3">
-      {jobs.map((job) => (
-        <Card key={job.id} href={job.rendered ? `/jobs/${job.id}/edit` : `/jobs/${job.id}/resources`} className="flex items-center justify-between gap-4 p-5">
-          <div>
-            <p className="font-[family-name:var(--font-display)] font-bold text-[color:var(--ink)]">{job.id}</p>
-            <p className="text-sm text-[color:var(--ink-dim)]">
-              {job.formatId} · {new Date(job.createdAt).toLocaleString()}
-            </p>
-          </div>
-          <Pill tone={job.rendered ? "accent" : "default"}>{STATUS_LABEL(job)}</Pill>
-        </Card>
-      ))}
-    </div>
   );
 }
