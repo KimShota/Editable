@@ -56,7 +56,14 @@ export function RenderPanel({ jobId }: { jobId: string }) {
   };
 
   return (
-    <div className="rounded-xl border border-[color:var(--ed-border-strong)] bg-[color:var(--ed-panel)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
+    // Height-bounded and scrollable: this panel is an absolutely-positioned
+    // dropdown (see Editor.tsx's Export button), so it's out of flow and the
+    // page can't scroll to reveal it. Once a render finishes, the failed-gate
+    // list plus the result <video> easily exceed the viewport, which put the
+    // download link past the bottom edge with no way to reach it.
+    // overscroll-contain stops a scroll here from chaining to the editor
+    // behind it once the panel hits its end.
+    <div className="max-h-[calc(100vh-6rem)] overflow-y-auto overscroll-contain rounded-xl border border-[color:var(--ed-border-strong)] bg-[color:var(--ed-panel)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
       <div className="flex items-center justify-between gap-3">
         <p className="font-[family-name:var(--ed-font-display)] font-semibold text-[color:var(--ed-ink)]">Render</p>
         <button
