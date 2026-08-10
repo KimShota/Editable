@@ -8,6 +8,7 @@ import { JobManifest } from "@backend/pipeline/types";
 import { repoRoot, artifactsDir, outDir } from "@backend/pipeline/paths";
 import { HookFeedbackResultSchema, ScriptSuggestionSchema } from "@backend/content/schemas";
 import { HookFeedbackResult, ScriptSuggestion } from "@backend/content/types";
+import { sql } from "./db";
 
 /**
  * Job directories ARE the app's "projects" — a job is created the moment a
@@ -80,11 +81,15 @@ export const writeJobHookFeedback = (jobId: string, feedback: HookFeedbackResult
 const slugify = (s: string): string =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
-/** Creates jobs/<id>/ with an empty manifest (no slots bound yet) and returns the id. */
-export const createJob = (formatId: string): string => {
+/** Creates jobs/<id>/ with an empty manifest (no slots bound yet), records
+ *  `ownerId` as its owner in Postgres (see db/migrations/002_accounts.sql —
+ *  middleware.ts and listJobsForUser below are what actually enforce this),
+ *  and returns the id. */
+export const createJob = async (formatId: string, ownerId: string): Promise<string> => {
   const jobId = `${slugify(formatId)}-${randomBytes(3).toString("hex")}`;
   fs.mkdirSync(path.join(jobDir(jobId), "assets"), { recursive: true });
   writeJobManifest(jobId, { format: formatId, bindings: {}, lexicon: [] });
+  await sql`insert into job_owners (job_id, user_id) values (${jobId}, ${ownerId})`;
   return jobId;
 };
 
@@ -115,6 +120,10 @@ export const getJobStatus = (jobId: string): { completedStages: PipelineStage[];
   rendered: fs.existsSync(path.join(outDir, `${jobId}.mp4`)),
 });
 
+/** Every job on disk, unfiltered — for cross-user/admin concerns (e.g.
+ *  formats.ts picking any rendered job as a gallery preview). Anything
+ *  showing jobs to a specific signed-in user should go through
+ *  listJobsForUser instead. */
 export const listJobs = (): JobSummary[] => {
   if (!fs.existsSync(jobsDir)) return [];
   return fs
@@ -127,4 +136,25 @@ export const listJobs = (): JobSummary[] => {
       return { id: d.name, formatId: manifest.format, createdAt, ...status };
     })
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+};
+
+/** The only jobs meant to be genuinely public example content — checked
+ *  into git as the ".gitignore"'s explicit `!jobs/<id>` allow-list, unlike
+ *  the many other unowned jobs sitting in jobs/ (real work predating
+ *  accounts, e.g. every job created while building this feature). Kept in
+ *  sync with middleware.ts's copy of the same list. */
+const DEMO_JOB_IDS = new Set(["demo", "five-codes", "five-codes-demo"]);
+
+/** listJobs(), scoped to what `user` may see: everything for an admin,
+ *  otherwise jobs they own plus the checked-in demo jobs above — mirrors
+ *  middleware.ts's per-job access rule exactly, so nothing shows up in a
+ *  listing that a direct link to it would then 404 on. An unowned job
+ *  that ISN'T one of the demo ids (pre-accounts dev/test data) stays
+ *  admin-only rather than defaulting to "shared with everyone". */
+export const listJobsForUser = async (user: { id: string; isAdmin: boolean }): Promise<JobSummary[]> => {
+  const jobs = listJobs();
+  if (user.isAdmin) return jobs;
+  const rows = await sql`select job_id, user_id from job_owners`;
+  const ownerOf = new Map((rows as { job_id: string; user_id: string }[]).map((r) => [r.job_id, r.user_id]));
+  return jobs.filter((j) => ownerOf.get(j.id) === user.id || DEMO_JOB_IDS.has(j.id));
 };

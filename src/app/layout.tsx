@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ConditionalNav } from "./_components/ConditionalNav";
+import { Nav } from "./_components/Nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -24,7 +25,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="ambient__grain" />
         </div>
         <div className="app-shell">
-          <ConditionalNav />
+          <ConditionalNav>
+            <Nav />
+          </ConditionalNav>
           {children}
         </div>
       </body>

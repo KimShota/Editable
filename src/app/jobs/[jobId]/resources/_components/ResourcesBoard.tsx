@@ -234,24 +234,6 @@ export function ResourcesBoard({
   const suggestionFor = (blockId: string, slotName: string) =>
     script?.suggestions.find((s) => s.blockId === blockId && s.slotName === slotName);
 
-  /** A generation-marked slot is never an upload target — shown as a badge
-   *  explaining why, instead of an actionable (and permanently-empty)
-   *  dropzone (see requiredSlots above for the matching "don't count it"
-   *  half of this). */
-  const generatedSlotBadge = (slot: Slot) => (
-    <div key={slot.name} className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]" />
-        <p className="text-sm font-medium text-[color:var(--ink)]">{slot.name}</p>
-        <Pill>auto-generated</Pill>
-      </div>
-      <p className="text-[12px] leading-snug text-[color:var(--ink-dim)]">
-        Generated automatically from your identity photos when you build — nothing to upload here.{" "}
-        {slot.instructions}
-      </p>
-    </div>
-  );
-
   return (
     <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1fr_340px]">
       <div className="flex flex-col gap-6">
@@ -351,7 +333,7 @@ export function ResourcesBoard({
 
             {format.blocks.map((block) => {
               const footageSlots = block.slots.filter(
-                (s) => s.mediaType !== "text" && !alwaysHiddenSlots.has(s.name),
+                (s) => s.mediaType !== "text" && !s.generation && !alwaysHiddenSlots.has(s.name),
               );
               if (footageSlots.length === 0) return null;
               return (
@@ -363,26 +345,22 @@ export function ResourcesBoard({
                     <Pill>{block.kind === "voice" ? "spoken" : "b-roll"}</Pill>
                   </div>
                   <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                    {footageSlots.map((slot) =>
-                      slot.generation ? (
-                        generatedSlotBadge(slot)
-                      ) : (
-                        <SlotDropzone
-                          key={slot.name}
-                          jobId={jobId}
-                          formatId={format.id}
-                          slot={slot}
-                          binding={bindings[slot.name]}
-                          onChange={setBinding}
-                          multi={block.kind === "voice" && slot.name === block.videoSlot}
-                          coveredNote={
-                            takeCoveredSlots.has(slot.name)
-                              ? "Covered by your speaking take — drop a clip here to film this line separately instead."
-                              : undefined
-                          }
-                        />
-                      ),
-                    )}
+                    {footageSlots.map((slot) => (
+                      <SlotDropzone
+                        key={slot.name}
+                        jobId={jobId}
+                        formatId={format.id}
+                        slot={slot}
+                        binding={bindings[slot.name]}
+                        onChange={setBinding}
+                        multi={block.kind === "voice" && slot.name === block.videoSlot}
+                        coveredNote={
+                          takeCoveredSlots.has(slot.name)
+                            ? "Covered by your speaking take — drop a clip here to film this line separately instead."
+                            : undefined
+                        }
+                      />
+                    ))}
                   </div>
                 </Card>
               );
@@ -504,6 +482,30 @@ export function ResourcesBoard({
               </div>
             )}
 
+            {buildError && (() => {
+              // Backend errors come as either a single sentence, or a
+              // "<heading>\n  - <item>\n  - <item>" list (see intake.ts's
+              // "Fix these before building:" throw) — split on that marker
+              // so a multi-item list renders as actual bullets instead of
+              // one run-on paragraph.
+              const marker = "\n  - ";
+              const splitAt = buildError.indexOf(marker);
+              const heading = splitAt === -1 ? buildError : buildError.slice(0, splitAt);
+              const items = splitAt === -1 ? [] : buildError.slice(splitAt + marker.length).split(marker);
+              return (
+                <div className="rounded-2xl border border-red-400/30 bg-red-400/10 p-5 backdrop-blur-md">
+                  <p className={`text-sm font-medium text-red-300 ${items.length > 0 ? "mb-2" : ""}`}>{heading}</p>
+                  {items.length > 0 && (
+                    <ul className="list-disc space-y-1 pl-5 text-xs text-red-200/90">
+                      {items.map((item, i) => (
+                        <li key={i}>{item}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })()}
+
             <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-[color:var(--bg)]/90 p-5 backdrop-blur-md">
               <div>
                 <p className="text-sm text-[color:var(--ink)]">
@@ -514,7 +516,6 @@ export function ResourcesBoard({
                     Missing something? Go back to Script or Footage & photos to finish filling slots.
                   </p>
                 )}
-                {buildError && <p className="text-xs text-red-400">{buildError}</p>}
               </div>
               {/* Once the diagnostics panel is already on screen the warnings
                   have been seen, so this proceeds instead of rebuilding into

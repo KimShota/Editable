@@ -2,7 +2,8 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 import { artifactsDir, outDir, publicDir } from "@backend/pipeline/paths";
-import { jobDir, listJobs, readJobManifest } from "./jobs";
+import { jobDir, listJobsForUser, readJobManifest } from "./jobs";
+import type { SessionUser } from "./auth";
 
 /**
  * The "Projects" dashboard's view over jobs/ — same store as lib/jobs.ts,
@@ -152,8 +153,8 @@ const defaultBaseName = (createdAt: string): string => {
   return `${mm}${dd}`;
 };
 
-export const listProjects = (): ProjectSummary[] => {
-  const jobs = listJobs();
+export const listProjects = async (user: Pick<SessionUser, "id" | "isAdmin">): Promise<ProjectSummary[]> => {
+  const jobs = await listJobsForUser(user);
 
   const ascending = [...jobs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const seenCount = new Map<string, number>();

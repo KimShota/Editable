@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 import { jobExists, jobDir } from "../../../../lib/jobs";
+import { acquirePipelineSlot } from "../../../../lib/pipelineQueue";
 import { repoRoot, artifactsDir, outDir } from "@backend/pipeline/paths";
 
 /**
@@ -84,44 +85,50 @@ export async function POST(_req: Request, { params }: { params: Promise<{ jobId:
   let percent = 0;
   writeStatus(jobId, { status: "rendering", startedAt, percent });
 
-  const child = spawn(
-    "npm",
-    ["run", "pipeline", "--", "--job", jobDir(jobId), "--only", "render", "--soft-gates"],
-    { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] },
-  );
-  let stderrTail = "";
-  child.stderr.on("data", (chunk) => {
-    stderrTail = (stderrTail + chunk.toString()).slice(-4000);
-  });
-  child.stdout.on("data", (chunk) => {
-    const next = parseProgressPercent(chunk.toString(), percent);
-    if (next !== percent) {
-      percent = next;
-      writeStatus(jobId, { status: "rendering", startedAt, percent });
-    }
-  });
-  child.on("close", (code) => {
-    const finishedAt = new Date().toISOString();
-    if (code === 0 && fs.existsSync(path.join(outDir, `${jobId}.mp4`))) {
-      // --soft-gates above means a failed acceptance gate never fails this
-      // process — the video still gets shown and is downloadable, with the
-      // failing checks surfaced so the user (not the pipeline) decides
-      // whether to keep it or discard and re-render.
-      const gatesFile = path.join(artifactsDir(jobId), "gates.json");
-      let failedGates: FailedGate[] | undefined;
-      if (fs.existsSync(gatesFile)) {
-        try {
-          const gates = JSON.parse(fs.readFileSync(gatesFile, "utf8")) as Array<{ name: string; pass: boolean | null; measured: string }>;
-          const failed = gates.filter((g) => g.pass === false).map((g) => ({ name: g.name, measured: g.measured }));
-          if (failed.length > 0) failedGates = failed;
-        } catch {
-          // malformed gates.json shouldn't block showing the render
-        }
+  // Don't await the slot here — see build/route.ts's identical pattern.
+  // The status file just sits at 0% until a slot frees up and the child
+  // process actually starts producing progress lines.
+  acquirePipelineSlot().then((release) => {
+    const child = spawn(
+      "npm",
+      ["run", "pipeline", "--", "--job", jobDir(jobId), "--only", "render", "--soft-gates"],
+      { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderrTail = "";
+    child.stderr.on("data", (chunk) => {
+      stderrTail = (stderrTail + chunk.toString()).slice(-4000);
+    });
+    child.stdout.on("data", (chunk) => {
+      const next = parseProgressPercent(chunk.toString(), percent);
+      if (next !== percent) {
+        percent = next;
+        writeStatus(jobId, { status: "rendering", startedAt, percent });
       }
-      writeStatus(jobId, { status: "done", startedAt, finishedAt, outUrl: `/api/media/out/${jobId}.mp4`, ...(failedGates ? { failedGates } : {}) });
-    } else {
-      writeStatus(jobId, { status: "error", startedAt, finishedAt, error: stderrTail || `render exited with code ${code}` });
-    }
+    });
+    child.on("close", (code) => {
+      release();
+      const finishedAt = new Date().toISOString();
+      if (code === 0 && fs.existsSync(path.join(outDir, `${jobId}.mp4`))) {
+        // --soft-gates above means a failed acceptance gate never fails this
+        // process — the video still gets shown and is downloadable, with the
+        // failing checks surfaced so the user (not the pipeline) decides
+        // whether to keep it or discard and re-render.
+        const gatesFile = path.join(artifactsDir(jobId), "gates.json");
+        let failedGates: FailedGate[] | undefined;
+        if (fs.existsSync(gatesFile)) {
+          try {
+            const gates = JSON.parse(fs.readFileSync(gatesFile, "utf8")) as Array<{ name: string; pass: boolean | null; measured: string }>;
+            const failed = gates.filter((g) => g.pass === false).map((g) => ({ name: g.name, measured: g.measured }));
+            if (failed.length > 0) failedGates = failed;
+          } catch {
+            // malformed gates.json shouldn't block showing the render
+          }
+        }
+        writeStatus(jobId, { status: "done", startedAt, finishedAt, outUrl: `/api/media/out/${jobId}.mp4`, ...(failedGates ? { failedGates } : {}) });
+      } else {
+        writeStatus(jobId, { status: "error", startedAt, finishedAt, error: stderrTail || `render exited with code ${code}` });
+      }
+    });
   });
 
   return NextResponse.json({ status: "rendering", startedAt, percent }, { status: 202 });

@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { NextRequest, NextResponse } from "next/server";
 import { jobExists, jobDir } from "../../../../lib/jobs";
+import { acquirePipelineSlot } from "../../../../lib/pipelineQueue";
 import { repoRoot, artifactsDir } from "@backend/pipeline/paths";
 import { Edl } from "@backend/pipeline/types";
 
@@ -50,52 +51,59 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
   const generator = typeof body?.generator === "string" ? body.generator : "auto";
 
   const startedAt = new Date().toISOString();
-  writeStatus(jobId, { status: "building", startedAt, stage: "intake" });
+  writeStatus(jobId, { status: "building", startedAt, stage: "queued" });
 
-  const child = spawn(
-    "npm",
-    [
-      "run",
-      "pipeline",
-      "--",
-      "--job",
-      jobDir(jobId),
-      "--stop-after",
-      "assemble",
-      "--resolver",
-      resolver,
-      "--generator",
-      generator,
-    ],
-    { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] },
-  );
-  let stderrTail = "";
-  child.stderr.on("data", (chunk) => {
-    stderrTail = (stderrTail + chunk.toString()).slice(-4000);
-  });
-  child.stdout.on("data", (chunk) => {
-    // run.ts logs "  ✔ <artifact>   → ..." as each stage's artifact is
-    // written (see run.ts's own `write` helper) — the last one seen is the
-    // furthest-along stage, good enough for a "Building… (matte)" label
-    // without needing a structured progress channel.
-    const matches = chunk.toString().match(/✔ (\S+)/g);
-    if (matches) {
-      const stage = matches[matches.length - 1].replace("✔ ", "");
-      writeStatus(jobId, { status: "building", startedAt, stage });
-    }
-  });
-  child.on("close", (code) => {
-    const finishedAt = new Date().toISOString();
-    const edlPath = path.join(artifactsDir(jobId), "edl.json");
-    if (code === 0 && fs.existsSync(edlPath)) {
-      const edl = JSON.parse(fs.readFileSync(edlPath, "utf8"));
-      writeStatus(jobId, { status: "done", startedAt, finishedAt, edl });
-    } else {
-      writeStatus(jobId, { status: "error", startedAt, finishedAt, error: stderrTail || `build exited with code ${code}` });
-    }
+  // Don't await the slot here — the route must still return 202
+  // immediately (see this file's own docstring on why building can't block
+  // the request). The status file stays at "queued" until a slot actually
+  // frees up and the child process starts.
+  acquirePipelineSlot().then((release) => {
+    const child = spawn(
+      "npm",
+      [
+        "run",
+        "pipeline",
+        "--",
+        "--job",
+        jobDir(jobId),
+        "--stop-after",
+        "assemble",
+        "--resolver",
+        resolver,
+        "--generator",
+        generator,
+      ],
+      { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderrTail = "";
+    child.stderr.on("data", (chunk) => {
+      stderrTail = (stderrTail + chunk.toString()).slice(-4000);
+    });
+    child.stdout.on("data", (chunk) => {
+      // run.ts logs "  ✔ <artifact>   → ..." as each stage's artifact is
+      // written (see run.ts's own `write` helper) — the last one seen is the
+      // furthest-along stage, good enough for a "Building… (matte)" label
+      // without needing a structured progress channel.
+      const matches = chunk.toString().match(/✔ (\S+)/g);
+      if (matches) {
+        const stage = matches[matches.length - 1].replace("✔ ", "");
+        writeStatus(jobId, { status: "building", startedAt, stage });
+      }
+    });
+    child.on("close", (code) => {
+      release();
+      const finishedAt = new Date().toISOString();
+      const edlPath = path.join(artifactsDir(jobId), "edl.json");
+      if (code === 0 && fs.existsSync(edlPath)) {
+        const edl = JSON.parse(fs.readFileSync(edlPath, "utf8"));
+        writeStatus(jobId, { status: "done", startedAt, finishedAt, edl });
+      } else {
+        writeStatus(jobId, { status: "error", startedAt, finishedAt, error: stderrTail || `build exited with code ${code}` });
+      }
+    });
   });
 
-  return NextResponse.json({ status: "building", startedAt, stage: "intake" }, { status: 202 });
+  return NextResponse.json({ status: "building", startedAt, stage: "queued" }, { status: 202 });
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ jobId: string }> }) {

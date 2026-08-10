@@ -271,6 +271,11 @@ export const GenerationSpecSchema = z.object({
 /** A named slot the user fills: a file (video/image/audio) or a text string. */
 export const SlotSchema = z.object({
   name: z.string(),
+  /** Human-friendly display name shown to the user in place of the raw
+   *  binding key, e.g. "Hook clip" for `hook_clip`. Optional — consumers
+   *  fall back to prettifying `name` (see intake.ts's friendlySlotName), so
+   *  a format only needs to author this when the derived name reads badly. */
+  label: z.string().optional(),
   mediaType: MediaTypeSchema,
   required: z.boolean().default(true),
   /** Filming / sourcing instructions shown to the user. */

@@ -188,6 +188,26 @@ export const allSlots = (format: Format): Slot[] => [
   ...(format.finalClipSlot ? [format.finalClipSlot] : []),
 ];
 
+/** Human-friendly display name for a slot: its authored `label` when the
+ *  format supplies one, otherwise a prettified version of the raw variable
+ *  name — never the bare snake_case/kebab-case binding key. Lives here
+ *  rather than in the Next app since this module also runs standalone as
+ *  the `npm run pipeline` CLI and doesn't depend on the app. */
+const friendlySlotName = (slot: Pick<Slot, "name" | "label">): string => {
+  if (slot.label) return slot.label;
+  const spaced = slot.name.replace(/[_-]+/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+};
+
+/** What a user does to fill each media type, for phrasing like `"Hook clip"
+ *  hasn't been filmed yet`. */
+const FILL_VERB: Record<Slot["mediaType"], string> = {
+  video: "filmed",
+  audio: "recorded",
+  image: "uploaded",
+  text: "filled in",
+};
+
 export const intake = (jobDir: string): FilledFormat => {
   const absJobDir = path.resolve(jobDir);
   const manifestPath = path.join(absJobDir, "job.json");
@@ -229,17 +249,18 @@ export const intake = (jobDir: string): FilledFormat => {
   }
 
   /** Probes one job-dir-relative file path into a BoundFile, or pushes an error and returns null. */
-  const bindOneFile = (slotName: string, relPath: string): BoundFile | null => {
+  const bindOneFile = (slot: Slot, relPath: string): BoundFile | null => {
     const absPath = path.resolve(absJobDir, relPath);
+    const label = friendlySlotName(slot);
     if (!fs.existsSync(absPath)) {
-      errors.push(`slot "${slotName}": file not found: ${relPath}`);
+      errors.push(`"${label}": the uploaded file (${path.basename(relPath)}) is missing — try uploading it again.`);
       return null;
     }
     try {
       const probed = probeFile(absPath);
       return { path: relPath, absPath, ...probed };
-    } catch (err) {
-      errors.push(`slot "${slotName}": ${(err as Error).message}`);
+    } catch {
+      errors.push(`"${label}": couldn't read ${path.basename(relPath)} — it may be corrupted or in an unsupported format. Try a different file.`);
       return null;
     }
   };
@@ -279,16 +300,16 @@ export const intake = (jobDir: string): FilledFormat => {
       // half of the either/or was supplied, and this IS a real gap.
       if (slot.required && !slot.generation && !(derivedFromTake.has(slot.name) && takeBound)) {
         const takeHint = format.speakingTakeSlot
-          ? ` — film this block's own clip, or upload one whole take covering all your lines to "${format.speakingTakeSlot.name}"`
+          ? ` — film this clip, or upload one take covering all your lines under "${friendlySlotName(format.speakingTakeSlot)}"`
           : "";
-        errors.push(`required slot "${slot.name}" (${slot.mediaType}) is not filled${takeHint}`);
+        errors.push(`"${friendlySlotName(slot)}" hasn't been ${FILL_VERB[slot.mediaType]} yet${takeHint}.`);
       }
       continue;
     }
 
     if ("text" in fill) {
       if (slot.mediaType !== "text") {
-        errors.push(`slot "${slot.name}" expects a ${slot.mediaType} file but got text`);
+        errors.push(`"${friendlySlotName(slot)}" needs a ${slot.mediaType} file, not text.`);
         continue;
       }
       bindings[slot.name] = { type: "text", text: fill.text };
@@ -296,25 +317,23 @@ export const intake = (jobDir: string): FilledFormat => {
     }
 
     if (slot.mediaType === "text") {
-      errors.push(`slot "${slot.name}" expects text but got a file`);
+      errors.push(`"${friendlySlotName(slot)}" needs text, not a file.`);
       continue;
     }
 
     if ("files" in fill) {
       if (!multiFileSlots.has(slot.name)) {
-        errors.push(
-          `slot "${slot.name}": multiple files are only supported for a voice block's main clip or the identity slot`,
-        );
+        errors.push(`"${friendlySlotName(slot)}" only accepts a single file — please attach just one.`);
         continue;
       }
       const files = fill.files
-        .map((f) => bindOneFile(slot.name, f))
+        .map((f) => bindOneFile(slot, f))
         .filter((f): f is BoundFile => f !== null);
       if (files.length !== fill.files.length) continue; // a per-file error was already pushed
       const mismatch = files.find((f) => f.mediaType !== slot.mediaType);
       if (mismatch) {
         errors.push(
-          `slot "${slot.name}" expects ${slot.mediaType} but ${mismatch.path} is ${mismatch.mediaType}`,
+          `"${friendlySlotName(slot)}" needs ${slot.mediaType}, but ${path.basename(mismatch.path)} is a${mismatch.mediaType === "audio" ? "n" : ""} ${mismatch.mediaType} file.`,
         );
         continue;
       }
@@ -322,11 +341,11 @@ export const intake = (jobDir: string): FilledFormat => {
       continue;
     }
 
-    const bound = bindOneFile(slot.name, fill.file);
+    const bound = bindOneFile(slot, fill.file);
     if (!bound) continue;
     if (bound.mediaType !== slot.mediaType) {
       errors.push(
-        `slot "${slot.name}" expects ${slot.mediaType} but ${fill.file} is ${bound.mediaType}`,
+        `"${friendlySlotName(slot)}" needs ${slot.mediaType}, but ${path.basename(fill.file)} is a${bound.mediaType === "audio" ? "n" : ""} ${bound.mediaType} file.`,
       );
       continue;
     }
@@ -354,7 +373,7 @@ export const intake = (jobDir: string): FilledFormat => {
         const silent = take.files.filter((f) => f.hasAudio === false);
         if (silent.length > 0) {
           for (const f of silent) {
-            errors.push(`speaking take clip "${f.path}" has no audio track`);
+            errors.push(`Your speaking take clip "${path.basename(f.path)}" doesn't have any sound — make sure your recording actually captured audio.`);
           }
         } else {
           try {
@@ -402,9 +421,7 @@ export const intake = (jobDir: string): FilledFormat => {
     if (block.kind !== "voice") continue;
     const files = clip?.type === "file" ? [clip] : clip?.type === "files" ? clip.files : [];
     if (files.some((f) => f.hasAudio === false)) {
-      errors.push(
-        `block "${block.id}" is a voice block but its clip "${block.videoSlot}" has no audio track`,
-      );
+      errors.push(`"${block.title}" needs sound, but its clip doesn't have any — make sure your recording captured audio.`);
     }
   }
 
@@ -419,7 +436,7 @@ export const intake = (jobDir: string): FilledFormat => {
   }
 
   if (errors.length > 0) {
-    throw new Error(`intake failed:\n  - ${errors.join("\n  - ")}`);
+    throw new Error(`Fix these before building:\n  - ${errors.join("\n  - ")}`);
   }
 
   return {

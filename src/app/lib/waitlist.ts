@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { neon, NeonQueryFunction } from "@neondatabase/serverless";
 import { z } from "zod";
+import { sql } from "./db";
 
 /**
  * Waitlist signups live in Postgres (Neon), not the filesystem — unlike
@@ -15,24 +15,6 @@ import { z } from "zod";
  * outside Next's bundler. Safe either way — nothing here is imported by a
  * client component.
  */
-
-// Lazy: constructing the client eagerly would throw at module import if
-// DATABASE_URL is unset, which would 500 every route that imports this
-// file — including code paths (like the honeypot check) that never touch
-// the DB at all.
-let sqlClient: NeonQueryFunction<false, false> | undefined;
-// Only ever called in tagged-template form below (never .query/.unsafe/
-// .transaction), so the cast is safe despite the wrapper not implementing
-// NeonQueryFunction's full interface.
-const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
-  if (!sqlClient) {
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is not set — see .env for the waitlist storage setup.");
-    }
-    sqlClient = neon(process.env.DATABASE_URL);
-  }
-  return sqlClient(strings, ...values);
-}) as NeonQueryFunction<false, false>;
 
 // Capped well above any real email/UTM value so a hostile client can't
 // stuff megabytes into a text column.
