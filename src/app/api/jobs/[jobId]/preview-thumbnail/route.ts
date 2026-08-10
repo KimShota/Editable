@@ -29,5 +29,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ jobI
     return NextResponse.json({ error: "thumbnail generation failed" }, { status: 500 });
   }
 
-  return NextResponse.redirect(new URL(previewCacheUrl(cacheAbsPath), req.url));
+  // Relative Location — see preview-proxy/route.ts for why an absolute
+  // redirect built from req.url breaks behind a reverse proxy.
+  return new NextResponse(null, {
+    status: 307,
+    headers: { Location: previewCacheUrl(cacheAbsPath) },
+  });
 }

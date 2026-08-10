@@ -29,5 +29,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ jobI
     return NextResponse.json({ error: "proxy generation failed" }, { status: 500 });
   }
 
-  return NextResponse.redirect(new URL(previewCacheUrl(cacheAbsPath), req.url));
+  // A RELATIVE Location, not NextResponse.redirect(new URL(..., req.url)).
+  // Behind a reverse proxy, req.url carries the address the app was reached
+  // on internally (localhost:3100), not the one the browser used, so an
+  // absolute redirect built from it points the browser at a host that only
+  // exists on the server — every preview 404s with ERR_CONNECTION_REFUSED.
+  // previewCacheUrl is already root-relative, and RFC 7231 lets Location be
+  // relative, so the browser resolves it against the page's own origin. That
+  // works behind any proxy and in local dev without reading forwarded
+  // headers. NextResponse.redirect() itself can't be used here: it requires
+  // an absolute URL.
+  return new NextResponse(null, {
+    status: 307,
+    headers: { Location: previewCacheUrl(cacheAbsPath) },
+  });
 }
