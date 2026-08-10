@@ -44,8 +44,12 @@ cd /opt/editable
 # (models/ is gitignored, so nothing collides).
 git init -q
 git remote add origin <your-repo-url>
-git fetch -q --depth 1 origin deployment-ready
-git checkout -q -B deployment-ready FETCH_HEAD
+# The server tracks main: whatever is on main is what production runs, so
+# "merged to main" and "deployed" don't drift apart. (This box ran the
+# deployment-ready branch during the initial build-out; that branch was
+# merged into main and is no longer what production follows.)
+git fetch -q --depth 1 origin main
+git checkout -q -B main FETCH_HEAD
 
 # devDependencies are REQUIRED: render.ts shells out to `npx remotion
 # render`, and the Remotion CLI is a devDependency. Never --omit=dev.
@@ -126,9 +130,20 @@ each one actually gets tested:
 ## Updating
 
 ```bash
-sudo -u editable -H bash -c 'cd /opt/editable && git pull && npm ci && npm run app:build'
+# Not `git pull`: the repo above was created with `git init` + a shallow
+# fetch, so there's no upstream-tracking branch for pull to follow.
+sudo -u editable -H bash -c 'cd /opt/editable \
+  && git fetch -q --depth 1 origin main \
+  && git checkout -q -B main FETCH_HEAD \
+  && npm ci \
+  && npm run db:migrate \
+  && npm run app:build'
 systemctl restart editable
 ```
+
+`db:migrate` is in there deliberately — it's a no-op when there's nothing
+new (it tracks applied files in `schema_migrations`), and leaving it out is
+how you end up with code that expects a table the database doesn't have.
 
 ## Watch
 
