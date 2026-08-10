@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { repoRoot } from "../paths";
+import { rvmAvailable } from "./rvm";
 
 /**
  * Local, free person-cutout compositing — the alternative to asking a
@@ -18,16 +19,46 @@ import { repoRoot } from "../paths";
 // server output under Next/Turbopack, not this source file's real
 // location (see paths.ts's repoRoot doc comment).
 const MATTE_SCRIPT = path.join(repoRoot, "src/backend/pipeline/generation/matte.swift");
+const RVM_STILLS_SCRIPT = path.join(repoRoot, "src/backend/pipeline/generation/rvmStillsCli.ts");
 
 /**
- * Runs matte.swift over every *.png in `inputDir`, writing a same-named
- * grayscale alpha mask (white = person, already scaled to match each
- * source image) to `outputDir` — ONE swift process for the whole batch,
- * not one per image, since process startup + Vision model load is a fixed
- * ~0.3-0.4s tax that would otherwise dominate wall time across a video
- * clip's worth of frames.
+ * Runs person segmentation over every *.png in `inputDir`, writing a
+ * same-named grayscale alpha mask (white = person, already scaled to match
+ * each source image) to `outputDir` — ONE subprocess for the whole batch,
+ * not one per image, since process startup + model load is a fixed tax
+ * that would otherwise dominate wall time across a video clip's worth of
+ * frames.
+ *
+ * Engine choice mirrors pipeline/matte.ts's: RVM whenever its model and
+ * runtime are both present, matte.swift's Vision path as the fallback.
+ * Preferring RVM even on macOS is deliberate — it keeps local development
+ * on the same engine the server runs, so a matte that looks right here is
+ * the matte friends actually get. Off macOS the Vision fallback doesn't
+ * exist at all, so a missing model is a hard, explicit failure rather than
+ * an ENOENT from `swift` several frames deep.
  */
 export const matteFramesBatch = (inputDir: string, outputDir: string): void => {
+  if (rvmAvailable()) {
+    try {
+      execFileSync("npx", ["tsx", RVM_STILLS_SCRIPT, inputDir, outputDir], {
+        cwd: repoRoot,
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+    } catch (err) {
+      const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? (err as Error).message;
+      throw new Error(`matteFramesBatch: RVM segmentation failed for "${inputDir}":\n${stderr.slice(-2000)}`);
+    }
+    return;
+  }
+
+  if (process.platform !== "darwin") {
+    throw new Error(
+      `matteFramesBatch: no segmentation engine available. RVM is required off macOS ` +
+        `(matte.swift needs Apple's Vision framework), but its model or runtime is missing — ` +
+        `see generation/rvm.ts's requireRvmModel for the download command.`,
+    );
+  }
+
   try {
     execFileSync("swift", [MATTE_SCRIPT, inputDir, outputDir], { stdio: ["ignore", "ignore", "pipe"] });
   } catch (err) {

@@ -50,10 +50,24 @@ cell_w = TILE_W + PAD * 2
 cell_h = TILE_H + LABEL_H + PAD * 2
 sheet = Image.new("RGB", (cell_w * cols, cell_h * rows), (20, 20, 20))
 draw = ImageDraw.Draw(sheet)
-try:
-    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 16)
-    font_small = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 12)
-except Exception:
+# First path that loads wins. load_default() is a last resort, not a real
+# fallback: it's a tiny bitmap face that makes the per-tile QC labels this
+# sheet exists to convey effectively unreadable, so the Linux render host's
+# own DejaVu is tried before giving up on it.
+FONT_PATHS = [
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+]
+font = font_small = None
+for p in FONT_PATHS:
+    try:
+        font = ImageFont.truetype(p, 16)
+        font_small = ImageFont.truetype(p, 12)
+        break
+    except Exception:
+        continue
+if font is None:
     font = ImageFont.load_default()
     font_small = font
 

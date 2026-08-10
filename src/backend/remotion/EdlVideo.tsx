@@ -51,6 +51,7 @@ const musicVolumeAt = (music: Edl["music"][number], fps: number) => (frame: numb
   // would get capped right back down to unity.
   return music.volume * mult;
 };
+import { ensureDisplayFonts } from "./fonts";
 import { TextOverlay } from "./components/TextOverlay";
 import { ImageOverlay } from "./components/ImageOverlay";
 import { VideoOverlay } from "./components/VideoOverlay";
@@ -239,6 +240,10 @@ const gradeFilter = (grade: Edl["grade"]): string | undefined => {
 };
 
 export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, previewMode }) => {
+  // Root-level, not per-component: SYSTEM_FONT's Inter has to be present
+  // for every frame regardless of which overlays that frame contains (see
+  // fonts.ts's own doc comment).
+  ensureDisplayFonts();
   const { fps } = useVideoConfig();
   const toFrames = (sec: number) => Math.round(sec * fps);
   const filter = gradeFilter(edl.grade);
