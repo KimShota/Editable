@@ -15,6 +15,7 @@ const POLL_MS = 2500;
 export function RenderPanel({ jobId }: { jobId: string }) {
   const [status, setStatus] = useState<RenderStatus>({ status: "idle" });
   const [discarding, setDiscarding] = useState(false);
+  const [gatesOpen, setGatesOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const poll = async () => {
@@ -87,21 +88,39 @@ export function RenderPanel({ jobId }: { jobId: string }) {
       )}
       {status.status === "done" && (
         <div className="mt-4">
+          {/* Gate list is collapsed by default: it grows with the number of
+              clips (one fps-integrity line per source), and at full height it
+              pushes the result video and the Download link out of the panel.
+              The headline count is what matters at a glance; the per-gate
+              detail is for when you want to act on it. */}
           {status.failedGates && status.failedGates.length > 0 && (
             <div className="mb-3 rounded-lg border border-[color:var(--ed-danger)]/40 bg-[color:var(--ed-danger)]/10 p-3">
-              <p className="text-sm font-semibold text-[color:var(--ed-danger)]">
-                {status.failedGates.length} quality check{status.failedGates.length > 1 ? "s" : ""} flagged this render
-              </p>
-              <ul className="mt-1 space-y-0.5 text-xs text-[color:var(--ed-danger)]/90">
-                {status.failedGates.map((g) => (
-                  <li key={g.name}>
-                    {g.name} — {g.measured}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-2 text-xs text-[color:var(--ed-ink)]/70">
-                The video still plays fine — take a look and decide whether it's good enough to keep.
-              </p>
+              <button
+                onClick={() => setGatesOpen((v) => !v)}
+                aria-expanded={gatesOpen}
+                className="flex w-full items-center justify-between gap-3 text-left"
+              >
+                <span className="text-sm font-semibold text-[color:var(--ed-danger)]">
+                  {status.failedGates.length} quality check{status.failedGates.length > 1 ? "s" : ""} flagged this render
+                </span>
+                <span aria-hidden className="shrink-0 text-xs text-[color:var(--ed-danger)]/80">
+                  {gatesOpen ? "Hide ▲" : "Details ▼"}
+                </span>
+              </button>
+              {gatesOpen && (
+                <>
+                  <ul className="mt-2 space-y-0.5 text-xs text-[color:var(--ed-danger)]/90">
+                    {status.failedGates.map((g) => (
+                      <li key={g.name}>
+                        {g.name} — {g.measured}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-xs text-[color:var(--ed-ink)]/70">
+                    The video still plays fine — take a look and decide whether it&apos;s good enough to keep.
+                  </p>
+                </>
+              )}
             </div>
           )}
           <video src={status.outUrl} controls className="w-full rounded-lg" />
