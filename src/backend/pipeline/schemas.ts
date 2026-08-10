@@ -272,14 +272,26 @@ export const GenerationSpecSchema = z.object({
 export const SlotSchema = z.object({
   name: z.string(),
   /** Human-friendly display name shown to the user in place of the raw
-   *  binding key, e.g. "Hook clip" for `hook_clip`. Optional — consumers
-   *  fall back to prettifying `name` (see intake.ts's friendlySlotName), so
-   *  a format only needs to author this when the derived name reads badly. */
+   *  binding key, e.g. "Hook clip" for `hook_clip` or "Painpoint — hook
+   *  text" for `hook_text`. Optional: both consumers fall back to
+   *  prettifying `name`, so a format only authors this when the derived
+   *  name reads badly.
+   *
+   *  Two callers deliberately duplicate that fallback rather than share it,
+   *  because they sit on opposite sides of the app/backend boundary:
+   *  app/lib/slotLabel.ts's slotLabel() for the resources UI, and
+   *  intake.ts's friendlySlotName() for pipeline validation messages. The
+   *  backend can't import from src/app, so the four-line prettifier is
+   *  copied instead of shared — keep the two in step if it ever changes. */
   label: z.string().optional(),
   mediaType: MediaTypeSchema,
   required: z.boolean().default(true),
   /** Filming / sourcing instructions shown to the user. */
   instructions: z.string(),
+  /** A real example value for THIS slot, shown as the textarea placeholder
+   *  and caption in the resources UI — replaces the old one-size-fits-all
+   *  hardcoded example that used to repeat under every text field. */
+  example: z.string().optional(),
   /** Present = this slot is a generated insert, not user-filmed footage. */
   generation: GenerationSpecSchema.optional(),
   /** A checked-in fallback (formatAssetsDir(formatId)-relative file) the

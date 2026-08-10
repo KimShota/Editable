@@ -25,13 +25,17 @@
           "name": "hook-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Film yourself chest-up, casual and curious, asking the setup question straight to camera. Say a literal opener like 'What do you think is heavier to carry?' — keep it short and let the last word hang."
+          "label": "Hook — spoken line",
+          "example": "What do you think is heavier to carry?",
+          "instructions": "Film yourself chest-up, casual and curious, asking the setup question straight to camera. Keep it short and let the last word hang."
         },
         {
           "name": "hook-text",
           "mediaType": "text",
           "required": true,
-          "instructions": "The big top-of-screen question, with the key word emphasized in CAPS, e.g. 'What do you think is HEAVIER to carry?'"
+          "label": "Hook — question on screen",
+          "example": "What do you think is HEAVIER to carry?",
+          "instructions": "The big question shown at the top of the screen. Put the key word in CAPS to emphasize it."
         }
       ],
       "captions": false,
@@ -92,19 +96,25 @@
           "name": "a-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Film yourself saying the answer marker then the first light/literal option, e.g. 'A: a suitcase?' Say it playfully, like it's the obvious answer."
+          "label": "Option A — spoken line",
+          "example": "A: a suitcase?",
+          "instructions": "Say the answer marker then a light, literal option — playfully, like it's the obvious answer."
         },
         {
           "name": "a-letter",
           "mediaType": "text",
           "required": false,
-          "instructions": "The big centered letter label. Leave as 'A:'."
+          "label": "Option A — letter on screen",
+          "example": "A:",
+          "instructions": "The big centered letter shown on screen. Leave blank to use \"A:\"."
         },
         {
           "name": "a-image",
           "mediaType": "image",
           "required": true,
-          "instructions": "A clean product-style photo of the light/literal object you name (e.g. a suitcase on a white background), fills the frame."
+          "label": "Option A — photo",
+          "example": "A clean product photo of a suitcase on a white background",
+          "instructions": "A clean product-style photo of the light, literal object you name. Fills the whole frame."
         }
       ],
       "captions": false,
@@ -186,19 +196,25 @@
           "name": "b-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Film yourself saying the second answer marker then a slightly heavier everyday object, e.g. 'B: a full laundry basket?'"
+          "label": "Option B — spoken line",
+          "example": "B: a full laundry basket?",
+          "instructions": "Say the second answer marker then a slightly heavier everyday object."
         },
         {
           "name": "b-letter",
           "mediaType": "text",
           "required": false,
-          "instructions": "The big centered letter label. Leave as 'B:'."
+          "label": "Option B — letter on screen",
+          "example": "B:",
+          "instructions": "The big centered letter shown on screen. Leave blank to use \"B:\"."
         },
         {
           "name": "b-image",
           "mediaType": "image",
           "required": true,
-          "instructions": "A photo of the everyday object you name (e.g. someone carrying an overflowing laundry basket), fills the frame."
+          "label": "Option B — photo",
+          "example": "Someone carrying an overflowing laundry basket",
+          "instructions": "A photo of the everyday object you name. Fills the whole frame."
         }
       ],
       "captions": false,
@@ -280,19 +296,25 @@
           "name": "c-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Film the letter beat on camera ('C:') then deliver the real, emotional 'answer' as one slow continuous voiceover — the gut-punch metaphor that reframes the question. Speak calmly and low; this plays over moody b-roll."
+          "label": "Option C — spoken line (the real answer)",
+          "example": "C... the weight of what you carry alone.",
+          "instructions": "Say the letter beat on camera (\"C:\") then deliver the real, emotional answer as one slow, calm voiceover — the gut-punch metaphor that reframes the question. This plays over moody b-roll, not your face."
         },
         {
           "name": "c-letter",
           "mediaType": "text",
           "required": false,
-          "instructions": "The big centered letter label. Leave as 'C:'."
+          "label": "Option C — letter on screen",
+          "example": "C:",
+          "instructions": "The big centered letter shown on screen. Leave blank to use \"C:\"."
         },
         {
           "name": "c-broll",
           "mediaType": "video",
           "required": true,
-          "instructions": "Moody, lonely b-roll to lay over the whole monologue — e.g. a lone figure in a dark alley or empty street at night. Slow, quiet, no people talking.",
+          "label": "Option C — mood b-roll",
+          "example": "A lone figure walking down a dark alley or empty street at night",
+          "instructions": "Moody, quiet footage that plays under the whole monologue — slow, lonely, no one talking on camera.",
           "defaultAsset": {
             "file": "c-broll-template.mp4",
             "label": "Our template clip — a lone figure in a dark alley at night"
@@ -383,19 +405,25 @@
           "name": "d-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Snap back to camera, lighter energy, and say the final answer marker with a funny/mundane option, e.g. 'Or D: all the groceries in one trip.'"
+          "label": "Option D — spoken line",
+          "example": "Or D: all the groceries in one trip.",
+          "instructions": "Snap back to camera with lighter energy and say the final answer — a funny, mundane option."
         },
         {
           "name": "d-letter",
           "mediaType": "text",
           "required": false,
-          "instructions": "The big centered letter label. Leave as 'D:'."
+          "label": "Option D — letter on screen",
+          "example": "D:",
+          "instructions": "The big centered letter shown on screen. Leave blank to use \"D:\"."
         },
         {
           "name": "d-broll",
           "mediaType": "image",
           "required": true,
-          "instructions": "A comedic photo of the mundane option (e.g. someone hauling all the grocery bags in one heroic trip), fills the frame."
+          "label": "Option D — photo",
+          "example": "Someone hauling all the grocery bags in one heroic trip",
+          "instructions": "A comedic photo of the mundane option you name. Fills the whole frame."
         }
       ],
       "captions": false,
@@ -478,13 +506,17 @@
           "name": "cta-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Back on camera, warm and quick: say your follow line, e.g. 'follow for more.'"
+          "label": "CTA — spoken line",
+          "example": "follow for more",
+          "instructions": "Back on camera, warm and quick — say your follow line."
         },
         {
           "name": "cta-text",
           "mediaType": "text",
           "required": false,
-          "instructions": "Top-of-screen CTA text. Leave as 'Follow for more'."
+          "label": "CTA — text on screen",
+          "example": "Follow for more",
+          "instructions": "The call-to-action text shown at the top of the screen. Leave blank to use \"Follow for more\"."
         }
       ],
       "captions": false,

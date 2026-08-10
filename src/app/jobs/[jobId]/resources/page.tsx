@@ -32,8 +32,8 @@ export default async function ResourcesPage({ params }: { params: Promise<{ jobI
     <Container className="max-w-[1500px]">
       <PageHeader
         kicker={format.name}
-        title="Throw in your resources"
-        subtitle="Film what each labeled slot asks for, then drop it in. Frequently-used sounds and memes? Drag them straight from your Library on the right."
+        title="Build your video"
+        subtitle="Three steps: write what appears on screen, add your clips and photos, then build. Frequently-used sounds and memes? Drag them straight from your Library on the right."
       />
       <Suspense fallback={null}>
         <ResourcesBoard

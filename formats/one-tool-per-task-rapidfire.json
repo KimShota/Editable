@@ -25,12 +25,15 @@
           "name": "hookClip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Sit centered, eye-level, plain interview background. Open cold with your first use-case then the tool, phrased with a marker word, e.g. 'Writing emails? I use Claude.' Keep it snappy — under 2 seconds — and dive straight in with no intro."
+          "label": "Item 1 (hook) — spoken line",
+          "example": "Writing emails? I use Claude.",
+          "instructions": "Sit centered, eye-level, plain interview background. Open cold with your first use-case then the tool, phrased with a marker word. Keep it snappy — under 2 seconds — and dive straight in with no intro."
         },
         {
           "name": "hookIcon",
           "mediaType": "image",
           "required": true,
+          "label": "Item 1 — tool icon",
           "instructions": "Square app icon / logo of the tool you name here, on transparent or its native background, so it can pop below your chin."
         }
       ],
@@ -218,12 +221,15 @@
           "name": "clip2",
           "mediaType": "video",
           "required": true,
-          "instructions": "State your second use-case then the tool with a marker word, e.g. 'Brainstorming ideas, I use ChatGPT.' Keep the same cadence as item one."
+          "label": "Item 2 — spoken line",
+          "example": "Brainstorming ideas, I use ChatGPT.",
+          "instructions": "State your second use-case then the tool with a marker word. Keep the same cadence as item one."
         },
         {
           "name": "icon2",
           "mediaType": "image",
           "required": true,
+          "label": "Item 2 — tool icon",
           "instructions": "Square app icon / logo of the tool named in this line."
         }
       ],
@@ -411,12 +417,15 @@
           "name": "clip3",
           "mediaType": "video",
           "required": true,
-          "instructions": "State your third use-case then the tool with a marker word, e.g. 'Deep research, I use Perplexity.'"
+          "label": "Item 3 — spoken line",
+          "example": "Deep research, I use Perplexity.",
+          "instructions": "State your third use-case then the tool with a marker word."
         },
         {
           "name": "icon3",
           "mediaType": "image",
           "required": true,
+          "label": "Item 3 — tool icon",
           "instructions": "Square app icon / logo of the tool named in this line."
         }
       ],
@@ -604,12 +613,15 @@
           "name": "clip4",
           "mediaType": "video",
           "required": true,
-          "instructions": "State your fourth use-case then the tool with a marker word, e.g. 'Real-time trends, I use Grok.'"
+          "label": "Item 4 — spoken line",
+          "example": "Real-time trends, I use Grok.",
+          "instructions": "State your fourth use-case then the tool with a marker word."
         },
         {
           "name": "icon4",
           "mediaType": "image",
           "required": true,
+          "label": "Item 4 — tool icon",
           "instructions": "Square app icon / logo of the tool named in this line."
         }
       ],
@@ -797,12 +809,15 @@
           "name": "clip5",
           "mediaType": "video",
           "required": true,
-          "instructions": "State your fifth use-case then the tool with a marker word, e.g. 'Image generation, I use Higgsfield.'"
+          "label": "Item 5 — spoken line",
+          "example": "Image generation, I use Higgsfield.",
+          "instructions": "State your fifth use-case then the tool with a marker word."
         },
         {
           "name": "icon5",
           "mediaType": "image",
           "required": true,
+          "label": "Item 5 — tool icon",
           "instructions": "Square app icon / logo of the tool named in this line."
         }
       ],
@@ -990,12 +1005,15 @@
           "name": "clip6",
           "mediaType": "video",
           "required": true,
-          "instructions": "State your sixth use-case then the tool with a marker word, e.g. 'Creating videos, I use Higgsfield.' Tools may repeat across items."
+          "label": "Item 6 — spoken line",
+          "example": "Creating videos, I use Higgsfield.",
+          "instructions": "State your sixth use-case then the tool with a marker word. Tools may repeat across items."
         },
         {
           "name": "icon6",
           "mediaType": "image",
           "required": true,
+          "label": "Item 6 — tool icon",
           "instructions": "Square app icon / logo of the tool named in this line."
         }
       ],
@@ -1183,12 +1201,15 @@
           "name": "clip7",
           "mediaType": "video",
           "required": true,
-          "instructions": "State your seventh use-case then the tool with a marker word, e.g. 'Understanding a podcast, I use NotebookLM.'"
+          "label": "Item 7 — spoken line",
+          "example": "Understanding a podcast, I use NotebookLM.",
+          "instructions": "State your seventh use-case then the tool with a marker word."
         },
         {
           "name": "icon7",
           "mediaType": "image",
           "required": true,
+          "label": "Item 7 — tool icon",
           "instructions": "Square app icon / logo of the tool named in this line."
         }
       ],
@@ -1376,12 +1397,15 @@
           "name": "clip8",
           "mediaType": "video",
           "required": true,
-          "instructions": "State your eighth use-case then the tool with a marker word, e.g. 'Planning your day, I use ChatGPT.'"
+          "label": "Item 8 — spoken line",
+          "example": "Planning your day, I use ChatGPT.",
+          "instructions": "State your eighth use-case then the tool with a marker word."
         },
         {
           "name": "icon8",
           "mediaType": "image",
           "required": true,
+          "label": "Item 8 — tool icon",
           "instructions": "Square app icon / logo of the tool named in this line."
         }
       ],
@@ -1569,12 +1593,15 @@
           "name": "clip9",
           "mediaType": "video",
           "required": true,
-          "instructions": "State your ninth use-case then the tool with a marker word, e.g. 'Creating cinematic content, I use Higgsfield.'"
+          "label": "Item 9 — spoken line",
+          "example": "Creating cinematic content, I use Higgsfield.",
+          "instructions": "State your ninth use-case then the tool with a marker word."
         },
         {
           "name": "icon9",
           "mediaType": "image",
           "required": true,
+          "label": "Item 9 — tool icon",
           "instructions": "Square app icon / logo of the tool named in this line."
         }
       ],
@@ -1762,12 +1789,15 @@
           "name": "clip10",
           "mediaType": "video",
           "required": true,
-          "instructions": "State your tenth use-case then the tool with a marker word, e.g. 'Writing a sales page, I use Claude.'"
+          "label": "Item 10 — spoken line",
+          "example": "Writing a sales page, I use Claude.",
+          "instructions": "State your tenth use-case then the tool with a marker word."
         },
         {
           "name": "icon10",
           "mediaType": "image",
           "required": true,
+          "label": "Item 10 — tool icon",
           "instructions": "Square app icon / logo of the tool named in this line."
         }
       ],
@@ -1955,12 +1985,15 @@
           "name": "clip11",
           "mediaType": "video",
           "required": true,
-          "instructions": "State your final use-case then the tool with a marker word, e.g. 'Creating product photos, I use Higgsfield.'"
+          "label": "Item 11 (final) — spoken line",
+          "example": "Creating product photos, I use Higgsfield.",
+          "instructions": "State your final use-case then the tool with a marker word."
         },
         {
           "name": "icon11",
           "mediaType": "image",
           "required": true,
+          "label": "Item 11 — tool icon",
           "instructions": "Square app icon / logo of the tool named in this line."
         }
       ],
@@ -2148,13 +2181,16 @@
           "name": "ctaClip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Close with a direct ask, gesturing toward the button: 'Follow [YourHandle] for daily AI tips.' Say your handle immediately after the word 'Follow'."
+          "label": "CTA — spoken line",
+          "example": "Follow @yourhandle for daily AI tips.",
+          "instructions": "Close with a direct ask, gesturing toward the button: \"Follow [YourHandle] for daily AI tips.\" Say your handle immediately after the word \"Follow\"."
         },
         {
           "name": "button",
           "mediaType": "image",
           "required": false,
-          "instructions": "Optional: a blue rounded 'Follow' button graphic (like the native app button) to sit under the caption; leave blank to use the built-in one."
+          "label": "Follow button graphic (optional)",
+          "instructions": "Optional: a blue rounded \"Follow\" button graphic (like the native app button) to sit under the caption; leave blank to use the built-in one."
         }
       ],
       "captions": true,

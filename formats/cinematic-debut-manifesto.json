@@ -18,6 +18,7 @@
     "name": "dramatic-music",
     "mediaType": "audio",
     "required": false,
+    "label": "Cinematic music (optional)",
     "instructions": "A tense, building cinematic/trailer track. Should swell right as the spoken intro ends and carry the montage. Leave blank to use the format's own default score."
   },
   "musicPlacement": {
@@ -30,12 +31,15 @@
     "name": "speaking-take",
     "mediaType": "video",
     "required": true,
+    "label": "Speaking take (all lines in one clip)",
     "instructions": "One continuous take of all your lines, straight to camera. Say each line clearly with a brief pause between them — the office background, cutaways, and montage are added for you automatically."
   },
   "identitySlot": {
     "name": "identity-photos",
     "mediaType": "image",
     "required": true,
+    "label": "Identity photos",
+    "example": "5+ photos: standing arms-crossed, a close-up, a side angle, and seated",
     "instructions": "5+ clear, well-lit photos of your face and body, wearing dark solid-colour clothing (avoid light-coloured trousers) — standing (arms crossed), a close-up, a side/three-quarter angle, and at least one seated pose. These are automatically turned into real studio and couch shots in Kumar's cinematic style, so you don't have to film them yourself."
   },
   "blocks": [
@@ -50,7 +54,9 @@
           "name": "hook-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Sit at a desk, hands steepled, and say slowly and gravely: 'This is a message to all [your audience]' — e.g. 'to all finance pros', 'to all personal trainers'. Deliver it like a threat, not a greeting. Lighting/background are replaced automatically — just say the line."
+          "label": "Hook — spoken line",
+          "example": "This is a message to all finance pros.",
+          "instructions": "Sit at a desk, hands steepled, and say slowly and gravely: \"This is a message to all [your audience]\". Deliver it like a threat, not a greeting. Lighting/background are replaced automatically — just say the line."
         }
       ],
       "captions": true,
@@ -88,6 +94,7 @@
           "name": "beat-1-clip",
           "mediaType": "video",
           "required": true,
+          "label": "Beat 1 — arms-crossed shot",
           "instructions": "Auto-generated — no filming needed.",
           "generation": {
             "kind": "generatedScene",
@@ -121,7 +128,9 @@
           "name": "name-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Same desk framing, calm and confident. Say: 'My name is [your name].' Pause on your name so the big word can hit."
+          "label": "Name reveal — spoken line",
+          "example": "My name is Alex.",
+          "instructions": "Same desk framing, calm and confident. Say: \"My name is [your name].\" Pause on your name so the big word can hit."
         }
       ],
       "captions": true,
@@ -161,6 +170,7 @@
           "name": "beat-2-clip",
           "mediaType": "video",
           "required": true,
+          "label": "Beat 2 — profile shot",
           "instructions": "Auto-generated — no filming needed.",
           "generation": {
             "kind": "generatedScene",
@@ -194,7 +204,9 @@
           "name": "credential-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Same setup. State your background in one short phrase: 'I'm a [credential]' — e.g. 'a retired accountant', 'a former lawyer'. Land hard on the key title word."
+          "label": "Credential — spoken line",
+          "example": "I'm a former lawyer.",
+          "instructions": "Same setup. State your background in one short phrase: \"I'm a [credential]\". Land hard on the key title word."
         }
       ],
       "captions": true,
@@ -234,6 +246,7 @@
           "name": "beat-3-clip",
           "mediaType": "video",
           "required": true,
+          "label": "Beat 3 — seated shot",
           "instructions": "Auto-generated — no filming needed.",
           "generation": {
             "kind": "generatedScene",
@@ -268,7 +281,9 @@
           "name": "claim-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Same dark desk. Deliver your grand, slightly over-the-top mission in one breath: 'And I'm gonna [take over / become the biggest X in the world]'. Escalate your intensity toward the end."
+          "label": "The ambition — spoken line",
+          "example": "And I'm gonna become the biggest name in finance.",
+          "instructions": "Same dark desk. Deliver your grand, slightly over-the-top mission in one breath: \"And I'm gonna [take over / become the biggest X in the world]\". Escalate your intensity toward the end."
         }
       ],
       "captions": true,
@@ -308,6 +323,7 @@
           "name": "triptych-clip",
           "mediaType": "video",
           "required": true,
+          "label": "Detail triptych",
           "instructions": "Auto-generated — no filming needed.",
           "generation": {
             "kind": "triptych",
@@ -363,6 +379,7 @@
           "name": "montage-clip",
           "mediaType": "video",
           "required": true,
+          "label": "Silent dramatic montage",
           "instructions": "Generated automatically from your identity photos in Kumar's cinematic style (backlit silhouette, moody, high contrast), reusing the beat shots earlier in the video plus two fresh cuts. Supply your own clip here instead if you'd rather film this shot yourself.",
           "generation": {
             "kind": "montageReel",
@@ -415,7 +432,9 @@
           "name": "cta-clip",
           "mediaType": "video",
           "required": false,
-          "instructions": "Optional bonus beat. Break the serious tone completely: bright, normal lighting, a partner/friend/family member appears with you and says the ask warmly and a little jokingly: '[This person] wants to be famous, so please follow him/her.' End on a candid laugh or playful beat. Leave blank to skip this beat."
+          "label": "Follow CTA — spoken line (optional)",
+          "example": "She wants to be famous, so please follow her.",
+          "instructions": "Optional bonus beat. Break the serious tone completely: bright, normal lighting, a partner/friend/family member appears with you and says the ask warmly and a little jokingly. End on a candid laugh. Leave blank to skip this beat."
         }
       ],
       "captions": true,
@@ -455,6 +474,7 @@
           "name": "endcard-clip",
           "mediaType": "video",
           "required": true,
+          "label": "Title-card portrait",
           "instructions": "Auto-generated — no filming needed.",
           "generation": {
             "kind": "generatedScene",
@@ -471,7 +491,9 @@
           "name": "debut-title",
           "mediaType": "text",
           "required": true,
-          "instructions": "The title-card text, e.g. \"[NAME]'S DEBUT\". Keep it short and dramatic, ALL CAPS."
+          "label": "End-card title",
+          "example": "ALEX'S DEBUT",
+          "instructions": "The title-card text that closes the video. Keep it short and dramatic, ALL CAPS — e.g. \"[YOUR NAME]'S DEBUT\"."
         }
       ],
       "captions": false,

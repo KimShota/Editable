@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Format } from "@backend/pipeline/types";
 import type { ScriptSuggestion } from "@backend/content/types";
 import { Card, LineKind, Pill } from "../../../../_components/ui";
+import { slotLabel } from "../../../../lib/slotLabel";
 
 const persistScript = async (jobId: string, script: ScriptSuggestion): Promise<ScriptSuggestion> => {
   const res = await fetch(`/api/jobs/${jobId}/script`, {
@@ -96,6 +97,7 @@ export function ScriptLines({
           }
           lineNumber += 1;
           const text = lineFor(block.id, block.videoSlot);
+          const videoSlot = block.slots.find((s) => s.name === block.videoSlot);
           return (
             <div key={block.id} className={`flex items-start gap-3 py-2 pl-1 ${i > 0 ? "border-t border-white/5" : ""}`}>
               <span className="mt-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[color:var(--accent)] text-xs font-bold text-[color:var(--accent-ink)]">
@@ -103,23 +105,27 @@ export function ScriptLines({
               </span>
               <div className="flex-1 pt-1">
                 <div className="mb-2 flex items-center gap-2">
+                  <p className="text-sm font-medium text-[color:var(--ink)]">
+                    {videoSlot ? slotLabel(videoSlot) : block.title}
+                  </p>
                   <LineKind kind="spoken" />
                 </div>
                 <p className="mb-2 text-[12px] leading-snug text-[color:var(--ink-dim)]">
-                  {block.slots.find((s) => s.name === block.videoSlot)?.instructions ?? block.title}
+                  {videoSlot?.instructions ?? block.title}
                 </p>
                 <textarea
                   defaultValue={text}
+                  placeholder={videoSlot?.example ? `e.g. ${videoSlot.example}` : undefined}
                   onBlur={(e) => {
                     const value = e.target.value;
                     if (value !== text) saveLine(block.id, block.videoSlot, value);
                   }}
                   rows={2}
-                  className="w-full resize-none rounded-lg border border-white/12 bg-black/20 p-3 text-sm text-[color:var(--ink)] outline-none focus:border-[color:var(--accent)]"
+                  className="w-full resize-none rounded-lg border border-white/12 bg-black/20 p-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
                 />
-                <p className="mt-1 text-[11px] text-[color:var(--ink-dim)]">
-                  Example — Here are 5 secret ChatGPT codes that nobody is talking about.
-                </p>
+                {videoSlot?.example && (
+                  <p className="mt-1 text-[11px] text-[color:var(--ink-dim)]">Example: {videoSlot.example}</p>
+                )}
                 {saving === block.videoSlot && (
                   <p className="mt-1 text-xs text-[color:var(--ink-dim)]">Saving…</p>
                 )}
