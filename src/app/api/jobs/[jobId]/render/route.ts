@@ -4,6 +4,8 @@ import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 import { jobExists, jobDir } from "../../../../lib/jobs";
 import { acquirePipelineSlot } from "../../../../lib/pipelineQueue";
+import { getRequestUser } from "../../../../lib/auth";
+import { checkAndRecordQuota } from "../../../../lib/quota";
 import { repoRoot, artifactsDir, outDir } from "@backend/pipeline/paths";
 
 /**
@@ -79,6 +81,17 @@ export async function POST(_req: Request, { params }: { params: Promise<{ jobId:
   const existing = readStatus(jobId);
   if (existing?.status === "rendering") {
     return NextResponse.json(existing, { status: 202 });
+  }
+
+  // See build/route.ts's identical check for why a null user here would
+  // mean middleware's guarantee broke, not a real anonymous caller.
+  const user = await getRequestUser();
+  if (!user) {
+    return NextResponse.json({ error: "log in required" }, { status: 401 });
+  }
+  const quota = await checkAndRecordQuota(user, jobId, "render");
+  if (!quota.ok) {
+    return NextResponse.json({ error: quota.error }, { status: quota.status });
   }
 
   const startedAt = new Date().toISOString();

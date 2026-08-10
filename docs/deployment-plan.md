@@ -249,8 +249,7 @@ non-Node dependency the other five formats don't have.
 The €9 is fixed. The uncapped item is **API spend** — every build calls
 Anthropic for role resolution and transcript correction
 (`resolvers/index.ts` `pickResolver`/`pickCorrector`, auto → Anthropic
-whenever `ANTHROPIC_API_KEY` is set). The invite gate controls *who*
-spends, not *how much*.
+whenever `ANTHROPIC_API_KEY` is set).
 
 Shipping all six formats raises this materially. `cinematic-debut-manifesto`
 is the only format with generation slots (6 of them), so it's the only one
@@ -258,9 +257,28 @@ that spends on Gemini/Higgsfield image and video generation — per build,
 and again on every QC retry inside `generatedShots`. The other five cost
 only the Anthropic resolver/corrector calls.
 
+**Per-user quota + kill switch (`src/app/lib/quota.ts`)** — the invite gate
+only ever controlled *who* could spend, not *how much*; this is what bounds
+the *how much*. `PIPELINE_DAILY_LIMIT_PER_USER` (default 10) caps build+render
+attempts per user in a rolling 24h, enforced in both
+`api/jobs/[jobId]/build` and `.../render` before the child process spawns —
+an attempt counts even if the build fails, since a failed build has already
+made its Anthropic/Gemini calls. Admins are exempt. `PIPELINE_DISABLED=1` +
+`systemctl restart editable` refuses every build/render immediately (503) —
+an env var rather than a DB flag, so it can't fail open if Neon is
+unreachable. Quota rows live in `pipeline_runs`
+(`db/migrations/003_pipeline_runs.sql`), not memory, so the count survives a
+restart.
+
+Known gap: two simultaneous requests can both pass the quota check before
+either records itself, so the true cap is the configured limit plus a small
+margin under concurrent load — not worth closing with a row lock against
+`PIPELINE_MAX_CONCURRENT=2`'s own ceiling on how much concurrency is even
+possible.
+
 - Set a hard spend limit in the Anthropic console, not just an alert. Do
-  the same on Gemini/Higgsfield.
-- Keep the invite count in single digits to start.
+  the same on Gemini/Higgsfield — the quota bounds *attempts*, not the
+  dollar cost of each one.
 - If spend gets uncomfortable, dropping cinematic back out of the gallery
   is a one-command `git mv` (see Scope above) and costs nothing else.
 

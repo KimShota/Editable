@@ -4,6 +4,8 @@ import { spawn } from "node:child_process";
 import { NextRequest, NextResponse } from "next/server";
 import { jobExists, jobDir } from "../../../../lib/jobs";
 import { acquirePipelineSlot } from "../../../../lib/pipelineQueue";
+import { getRequestUser } from "../../../../lib/auth";
+import { checkAndRecordQuota } from "../../../../lib/quota";
 import { repoRoot, artifactsDir } from "@backend/pipeline/paths";
 import { Edl } from "@backend/pipeline/types";
 
@@ -44,6 +46,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
   const existing = readStatus(jobId);
   if (existing?.status === "building") {
     return NextResponse.json(existing, { status: 202 });
+  }
+
+  // Middleware already 401s an unauthenticated request before it reaches
+  // here (see middleware.ts) — getRequestUser() returning null on a job
+  // route would mean that guarantee broke, not a real anonymous caller.
+  const user = await getRequestUser();
+  if (!user) {
+    return NextResponse.json({ error: "log in required" }, { status: 401 });
+  }
+  const quota = await checkAndRecordQuota(user, jobId, "build");
+  if (!quota.ok) {
+    return NextResponse.json({ error: quota.error }, { status: quota.status });
   }
 
   const body = await req.json().catch(() => ({}));

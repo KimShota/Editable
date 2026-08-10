@@ -38,8 +38,17 @@ export function RenderPanel({ jobId }: { jobId: string }) {
 
   const startRender = async () => {
     const res = await fetch(`/api/jobs/${jobId}/render`, { method: "POST" });
-    const data: RenderStatus = await res.json();
-    setStatus(data);
+    const data = await res.json();
+    // A quota/kill-switch rejection (429/503) is `{ error: string }`, which
+    // matches none of RenderStatus's variants — blindly casting it, as this
+    // used to, left every `status.status === "..."` check below false and
+    // the panel silently showed nothing. Route it through the existing
+    // "error" branch instead so the message actually reaches the user.
+    if (!res.ok) {
+      setStatus({ status: "error", startedAt: "", finishedAt: "", error: data.error ?? `request failed (${res.status})` });
+      return;
+    }
+    setStatus(data as RenderStatus);
     if (data.status === "rendering" && !timer.current) {
       timer.current = setInterval(poll, POLL_MS);
     }
