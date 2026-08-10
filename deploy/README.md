@@ -39,7 +39,13 @@ ssh root@<ip>
 sudo -u editable -H bash
 
 cd /opt/editable
-git clone -b deployment-ready <your-repo-url> .
+# NOT `git clone . ` — provision.sh already created models/ here, and clone
+# refuses a non-empty directory. init+fetch works against existing files
+# (models/ is gitignored, so nothing collides).
+git init -q
+git remote add origin <your-repo-url>
+git fetch -q --depth 1 origin deployment-ready
+git checkout -q -B deployment-ready FETCH_HEAD
 
 # devDependencies are REQUIRED: render.ts shells out to `npx remotion
 # render`, and the Remotion CLI is a devDependency. Never --omit=dev.
@@ -71,10 +77,15 @@ journalctl -u editable -f
 ## 5. TLS
 
 ```bash
-sed -i 's/app.example.com/<your-hostname>/' /opt/editable/deploy/Caddyfile
-install -m 644 /opt/editable/deploy/Caddyfile /etc/caddy/Caddyfile
-mkdir -p /var/log/caddy && chown caddy:caddy /var/log/caddy
-systemctl reload caddy
+sed "s/app.example.com/<your-hostname>/" /opt/editable/deploy/Caddyfile > /etc/caddy/Caddyfile
+mkdir -p /var/log/caddy
+caddy validate --config /etc/caddy/Caddyfile
+# AFTER validate, not before: `caddy validate` run as root instantiates the
+# logger and creates editable.log owned by root:root 0600. The service runs
+# as `caddy` and then can't append to it — the failure looks like a
+# filesystem permission bug but the directory is fine; it's that one file.
+chown -R caddy:caddy /var/log/caddy
+systemctl restart caddy && systemctl is-active caddy
 ```
 
 Certificate issuance takes a few seconds on first request. Then **verify a
