@@ -1,0 +1,38 @@
+[Unit]
+Description=Editable
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=editable
+Group=editable
+WorkingDirectory=/opt/editable
+
+# Next reads .env itself, and the pipeline loads it via dotenv — this is
+# here so the `npm run pipeline` CHILD processes the API routes spawn
+# inherit the same values regardless of which loader runs first.
+EnvironmentFile=/opt/editable/.env
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+ExecStart=/usr/bin/npm run app:start
+Restart=always
+RestartSec=5
+
+# A build or render is a minutes-long child process writing into jobs/ and
+# out/. The default 90s stop timeout would SIGKILL it mid-write and leave a
+# half-written artifact behind, so give in-flight work room to finish.
+TimeoutStopSec=300
+KillSignal=SIGTERM
+
+# Renders are memory-hungry (esbuild bundle + headless Chromium). Let the
+# OOM killer take this service before it takes the whole box.
+OOMPolicy=continue
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=editable
+
+[Install]
+WantedBy=multi-user.target

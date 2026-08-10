@@ -1,0 +1,25 @@
+# Replace with your hostname before copying to /etc/caddy/Caddyfile.
+# Caddy provisions and renews the Let's Encrypt certificate automatically —
+# the only requirement is that this name's A record already points here.
+app.example.com {
+	reverse_proxy localhost:3100 {
+		# A take upload is minutes long on a slow connection. Caddy's
+		# default proxy read timeout is generous, but the flush interval
+		# matters for the build/render routes, which stream progress back
+		# as plain text and would otherwise arrive in one lump at the end.
+		flush_interval -1
+	}
+
+	# Deliberately NOT setting a request_body max_size. next.config.mjs
+	# raises Next's own limit to 2gb for raw take uploads, and Caddy has no
+	# default cap of its own, so leaving this out is what makes large
+	# uploads work. (This is also why the app can't sit behind Cloudflare's
+	# proxy: free and Pro plans hard-cap request bodies at 100MB.)
+
+	encode zstd gzip
+
+	log {
+		output file /var/log/caddy/editable.log
+		format console
+	}
+}
