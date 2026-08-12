@@ -108,18 +108,18 @@ const AddButton = ({
  *  instead. */
 const AddTextButton = ({
   disabled,
-  currentTimeSec,
+  currentTimeSecRef,
   onOp,
 }: {
   disabled: boolean;
-  currentTimeSec: number;
+  currentTimeSecRef: React.RefObject<number>;
   onOp: (op: TimelineOp) => void;
 }) => (
   <button
     type="button"
     draggable={!disabled}
     disabled={disabled}
-    onClick={() => onOp(buildAddTextOverlayOp(currentTimeSec))}
+    onClick={() => onOp(buildAddTextOverlayOp(currentTimeSecRef.current))}
     onDragStart={(e) => {
       e.dataTransfer.effectAllowed = "copy";
       e.dataTransfer.setData(TEXT_OVERLAY_DRAG_TYPE, "1");
@@ -144,27 +144,30 @@ const AddTextButton = ({
  *  odd one out — no file to import, just "Add text", clicked or dragged
  *  onto the preview/timeline to place it (see textOverlay.ts).
  *
- *  Memoized: doesn't depend on playhead position for its OWN render (the
- *  playhead is only read at upload time via a ref-free prop), so it
- *  shouldn't re-render on every one of the editor's ~30/sec frame updates. */
+ *  Memoized: doesn't depend on playhead position for its OWN render — the
+ *  playhead is only read at upload/add-text time, through a ref rather
+ *  than a plain number prop, specifically so a changing playhead can't
+ *  defeat this memo and force a re-render on every one of the editor's
+ *  ~30/sec frame updates (a plain prop would change identity every frame
+ *  and memo compares props, not usage). */
 export const MediaPanel = memo(function MediaPanel({
   edl,
   onJumpTo,
   onUpload,
   onOp,
-  currentTimeSec,
+  currentTimeSecRef,
   pending,
 }: {
   edl: Edl;
   onJumpTo: (selection: Selection, tlInSec: number) => void;
   onUpload: (file: File, kind: MediaKind, atSec: number) => Promise<boolean>;
   onOp: (op: TimelineOp) => void;
-  currentTimeSec: number;
+  currentTimeSecRef: React.RefObject<number>;
   pending: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("media");
   const upload = (file: File, kind: MediaKind) => {
-    void onUpload(file, kind, currentTimeSec);
+    void onUpload(file, kind, currentTimeSecRef.current);
   };
 
   /** Every piece of visual media the job holds, as ONE uniform list: the
@@ -286,7 +289,7 @@ export const MediaPanel = memo(function MediaPanel({
         {/* Just the one control — existing text lives on the timeline,
             where it's already clickable, so listing it again here would
             only duplicate it. */}
-        {tab === "text" && <AddTextButton disabled={pending} currentTimeSec={currentTimeSec} onOp={onOp} />}
+        {tab === "text" && <AddTextButton disabled={pending} currentTimeSecRef={currentTimeSecRef} onOp={onOp} />}
       </div>
     </div>
   );

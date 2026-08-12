@@ -1,5 +1,6 @@
 import React from "react";
 import { AbsoluteFill, OffthreadVideo, staticFile } from "remotion";
+import { previewProxySrc } from "../previewSrc";
 
 /**
  * A hard-cut visual cutaway: full-frame, muted, no card styling (that's
@@ -10,13 +11,21 @@ import { AbsoluteFill, OffthreadVideo, staticFile } from "remotion";
  * spoken line on ~0.9s beats, never interrupting the voice). No default
  * box in assemble.ts's DEFAULT_MEDIA_BOX_MAX means this gets the
  * full-frame fallback automatically — deliberate, not an oversight.
+ *
+ * `jobId`/`previewMode` — see VideoOverlay's own doc comment: same
+ * preview-proxy swap, injected by EdlVideo's OverlayInstance.
  */
-export const CutawayOverlay: React.FC<{ src?: string }> = ({ src }) => {
+export const CutawayOverlay: React.FC<{ src?: string; jobId?: string; previewMode?: boolean }> = ({
+  src,
+  jobId,
+  previewMode,
+}) => {
   if (!src) return null;
+  const resolvedSrc = previewMode && jobId ? previewProxySrc(jobId, src) : staticFile(src);
   return (
     <AbsoluteFill>
       <OffthreadVideo
-        src={staticFile(src)}
+        src={resolvedSrc}
         muted
         style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
       />

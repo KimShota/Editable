@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Edl } from "@backend/pipeline/types";
 import type { TimelineOp } from "@backend/pipeline/timelineOps";
+import { previewProxySrc } from "@backend/remotion/previewSrc";
 import { TimelineClip } from "./TimelineClip";
 import { assignLanes, laneCount } from "./lanes";
 import { isSelected, Selection, SelectionTrack, toggleSelect } from "./selection";
@@ -610,11 +611,19 @@ export function Timeline({
         // Muted segments never play audio, so a waveform there would just
         // be misleading — skip it and let the "muted" sublabel speak for
         // itself.
-        waveformSrc: v.muted ? undefined : `/${v.src}`,
+        //
+        // Routed through the same preview proxy the Player's own video
+        // elements use (see EdlVideo.tsx's previewProxySrc), not the raw
+        // asset directly — v.src often points at a 15-40MB 4K original,
+        // and decoding a clip's FULL audio track for its waveform doesn't
+        // need the original's video bitrate along for the ride. Every clip
+        // renders its waveform on Timeline mount (not lazily), so this
+        // was routinely tens of MB of unnecessary download up front.
+        waveformSrc: v.muted ? undefined : previewProxySrc(edl.jobId, v.src),
         waveformInSec: v.srcInSec,
         waveformOutSec: v.srcOutSec,
       })),
-    [edl.video],
+    [edl.video, edl.jobId],
   );
 
   const overlayClips: ClipView[] = useMemo(

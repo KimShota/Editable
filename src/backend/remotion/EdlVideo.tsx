@@ -52,6 +52,7 @@ const musicVolumeAt = (music: Edl["music"][number], fps: number) => (frame: numb
   return music.volume * mult;
 };
 import { ensureDisplayFonts } from "./fonts";
+import { previewProxySrc } from "./previewSrc";
 import { TextOverlay } from "./components/TextOverlay";
 import { ImageOverlay } from "./components/ImageOverlay";
 import { VideoOverlay } from "./components/VideoOverlay";
@@ -115,12 +116,6 @@ const IncomingTransition: React.FC<{
   }
   return <>{children}</>;
 };
-
-/** Editor-only: a source clip served through the transcoded preview proxy
- *  instead of the (often 4K) original — see previewMedia.ts. Export never
- *  sets `previewMode`, so `render.ts` always gets the real source. */
-const previewProxySrc = (jobId: string, src: string): string =>
-  `/api/jobs/${jobId}/preview-proxy?src=${encodeURIComponent(src)}`;
 
 /** The karaokeTitle fg-alpha layer (matte.ts's compositeSubjectAlphaVideo)
  *  for ONE video segment — subject + desk foreground, transparent
@@ -190,7 +185,11 @@ const Segment: React.FC<{
  *  window lookup. overlay.states is always [] for a format that doesn't
  *  author any, so this is a no-op loop and params===overlay.params for
  *  every overlay that exists today. */
-const OverlayInstance: React.FC<{ overlay: Edl["overlays"][number] }> = ({ overlay }) => {
+const OverlayInstance: React.FC<{ overlay: Edl["overlays"][number]; jobId: string; previewMode?: boolean }> = ({
+  overlay,
+  jobId,
+  previewMode,
+}) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const tSec = overlay.tlInSec + frame / fps;
@@ -218,7 +217,14 @@ const OverlayInstance: React.FC<{ overlay: Edl["overlays"][number] }> = ({ overl
         motion={overlay.motion ?? DEFAULT_MOTION_BY_COMPONENT[overlay.component]}
         totalDurationInFrames={totalDurationInFrames}
       >
-        <Component {...params} />
+        {/* jobId/previewMode are only consumed by the two overlay
+            components that embed a video (VideoOverlay, CutawayOverlay —
+            see their own doc comments); every other registered component
+            just ignores the extra props. Without this they fell back to
+            staticFile(), live-decoding the original (often 4K) source in
+            the browser instead of the small preview proxy every OTHER
+            video element in this composition already uses. */}
+        <Component {...params} jobId={jobId} previewMode={previewMode} />
       </MotionWrapper>
     </div>
   );
@@ -238,6 +244,16 @@ const gradeFilter = (grade: Edl["grade"]): string | undefined => {
   const hueRotateDeg = grade.temperatureShift * -12;
   return `brightness(${brightnessMultiplier}) contrast(${grade.contrast}) saturate(${grade.saturation}) hue-rotate(${hueRotateDeg}deg)`;
 };
+
+/** How far ahead of its own start a preview-mode Sequence mounts its child
+ *  — long enough to cover a preview-proxy request (an API round trip, plus
+ *  ffmpeg transcode time on a cache miss) and a fresh <video> element's own
+ *  fetch/seek/decoder warm-up, without premounting so many elements at once
+ *  that concurrent decode load becomes the new bottleneck. The previous
+ *  0.75s budget wasn't enough headroom for a still-warming cache, which
+ *  showed up as a stall right at the cut. Export never premounts (ffmpeg
+ *  frame extraction has no equivalent warm-up cost). */
+const PREVIEW_PREMOUNT_SEC = 2;
 
 export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, previewMode }) => {
   // Root-level, not per-component: SYSTEM_FONT's Inter has to be present
@@ -268,7 +284,7 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
             from={toFrames(seg.tlInSec)}
             durationInFrames={toFrames(seg.tlOutSec) - toFrames(seg.tlInSec)}
             name={`video:${seg.id}`}
-            premountFor={previewMode ? Math.round(fps * 0.75) : 0}
+            premountFor={previewMode ? Math.round(fps * PREVIEW_PREMOUNT_SEC) : 0}
           >
             <Segment seg={seg} transition={incomingTransitions.get(seg.id)} jobId={edl.jobId} previewMode={previewMode} />
           </Sequence>
@@ -292,6 +308,7 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
             from={toFrames(seg.tlInSec)}
             durationInFrames={toFrames(seg.tlOutSec) - toFrames(seg.tlInSec)}
             name={`fg:${seg.id}`}
+            premountFor={previewMode ? Math.round(fps * PREVIEW_PREMOUNT_SEC) : 0}
           >
             <FgLayer src={seg.fgSrc!} srcInSec={seg.srcInSec} srcOutSec={seg.srcOutSec} jobId={edl.jobId} previewMode={previewMode} />
           </Sequence>
@@ -303,8 +320,9 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
           from={toFrames(overlay.tlInSec)}
           durationInFrames={toFrames(overlay.tlOutSec) - toFrames(overlay.tlInSec)}
           name={`overlay:${overlay.id}`}
+          premountFor={previewMode ? Math.round(fps * PREVIEW_PREMOUNT_SEC) : 0}
         >
-          <OverlayInstance overlay={overlay} />
+          <OverlayInstance overlay={overlay} jobId={edl.jobId} previewMode={previewMode} />
         </Sequence>
       ))}
 

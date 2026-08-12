@@ -50,6 +50,17 @@ const loadLayout = (): Layout => {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
+/** While playing, re-rendering the whole editor tree (timeline playhead,
+ *  Inspector, OverlayCanvas) on every one of the Player's ~30/sec frame
+ *  ticks competes with the Player itself for the main thread it needs to
+ *  decode/paint smoothly — that contention is a big part of why preview
+ *  playback stutters. Capping the editor's own re-render rate frees that
+ *  thread up without losing any real precision: nothing downstream needs
+ *  frame-exact chrome updates DURING playback. Scrubbing/stepping (not
+ *  playing) still updates on every tick for a responsive feel — see the
+ *  frameupdate listener below. */
+const PLAYBACK_UI_THROTTLE_MS = 80;
+
 const panelClass = "rounded-xl border border-[color:var(--ed-border)] bg-[color:var(--ed-panel)] overflow-hidden";
 
 const TransportButton = ({
@@ -107,6 +118,14 @@ export function Editor({
   // composition-props change and invalidates the whole render tree.
   const playerInputProps = useMemo(() => ({ edl, previewMode: true }), [edl]);
 
+  // The exact playhead position, updated on every one of the Player's own
+  // ~30/sec frame ticks regardless of throttling below — anything that
+  // reads the CURRENT instant (upload-at-playhead, frame stepping) uses
+  // this instead of the throttled `currentTimeSec` state.
+  const currentTimeSecRef = useRef(0);
+  const isPlayingRef = useRef(false);
+  const lastUiFrameUpdateRef = useRef(0);
+
   const isFirstPersist = useRef(true);
 
   // Skips its own first run so the mount-time load below (which changes
@@ -142,9 +161,31 @@ export function Editor({
   useEffect(() => {
     const player = playerRef.current;
     if (!player) return;
-    const onFrame = (e: { detail: { frame: number } }) => setCurrentTimeSec(e.detail.frame / edl.fps);
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
+    const onFrame = (e: { detail: { frame: number } }) => {
+      const sec = e.detail.frame / edl.fps;
+      currentTimeSecRef.current = sec;
+      if (!isPlayingRef.current) {
+        setCurrentTimeSec(sec);
+        return;
+      }
+      const now = performance.now();
+      if (now - lastUiFrameUpdateRef.current < PLAYBACK_UI_THROTTLE_MS) return;
+      lastUiFrameUpdateRef.current = now;
+      setCurrentTimeSec(sec);
+    };
+    const onPlay = () => {
+      isPlayingRef.current = true;
+      setIsPlaying(true);
+    };
+    const onPause = () => {
+      isPlayingRef.current = false;
+      // Playback just stopped mid-throttle-window — flush the exact
+      // position immediately rather than leaving the UI up to
+      // PLAYBACK_UI_THROTTLE_MS stale until the next tick (there won't be
+      // one; the Player isn't emitting frameupdate while paused).
+      setCurrentTimeSec(currentTimeSecRef.current);
+      setIsPlaying(false);
+    };
     const onFullscreenChange = (e: { detail: { isFullscreen: boolean } }) =>
       setIsFullscreen(e.detail.isFullscreen);
     player.addEventListener("frameupdate", onFrame);
@@ -158,6 +199,39 @@ export function Editor({
       player.removeEventListener("fullscreenchange", onFullscreenChange);
     };
   }, [edl.fps]);
+
+  // Prewarms the preview-proxy transcode for every video source the EDL
+  // currently references, as soon as it's known — instead of waiting for
+  // the Player's own Sequence to premount and request it right as playback
+  // reaches that clip. /preview-proxy blocks on ffmpeg the first time it's
+  // asked for a source (see previewMedia.ts), so without this, hitting a
+  // not-yet-cached clip mid-playback stalls the video element until the
+  // transcode finishes. `warmed` tracks what's already been requested so an
+  // unrelated edit (a new `edl` object on every accepted op) doesn't
+  // re-request sources that are already cached or in flight.
+  const warmedPreviewSources = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const sources = new Set<string>();
+    for (const v of edl.video) sources.add(v.src);
+    for (const seg of edl.video) if (seg.fgSrc) sources.add(seg.fgSrc);
+    for (const o of edl.overlays) {
+      if (
+        (o.component === "VideoOverlay" || o.component === "CutawayOverlay") &&
+        typeof o.params.src === "string"
+      ) {
+        sources.add(o.params.src);
+      }
+    }
+    for (const src of sources) {
+      if (warmedPreviewSources.current.has(src)) continue;
+      warmedPreviewSources.current.add(src);
+      fetch(`/api/jobs/${jobId}/preview-proxy?src=${encodeURIComponent(src)}`, { redirect: "manual" }).catch(() => {
+        // Best-effort warmup only — a failed prefetch just means the
+        // Player's own request (still guaranteed later) does the work.
+        warmedPreviewSources.current.delete(src);
+      });
+    }
+  }, [jobId, edl.video, edl.overlays]);
 
   const seekToSec = useCallback(
     (sec: number) => {
@@ -399,7 +473,7 @@ export function Editor({
               onJumpTo={jumpTo}
               onUpload={uploadMedia}
               onOp={submitOp}
-              currentTimeSec={currentTimeSec}
+              currentTimeSecRef={currentTimeSecRef}
               pending={pending}
             />
           </div>
