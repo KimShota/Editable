@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { NextRequest, NextResponse } from "next/server";
 import { repoRoot } from "@backend/pipeline/paths";
 
@@ -60,35 +61,66 @@ function parseRange(rangeHeader: string | null, size: number): { start: number; 
   return { start, end };
 }
 
+/** Cheap enough to compute on every request (just the already-`stat`'d
+ *  size/mtime, no file read) — weak because a byte-identical re-encode at
+ *  the same size+mtime-granularity is indistinguishable from the original
+ *  and that's fine for video/audio, unlike e.g. a JSON diff. */
+const weakETag = (stat: fs.Stats): string => `W/"${stat.size.toString(16)}-${stat.mtimeMs.toString(16)}"`;
+
 /** Serves a file with Range support — required for <video>/<audio> seeking
  *  to work at all in Chrome. Without a 206 response to a Range request, the
  *  element treats the resource as unseekable and setting `currentTime` is
- *  silently ignored. */
-function serveFile(filePath: string, contentType: string, rangeHeader: string | null): NextResponse {
-  const size = fs.statSync(filePath).size;
-  const data = fs.readFileSync(filePath);
-  const range = parseRange(rangeHeader, size);
-  if (range) {
-    const chunk = data.subarray(range.start, range.end + 1);
-    return new NextResponse(new Uint8Array(chunk), {
-      status: 206,
-      headers: {
-        "Content-Type": contentType,
-        "Content-Range": `bytes ${range.start}-${range.end}/${size}`,
-        "Content-Length": String(chunk.length),
-        "Accept-Ranges": "bytes",
-        "Cache-Control": "no-store",
-      },
-    });
+ *  silently ignored.
+ *
+ * Streams via fs.createReadStream instead of reading the whole file into a
+ * Buffer first — a scrub/seek on a multi-hundred-MB clip used to allocate
+ * the ENTIRE file per request (a 326MB source for a 64KB range read), and
+ * every one of those buffers stays pinned in RAM for as long as its
+ * response is in flight; a handful of concurrent video elements on one
+ * page was enough to push the dev server into the multi-GB range. Streaming
+ * caps memory at whatever the platform's own internal chunk size is,
+ * regardless of file size.
+ *
+ * `Cache-Control: no-cache` (NOT no-store, and NOT a long max-age/
+ * immutable): out/<jobId>.mp4 gets overwritten by a re-render at the SAME
+ * path, and a job's own assets/generated/derived files can likewise be
+ * replaced without a path change (see stageAssets/the ffmpeg transcode
+ * below) — so this always revalidates with the server rather than trusting
+ * a local copy indefinitely. Revalidation is a 304 (via ETag/Last-Modified)
+ * that costs one stat() call, not a re-read, which is what actually kills
+ * the redundant-refetch half of the memory problem: the browser's own
+ * cache serves the bytes it already downloaded instead of re-requesting
+ * them from a route that used to advertise itself as uncacheable. */
+function serveFile(filePath: string, contentType: string, req: NextRequest): NextResponse {
+  const stat = fs.statSync(filePath);
+  const size = stat.size;
+  const etag = weakETag(stat);
+  const lastModified = stat.mtime.toUTCString();
+  const cacheControl = "no-cache";
+
+  const ifNoneMatch = req.headers.get("if-none-match");
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    return new NextResponse(null, { status: 304, headers: { ETag: etag, "Last-Modified": lastModified, "Cache-Control": cacheControl } });
   }
-  return new NextResponse(new Uint8Array(data), {
-    headers: {
-      "Content-Type": contentType,
-      "Content-Length": String(size),
-      "Accept-Ranges": "bytes",
-      "Cache-Control": "no-store",
-    },
-  });
+
+  const range = parseRange(req.headers.get("range"), size);
+  const start = range ? range.start : 0;
+  const end = range ? range.end : size - 1;
+
+  const nodeStream = fs.createReadStream(filePath, { start, end });
+  const webStream = Readable.toWeb(nodeStream) as unknown as ReadableStream;
+
+  const headers: Record<string, string> = {
+    "Content-Type": contentType,
+    "Content-Length": String(end - start + 1),
+    "Accept-Ranges": "bytes",
+    "Cache-Control": cacheControl,
+    ETag: etag,
+    "Last-Modified": lastModified,
+  };
+  if (range) headers["Content-Range"] = `bytes ${range.start}-${range.end}/${size}`;
+
+  return new NextResponse(webStream, { status: range ? 206 : 200, headers });
 }
 
 export async function GET(
@@ -152,10 +184,10 @@ export async function GET(
       }
     }
     if (fs.existsSync(previewPath)) {
-      return serveFile(previewPath, "video/mp4", req.headers.get("range"));
+      return serveFile(previewPath, "video/mp4", req);
     }
   }
 
   const contentType = CONTENT_TYPES[path.extname(resolved).toLowerCase()] ?? "application/octet-stream";
-  return serveFile(resolved, contentType, req.headers.get("range"));
+  return serveFile(resolved, contentType, req);
 }
