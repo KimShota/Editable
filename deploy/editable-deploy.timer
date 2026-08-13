@@ -1,0 +1,20 @@
+[Unit]
+Description=Check origin/main for new commits every few minutes
+Documentation=file:/opt/editable/deploy/README.md
+
+[Timer]
+# First check shortly after boot, then every 3 minutes. Nearly every firing
+# does one shallow `git fetch` and exits — the interval is cheap, and it's also
+# the retry cadence when a deploy defers to an in-flight render, so a merge
+# that lands mid-render still ships a few minutes after the box frees up.
+OnBootSec=5min
+OnUnitActiveSec=3min
+
+# Keeps the fetch off an exact wall-clock boundary shared with every other
+# timer on the box.
+RandomizedDelaySec=30s
+
+Unit=editable-deploy.service
+
+[Install]
+WantedBy=timers.target

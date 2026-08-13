@@ -129,21 +129,76 @@ each one actually gets tested:
 
 ## Updating
 
+Automatic. `editable-deploy.timer` checks `origin/main` every 3 minutes and
+runs `deploy/update.sh` when it moved, so **merged to main means deployed**
+with nothing left to remember. Install it once:
+
 ```bash
-# Not `git pull`: the repo above was created with `git init` + a shallow
-# fetch, so there's no upstream-tracking branch for pull to follow.
-sudo -u editable -H bash -c 'cd /opt/editable \
-  && git fetch -q --depth 1 origin main \
-  && git checkout -q -B main FETCH_HEAD \
-  && npm ci \
-  && npm run db:migrate \
-  && npm run app:build'
-systemctl restart editable
+install -m 644 /opt/editable/deploy/editable-deploy.service /etc/systemd/system/
+install -m 644 /opt/editable/deploy/editable-deploy.timer   /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now editable-deploy.timer
+
+systemctl list-timers editable-deploy   # next firing
+journalctl -u editable-deploy -f        # watch a deploy happen
 ```
+
+`update.sh` lives in the repo, so it updates itself along with everything
+else. It does, in order: shallow-fetch `main`; **exit silently if HEAD
+already matches** (the common case — a timer tick that finds nothing costs
+one fetch); **defer if any job is in flight**; then `npm ci`, `db:migrate`,
+`app:build`, `systemctl restart editable`, and confirm the service is
+actually up 5s later.
 
 `db:migrate` is in there deliberately — it's a no-op when there's nothing
 new (it tracks applied files in `schema_migrations`), and leaving it out is
 how you end up with code that expects a table the database doesn't have.
+
+### Why it defers instead of just deploying
+
+`npm ci` **deletes `node_modules` before reinstalling it**, and a running
+build or render is a child process reading out of exactly that directory —
+`tsx`, the Remotion CLI, `onnxruntime-node`'s prebuilt `.node`. Deploying
+under a live job doesn't merely restart it early; it pulls the interpreter
+out from under a process that's minutes into writing job artifacts. So the
+script treats a busy box as a reason to come back in 3 minutes.
+
+"Busy" is two checks, because neither alone is sufficient:
+
+- **`pgrep` for `pipeline/run.ts`** — ground truth for work that's actually
+  executing, and immune to stale files.
+- **`artifacts/*/{build,render}-status.json` reading `building`/
+  `rendering`** — catches a job the API has accepted but which is still
+  parked in `pipelineQueue`'s in-memory waiter list with no process yet.
+  Restarting drops that job with no record it was ever queued; the browser
+  just polls a status file that never advances.
+
+The status-file check ignores anything untouched for `STALE_AFTER_MIN`
+(default 180). Without that cutoff, one process killed mid-build leaves a
+file reading `"building"` forever and blocks every future deploy.
+
+### Driving it by hand
+
+```bash
+systemctl start editable-deploy.service   # deploy now, same guards
+FORCE=1 /opt/editable/deploy/update.sh    # skip the in-flight check
+systemctl stop editable-deploy.timer      # pause auto-deploy (e.g. during a demo)
+```
+
+A failed deploy **does not restart the service** — the box keeps serving the
+previous build, and the journal prints the exact rollback command with the
+old SHA in it.
+
+### Two things it doesn't solve
+
+- **`next build` overwrites `.next` under the running server.** For the
+  ~1–2 minutes between build start and restart, the live process can serve
+  from a directory being rewritten under it. This is inherent to the
+  manual sequence too, and idle-only deploys keep the exposure small — but
+  if it ever bites, the fix is building to a fresh `distDir` and swapping.
+- **Deploys are branch-triggered, not reviewed.** Anything merged to `main`
+  is live within ~3 minutes. That's the point, but it does mean `main`
+  needs to stay deployable.
 
 ## Watch
 
