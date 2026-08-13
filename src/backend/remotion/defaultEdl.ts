@@ -38,6 +38,7 @@ export const defaultEdl: Edl = {
       width: 1,
       height: 1,
       states: [],
+      layoutLocked: false,
     },
   ],
   sfx: [],

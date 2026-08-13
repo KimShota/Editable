@@ -10,6 +10,7 @@ import {
   temporalAlphaGatePasses,
 } from "./generation/maskQC";
 import { Edl, Format, MatteArtifact } from "./types";
+import { findUnresolvedTextOverlayCollisions } from "./textOverlayLayout";
 
 /**
  * Acceptance gates for a rendered export — measured against the reference
@@ -787,6 +788,23 @@ const captionGates = (edl: Edl, format: Format | undefined): GateResult[] => {
   return [noFlashFrames, bigTitleShare];
 };
 
+/** Gate: no two TextOverlay events land on top of each other on the
+ *  FINAL, frozen EDL — assemble.ts's auto-layout solver (see
+ *  textOverlayLayout.ts) already prevents this at build time; this
+ *  re-checks the export's actual edl.json, catching the case where a
+ *  post-build hand edit (e.g. "Reset to template style" un-locking an
+ *  overlay without re-running the solver) reintroduced one, rather than
+ *  silently shipping a render with the exact bug this feature exists to
+ *  prevent. */
+const textOverlapGate = (edl: Edl): GateResult => {
+  const collisions = findUnresolvedTextOverlayCollisions(edl.overlays, edl.width, edl.height);
+  return {
+    name: "no overlapping TextOverlay events",
+    pass: collisions.length === 0,
+    measured: collisions.length === 0 ? "none" : `${collisions.length} pair(s): ${collisions.map(([a, b]) => `"${a}"/"${b}"`).join(", ")}`,
+  };
+};
+
 /** Gate: every non-optional block the format declares actually made it
  *  into the export (an optional block's own absence is fine — see
  *  BlockSchema's doc comment — a REQUIRED block missing is a real bug the
@@ -825,6 +843,7 @@ export const runGates = (videoPath: string, edl: Edl, matte?: MatteArtifact): Ga
     shotDensityGate(edl),
     endCardDurationGate(edl, format),
     structureGate(edl, format),
+    textOverlapGate(edl),
   ];
 };
 

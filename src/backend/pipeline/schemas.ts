@@ -1173,6 +1173,15 @@ export const EdlOverlaySchema = z.object({
    *  FormatEvent.motion (or an override's own, see assemble.ts). Absent =
    *  the rendering component's own hardcoded default motion. */
   motion: MotionSpecSchema.optional(),
+  /** Set the moment a user drags/resizes this overlay's box on the canvas,
+   *  or hand-sets its fontSize in the Inspector (see timelineOps.ts's
+   *  applySetProp) — "this box's geometry is the user's own decision now,"
+   *  same spirit as EdlCaptionGroupSchema's x/y. textOverlayLayout.ts's
+   *  auto-layout pass (run once inside assemble()) never touches a locked
+   *  overlay's box/fontSize; it treats it as a fixed obstacle other text
+   *  routes around instead. Cleared back to false only by "Reset to
+   *  template style," which hands the box back to auto-layout. */
+  layoutLocked: z.boolean().default(false),
 });
 
 export const EdlSfxSchema = z.object({

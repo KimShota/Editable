@@ -16,6 +16,7 @@ import {
   TextVariant,
   fitDidoneFontSize,
 } from "../../components/style";
+import { clampPillPadding, outerInsetPx } from "../../components/textFit";
 import { ensureDisplayFonts } from "../fonts";
 
 /**
@@ -119,6 +120,15 @@ export const TextOverlay: React.FC<{
   backgroundRadius?: number;
   paddingX?: number;
   paddingY?: number;
+  /** This event's own on-canvas box, in composition px — set by
+   *  EdlVideo.tsx's OverlayInstance from the EDL's x/y/width/height
+   *  fraction (see EdlOverlaySchema). Used only to keep the outer inset
+   *  and the background pill's own padding proportional to a SMALL box
+   *  (see outerInsetPx's doc comment) instead of the flat 60px that used
+   *  to swallow most of a ~150px-tall resource-card title region. Falls
+   *  back to the full frame when absent (a standalone/full-frame render). */
+  boxWidthPx?: number;
+  boxHeightPx?: number;
 }> = ({
   text = "",
   variant = "hook",
@@ -133,13 +143,26 @@ export const TextOverlay: React.FC<{
   backgroundRadius = 28,
   paddingX = 40,
   paddingY = 22,
+  boxWidthPx,
+  boxHeightPx,
 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
   if (variant === "kumarSplitTitle") return <KumarSplitTitle text={text} />;
   const style = TEXT_VARIANTS[(variant as Variant) in TEXT_VARIANTS ? (variant as Variant) : "hook"];
   const resolvedFontFamily = fontFamily ? (FONT_FAMILY_SHORTHANDS[fontFamily] ?? fontFamily) : style.fontFamily;
   if (resolvedFontFamily && resolvedFontFamily !== SYSTEM_FONT) ensureDisplayFonts();
+
+  const boxWpx = boxWidthPx ?? width;
+  const boxHpx = boxHeightPx ?? height;
+  // A background pill contains itself via its own padding below; the
+  // outer inset is only for bare (no-pill) text, so the two never stack
+  // and double-eat a small box's own height (see textOverlayLayout.ts's
+  // computeInsets, which this mirrors exactly — the solver has to predict
+  // the same number this renders with).
+  const outerPad = background ? 0 : outerInsetPx(boxWpx, boxHpx);
+  const resolvedPaddingX = background ? clampPillPadding(paddingX, boxWpx) : paddingX;
+  const resolvedPaddingY = background ? clampPillPadding(paddingY, boxHpx) : paddingY;
 
   // The resolve/kumarTitle punch in on the beat; everything else eases in
   // quickly.
@@ -152,7 +175,13 @@ export const TextOverlay: React.FC<{
 
   return (
     <AbsoluteFill
-      style={{ justifyContent: "center", alignItems: "center", padding: 60 }}
+      // overflow: hidden is the hard backstop: whatever the auto-layout
+      // solver estimated (textOverlayLayout.ts, Node-side, no real glyph
+      // metrics available there — see textFit.ts's own doc comment on why
+      // it's an approximation), this box never visually spills into
+      // whatever sits next to it. Worst case on a misjudged estimate is
+      // an invisibly clipped line, not a collision.
+      style={{ justifyContent: "center", alignItems: "center", padding: outerPad, overflow: "hidden" }}
     >
       <div
         style={{
@@ -174,7 +203,7 @@ export const TextOverlay: React.FC<{
                 display: "inline-block",
                 background,
                 borderRadius: backgroundRadius,
-                padding: `${paddingY}px ${paddingX}px`,
+                padding: `${resolvedPaddingY}px ${resolvedPaddingX}px`,
                 boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
               }
             : {}),

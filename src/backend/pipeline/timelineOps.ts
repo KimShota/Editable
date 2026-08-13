@@ -308,6 +308,10 @@ const applyShiftOverlayBoxMany = (edl: Edl, op: Extract<TimelineOp, { type: "shi
     const clip = edl.overlays[findIndexOrThrow(edl.overlays, id, "overlay")];
     clip.x += op.dx;
     clip.y += op.dy;
+    // Only ever dispatched from an actual canvas drag (see OverlayCanvas's
+    // own doc comment) — same layoutLocked contract as applySetProp's
+    // single-overlay drag/resize above.
+    clip.layoutLocked = true;
   }
 };
 
@@ -612,6 +616,17 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
   if (op.track === "overlay") {
     const clip = edl.overlays[findIndexOrThrow(edl.overlays, op.id!, "overlay")];
     if (typeof op.patch.component === "string") clip.component = op.patch.component;
+
+    // Tracks whether this patch is the user hand-adjusting the overlay's
+    // own geometry (box drag/resize, or a font-size set — OverlayCanvas's
+    // corner-resize and the Inspector's font-size slider both land here,
+    // see their own call sites) vs. "Reset to template style" explicitly
+    // clearing fontSize back to null. Either way flips layoutLocked (see
+    // EdlOverlaySchema's own doc comment) — set on a hand adjustment so
+    // textOverlayLayout.ts's auto-layout never overwrites it again on a
+    // later reassemble; cleared on reset so auto-layout gets the box back.
+    let userAdjustedGeometry = false;
+    let explicitFontSizeReset = false;
     if (op.patch.params && typeof op.patch.params === "object") {
       // An explicit null deletes the key (back to the component's own
       // default — see TextOverlay's variant fallback) rather than setting
@@ -619,17 +634,36 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
       // Object.assign couldn't express "delete", which the Inspector's
       // "Reset to template style" needs per-field.
       for (const [key, value] of Object.entries(op.patch.params as Record<string, unknown>)) {
-        if (value === null) delete clip.params[key];
-        else clip.params[key] = value;
+        if (value === null) {
+          delete clip.params[key];
+          if (key === "fontSize") explicitFontSizeReset = true;
+        } else {
+          clip.params[key] = value;
+          if (key === "fontSize" && typeof value === "number") userAdjustedGeometry = true;
+        }
       }
     }
     // On-canvas box (see EdlOverlaySchema) — x/y are deliberately
     // unclamped (partially off-frame is a valid CapCut-style placement);
     // width/height only get a small positive floor.
-    if (typeof op.patch.x === "number") clip.x = op.patch.x;
-    if (typeof op.patch.y === "number") clip.y = op.patch.y;
-    if (typeof op.patch.width === "number") clip.width = Math.max(op.patch.width, MIN_OVERLAY_SIZE);
-    if (typeof op.patch.height === "number") clip.height = Math.max(op.patch.height, MIN_OVERLAY_SIZE);
+    if (typeof op.patch.x === "number") {
+      clip.x = op.patch.x;
+      userAdjustedGeometry = true;
+    }
+    if (typeof op.patch.y === "number") {
+      clip.y = op.patch.y;
+      userAdjustedGeometry = true;
+    }
+    if (typeof op.patch.width === "number") {
+      clip.width = Math.max(op.patch.width, MIN_OVERLAY_SIZE);
+      userAdjustedGeometry = true;
+    }
+    if (typeof op.patch.height === "number") {
+      clip.height = Math.max(op.patch.height, MIN_OVERLAY_SIZE);
+      userAdjustedGeometry = true;
+    }
+    if (userAdjustedGeometry) clip.layoutLocked = true;
+    else if (explicitFontSizeReset) clip.layoutLocked = false;
     return;
   }
   if (op.track === "sfx") {
@@ -751,6 +785,7 @@ const applyAddOverlay = (edl: Edl, op: Extract<TimelineOp, { type: "addOverlay" 
     width: op.width,
     height: op.height,
     states: [],
+    layoutLocked: false,
   });
   recomputeVideoTrack(edl);
 };

@@ -191,7 +191,7 @@ const OverlayInstance: React.FC<{ overlay: Edl["overlays"][number]; jobId: strin
   previewMode,
 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
   const tSec = overlay.tlInSec + frame / fps;
   let params = overlay.params;
   for (const s of overlay.states) {
@@ -219,12 +219,14 @@ const OverlayInstance: React.FC<{ overlay: Edl["overlays"][number]; jobId: strin
       >
         {/* jobId/previewMode are only consumed by the two overlay
             components that embed a video (VideoOverlay, CutawayOverlay —
-            see their own doc comments); every other registered component
-            just ignores the extra props. Without this they fell back to
-            staticFile(), live-decoding the original (often 4K) source in
-            the browser instead of the small preview proxy every OTHER
-            video element in this composition already uses. */}
-        <Component {...params} jobId={jobId} previewMode={previewMode} />
+            see their own doc comments); boxWidthPx/boxHeightPx only by
+            TextOverlay (see its own doc comment); every other registered
+            component just ignores whichever extra props it doesn't use.
+            Without jobId/previewMode they fell back to staticFile(),
+            live-decoding the original (often 4K) source in the browser
+            instead of the small preview proxy every OTHER video element
+            in this composition already uses. */}
+        <Component {...params} jobId={jobId} previewMode={previewMode} boxWidthPx={overlay.width * width} boxHeightPx={overlay.height * height} />
       </MotionWrapper>
     </div>
   );

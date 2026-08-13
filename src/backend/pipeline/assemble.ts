@@ -24,6 +24,7 @@ import { audioOnsetSec } from "./trim";
 import { publicJobPrefix, formatStylesDir, formatAssetsDir } from "./paths";
 import { loadStyleProfile } from "./generation/styleProfile";
 import { loadPlatesManifest } from "./generation/plates";
+import { solveTextOverlayLayout } from "./textOverlayLayout";
 
 /**
  * Module 6 — Timeline assembly.
@@ -658,6 +659,7 @@ export const assemble = (
           ...box,
           states: resolvedStates,
           motion: event.motion,
+          layoutLocked: false,
         });
       } else {
         const volume = resolvedRef.params.volume;
@@ -909,6 +911,7 @@ export const assemble = (
             tlOutSec: tlInSec + endSec,
             ...defaultOverlayBox("CutawayOverlay", {}, ecuAsset.width, ecuAsset.height),
             states: [],
+            layoutLocked: false,
           });
         }
       }
@@ -1073,6 +1076,14 @@ export const assemble = (
       karaokeTitleBaselineFrac = undefined;
     }
   }
+
+  // Auto-layout pass: grows/shrinks/repositions TextOverlay events so no
+  // two ever visually collide — see textOverlayLayout.ts's own doc
+  // comment. Runs here, once, over the fully-resolved overlay list (every
+  // box/timing decision above has already landed) and before the EDL is
+  // frozen — the same "decided upstream, mechanical downstream" contract
+  // render.ts documents for everything after assemble().
+  solveTextOverlayLayout(overlays, format.width, format.height, captions, diagnostics);
 
   const edl: Edl = EdlSchema.parse({
     jobId: filled.jobId,
