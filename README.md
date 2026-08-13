@@ -160,3 +160,30 @@ The backend (engine) and frontend (web app) are separate folders under
 
 `npm run dev` opens Remotion Studio; the `EdlVideo` composition previews a
 placeholder EDL (real renders pass a job's EDL via `--props`).
+
+### Running the web app
+
+```bash
+npm run app:dev      # http://localhost:3100
+npm run app:build    # what deploy/update.sh runs on the server
+npm run app:start
+```
+
+`app:dev` pins `--max-old-space-size=4096` deliberately. Turbopack's dev
+server opens an HMR subscription per server chunk
+(`next/dist/server/dev/hot-reloader-turbopack.js`, `subscribeToServerHmr`)
+and pumps each one through an async iterator that buffers events in an
+unbounded array. On Next 16.2.10 that could run away: a dev server left
+open while files changed underneath it climbed past 8GB of JS heap and
+died with `FATAL ERROR: Ineffective mark-compacts near heap limit`, after
+first pushing the machine into swap hard enough to make everything else
+unusable — the thrashing was worse than the crash. Next 16.3 fixes the
+underlying cause (memory eviction for the dev cache, on by default, plus
+collapsing those per-chunk subscriptions into one), so the cap is a
+backstop, not the fix: it turns any recurrence into a fast crash you can
+restart instead of a wedged laptop. Node otherwise defaults the limit to
+roughly half of physical RAM (8.4GB on a 16GB machine), which is far more
+than this app legitimately needs — a healthy session sits near 120MB.
+
+Only `next dev` is affected. `next start` never loads the dev
+hot-reloader, so the deployed box is not exposed to this.
