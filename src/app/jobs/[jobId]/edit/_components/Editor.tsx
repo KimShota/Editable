@@ -6,6 +6,7 @@ import { Player, PlayerRef } from "@remotion/player";
 import { EdlVideo } from "@backend/remotion/EdlVideo";
 import type { Edl } from "@backend/pipeline/types";
 import type { TimelineOp } from "@backend/pipeline/timelineOps";
+import type { QuotaStatus } from "../../../../lib/quota";
 import { Timeline } from "./Timeline";
 import { Inspector } from "./Inspector";
 import { MediaPanel } from "./MediaPanel";
@@ -110,6 +111,7 @@ export function Editor({
   const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
   const [undoStack, setUndoStack] = useState<Edl[]>([]);
   const [redoStack, setRedoStack] = useState<Edl[]>([]);
+  const [quota, setQuota] = useState<QuotaStatus | null>(null);
 
   const playerRef = useRef<PlayerRef>(null);
   const totalFrames = Math.max(1, Math.round(edl.durationSec * edl.fps));
@@ -232,6 +234,28 @@ export function Editor({
       });
     }
   }, [jobId, edl.video, edl.overlays]);
+
+  // Refreshed on mount, right before the Export panel (where Render lives)
+  // opens, and right after a render attempt is actually recorded (see
+  // RenderPanel's own onQuotaChange call) — a build/render attempt is
+  // recorded the instant the request is accepted, not when it finishes (see
+  // quota.ts's own doc comment), so that's the moment this should re-check,
+  // not render completion.
+  const fetchQuota = useCallback(() => {
+    fetch("/api/quota")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: QuotaStatus | null) => {
+        if (data) setQuota(data);
+      })
+      .catch(() => {
+        // Decorative indicator only — a failed fetch just leaves the last
+        // known value (or nothing) shown.
+      });
+  }, []);
+
+  useEffect(() => {
+    fetchQuota();
+  }, [fetchQuota]);
 
   const seekToSec = useCallback(
     (sec: number) => {
@@ -430,6 +454,11 @@ export function Editor({
         </div>
 
         <div className="flex items-center gap-3">
+          {quota && !quota.unlimited && (
+            <span className="flex items-center gap-1.5 rounded-full border border-[color:var(--ed-border)] px-2.5 py-1 text-[11px] text-[color:var(--ed-ink-dim)]">
+              {quota.remaining} video{quota.remaining === 1 ? "" : "s"} left today
+            </span>
+          )}
           <span className="flex items-center gap-1.5 rounded-full border border-[color:var(--ed-border)] px-2.5 py-1 text-[11px] text-[color:var(--ed-ink-dim)]">
             {pending ? (
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[color:var(--ed-accent)]" />
@@ -441,7 +470,10 @@ export function Editor({
 
           <div className="relative">
             <button
-              onClick={() => setExportOpen((v) => !v)}
+              onClick={() => {
+                setExportOpen((v) => !v);
+                fetchQuota();
+              }}
               className="rounded-lg bg-[color:var(--ed-accent)] px-4 py-2 font-[family-name:var(--ed-font-display)] text-sm font-semibold text-[color:var(--ed-accent-ink)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
             >
               Export
@@ -450,7 +482,7 @@ export function Editor({
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
                 <div className="absolute top-11 right-0 z-50 w-96">
-                  <RenderPanel jobId={jobId} />
+                  <RenderPanel jobId={jobId} onQuotaChange={fetchQuota} />
                 </div>
               </>
             )}

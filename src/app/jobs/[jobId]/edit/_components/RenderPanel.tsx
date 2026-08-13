@@ -12,7 +12,7 @@ type RenderStatus =
 
 const POLL_MS = 2500;
 
-export function RenderPanel({ jobId }: { jobId: string }) {
+export function RenderPanel({ jobId, onQuotaChange }: { jobId: string; onQuotaChange?: () => void }) {
   const [status, setStatus] = useState<RenderStatus>({ status: "idle" });
   const [discarding, setDiscarding] = useState(false);
   const [gatesOpen, setGatesOpen] = useState(false);
@@ -52,6 +52,12 @@ export function RenderPanel({ jobId }: { jobId: string }) {
     if (data.status === "rendering" && !timer.current) {
       timer.current = setInterval(poll, POLL_MS);
     }
+    // A render attempt is recorded the instant this request is accepted —
+    // BEFORE the render actually runs (see quota.ts's own doc comment on
+    // why: a build/render that fails downstream has still spent the
+    // money) — so quota already changed by the time this response lands,
+    // not when the render later finishes.
+    onQuotaChange?.();
   };
 
   const discard = async () => {

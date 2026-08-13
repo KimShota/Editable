@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { getSessionUser, SessionUser, SESSION_COOKIE } from "../lib/auth";
+import { getQuotaStatus, QuotaStatus } from "../lib/quota";
 import { LogoutButton } from "./LogoutButton";
+import { Pill } from "./ui";
 
 const LINKS = [
   { href: "/projects", label: "Projects" },
@@ -26,6 +28,18 @@ export async function Nav() {
   }
   const links = LINKS.filter((link) => !link.adminOnly || user?.isAdmin);
 
+  // Same best-effort shape as the session lookup above — a quota query
+  // failure shouldn't take down every page's nav, it just means the badge
+  // is silently absent for this render.
+  let quota: QuotaStatus | null = null;
+  if (user) {
+    try {
+      quota = await getQuotaStatus(user);
+    } catch (err) {
+      console.error("Nav: quota lookup failed", err);
+    }
+  }
+
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[color:var(--bg)]/70 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between px-6">
@@ -48,6 +62,11 @@ export async function Nav() {
         </nav>
         {user && (
           <div className="flex items-center gap-3">
+            {quota && !quota.unlimited && (
+              <Pill tone={quota.remaining === 0 ? "accent" : "default"}>
+                {quota.remaining} video{quota.remaining === 1 ? "" : "s"} left today
+              </Pill>
+            )}
             <span className="text-[13px] text-[color:var(--ink-dim)]">{user.email}</span>
             <LogoutButton />
           </div>

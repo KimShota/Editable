@@ -16,6 +16,10 @@ import type { SessionUser } from "./session";
 
 export type QuotaResult = { ok: true } | { ok: false; error: string; status: 429 | 503 };
 
+export type QuotaStatus =
+  | { unlimited: true }
+  | { unlimited: false; limit: number; used: number; remaining: number };
+
 const DEFAULT_DAILY_LIMIT = 10;
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -31,6 +35,32 @@ const dailyLimit = (): number => {
   if (process.env.PIPELINE_DAILY_LIMIT_PER_USER === undefined) return DEFAULT_DAILY_LIMIT;
   const raw = Number(process.env.PIPELINE_DAILY_LIMIT_PER_USER);
   return Number.isFinite(raw) && raw > 0 ? raw : 0;
+};
+
+/** Rolling-24h attempt count for this user — shared by checkAndRecordQuota's
+ *  own check and getQuotaStatus's read-only peek, so the two can't drift on
+ *  what "used" means. */
+const countUsed = async (userId: string): Promise<number> => {
+  const since = new Date(Date.now() - WINDOW_MS).toISOString();
+  const rows = await sql`
+    select count(*)::int as count from pipeline_runs
+    where user_id = ${userId} and created_at >= ${since}
+  `;
+  return (rows[0] as { count: number }).count;
+};
+
+/**
+ * Read-only: how much of today's quota is left, without recording an
+ * attempt — for showing a "N videos left today" indicator in the UI. Mirrors
+ * checkAndRecordQuota's own unlimited rules (admin, or the env var set to
+ * unlimited) so the two never disagree about who's capped.
+ */
+export const getQuotaStatus = async (user: SessionUser): Promise<QuotaStatus> => {
+  if (user.isAdmin) return { unlimited: true };
+  const limit = dailyLimit();
+  if (limit === 0) return { unlimited: true };
+  const used = await countUsed(user.id);
+  return { unlimited: false, limit, used, remaining: Math.max(0, limit - used) };
 };
 
 /**
@@ -64,12 +94,7 @@ export const checkAndRecordQuota = async (
   const limit = dailyLimit();
   if (limit === 0) return { ok: true };
 
-  const since = new Date(Date.now() - WINDOW_MS).toISOString();
-  const rows = await sql`
-    select count(*)::int as count from pipeline_runs
-    where user_id = ${user.id} and created_at >= ${since}
-  `;
-  const used = (rows[0] as { count: number }).count;
+  const used = await countUsed(user.id);
   if (used >= limit) {
     return {
       ok: false,
