@@ -1,0 +1,30 @@
+[Unit]
+Description=Deploy Editable from origin/main if changed and idle
+After=network-online.target
+Wants=network-online.target
+
+# Deliberately NO Requires=/After=editable.service. Binding to it would make
+# the deploy refuse to run whenever the app is down or crash-looping — which
+# is exactly the state a deploy is most often meant to get it out of.
+
+[Service]
+Type=oneshot
+
+# Root, because the last step is `systemctl restart editable`. update.sh drops
+# to the `editable` user (runuser) for every git/npm step, so nothing
+# root-owned lands in a tree the service reads unprivileged.
+User=root
+WorkingDirectory=/opt/editable
+ExecStart=/opt/editable/deploy/update.sh
+
+# `next build` bundles the whole app and db:migrate waits on Neon. The default
+# has no timeout, but being explicit keeps a wedged deploy from holding the
+# lock indefinitely and blocking every later cycle.
+TimeoutStartSec=1800
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=editable-deploy
+
+# No [Install] section: this unit is started by editable-deploy.timer, never
+# enabled directly. Enable the timer, not this.
