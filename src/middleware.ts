@@ -40,7 +40,17 @@ export const runtime = "nodejs";
  * .gitignore's explicit `!jobs/<id>` allow-list) — everything else unowned
  * is real dev/test data that predates accounts, not something to expose to
  * every signed-up friend by default. Kept in sync with jobs.ts's copy of
- * this same list.
+ * this same list. Being shared doesn't mean writable, though: a demo job
+ * is read-only for non-admins (GET/HEAD only) — otherwise any tester could
+ * overwrite or "Delete forever" the one demo every gallery preview and
+ * README walkthrough points at.
+ *
+ * 3. Each user's own asset library (library/<userId>/<category>/, see
+ *    app/lib/library.ts) is scoped the same way a job is — every route
+ *    under api/library/ already resolves to the caller's own userId
+ *    server-side, so the only extra thing middleware needs to enforce is
+ *    that /api/media/library/<userId>/... can't be fetched by anyone but
+ *    that userId (or an admin).
  */
 
 const DEMO_JOB_IDS = new Set(["demo", "five-codes", "five-codes-demo"]);
@@ -69,6 +79,17 @@ const jobIdFromPath = (pathname: string): string | null => {
   }
   return null;
 };
+
+/** Extracts the owning userId from a library media path:
+ *  /api/media/library/<userId>/<category>/<filename>. Distinct from
+ *  jobIdFromPath — a library asset's "owner" is baked directly into the
+ *  URL (see lib/library.ts's mediaUrlFor), not looked up in a table. */
+const libraryUserIdFromPath = (pathname: string): string | null => {
+  const match = /^\/api\/media\/library\/([^/]+)\//.exec(pathname);
+  return match ? match[1] : null;
+};
+
+const isReadOnlyMethod = (method: string): boolean => method === "GET" || method === "HEAD";
 
 /** null means no owner is recorded for this job (legacy/demo content). */
 const jobOwnerId = async (jobId: string): Promise<string | null> => {
@@ -110,11 +131,22 @@ export async function middleware(req: NextRequest) {
 
   if (!user.isAdmin) {
     const jobId = jobIdFromPath(pathname);
-    if (jobId && !DEMO_JOB_IDS.has(jobId)) {
-      const ownerId = await jobOwnerId(jobId);
-      if (ownerId !== user.id) {
-        return notFound(req);
+    if (jobId) {
+      if (DEMO_JOB_IDS.has(jobId)) {
+        if (!isReadOnlyMethod(req.method)) {
+          return notFound(req);
+        }
+      } else {
+        const ownerId = await jobOwnerId(jobId);
+        if (ownerId !== user.id) {
+          return notFound(req);
+        }
       }
+    }
+
+    const libraryUserId = libraryUserIdFromPath(pathname);
+    if (libraryUserId && libraryUserId !== user.id) {
+      return notFound(req);
     }
   }
 

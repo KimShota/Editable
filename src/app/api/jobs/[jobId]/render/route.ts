@@ -139,7 +139,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ jobId:
         }
         writeStatus(jobId, { status: "done", startedAt, finishedAt, outUrl: `/api/media/out/${jobId}.mp4`, ...(failedGates ? { failedGates } : {}) });
       } else {
-        writeStatus(jobId, { status: "error", startedAt, finishedAt, error: stderrTail || `render exited with code ${code}` });
+        const error = stderrTail || `render exited with code ${code}`;
+        console.error(`render failed for job "${jobId}":\n${error}`);
+        writeStatus(jobId, { status: "error", startedAt, finishedAt, error });
       }
     });
   });
@@ -153,7 +155,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ jobId: 
     return NextResponse.json({ error: "job not found" }, { status: 404 });
   }
   const existing = readStatus(jobId);
-  if (existing) return NextResponse.json(existing);
+  if (existing) {
+    // See build/route.ts's identical redaction — a raw pipeline stderr tail
+    // can carry server paths/stack traces/SDK error bodies, not something
+    // to hand a non-admin's browser. Full detail is in the journal already
+    // (see the console.error above).
+    if (existing.status === "error") {
+      const user = await getRequestUser();
+      if (!user?.isAdmin) {
+        return NextResponse.json({ ...existing, error: "the render failed — ask an admin to check the server logs" });
+      }
+    }
+    return NextResponse.json(existing);
+  }
 
   const rendered = fs.existsSync(path.join(outDir, `${jobId}.mp4`));
   return NextResponse.json(

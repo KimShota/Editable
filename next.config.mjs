@@ -14,7 +14,9 @@ const nextConfig = {
     // middleware at 10MB by default — silently truncating any raw video
     // upload (api/jobs/[jobId]/assets) past that, which breaks the
     // multipart parse. Raised well past a phone-recorded clip's size.
-    middlewareClientMaxBodySize: "2gb",
+    // (Renamed from middlewareClientMaxBodySize, deprecated in Next 16.3 —
+    // see node_modules/next/dist/docs — same option, new name.)
+    proxyClientMaxBodySize: "2gb",
   },
 };
 

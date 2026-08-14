@@ -5,25 +5,36 @@ import { repoRoot } from "@backend/pipeline/paths";
 import { LIBRARY_CATEGORIES, LibraryAsset, LibraryCategory } from "./library-shared";
 
 /**
- * The user's reusable-asset library: SFX, memes/images, gifs, screen
- * recordings, and music they drop into format slots over and over. Lives
- * at library/<category>/, sibling to jobs/ and formats/ — same
- * filesystem-as-store approach as the rest of the app.
+ * Each signed-up user's reusable-asset library: SFX, memes/images, gifs,
+ * screen recordings, and music they drop into format slots over and over.
+ * Lives at library/<userId>/<category>/, sibling to jobs/ and formats/ —
+ * same filesystem-as-store approach as the rest of the app.
+ *
+ * Per-user, not shared: this used to be one flat library/<category>/ tree
+ * with no owner, which meant any signed-up tester could list, download,
+ * and delete every other tester's uploads (the Library nav item exposed it
+ * to everyone, and it wasn't a job — so middleware.ts's job-ownership
+ * check never covered it). Every function below takes the CALLER's own
+ * userId, sourced from getRequestUser() in every route in api/library/ —
+ * never client-supplied — so no extra validation is needed on it.
  */
 
 export { LIBRARY_CATEGORIES, isLibraryCategory } from "./library-shared";
 export type { LibraryAsset, LibraryCategory } from "./library-shared";
 
-export const libraryDir = (category: LibraryCategory): string =>
-  path.join(repoRoot, "library", category);
+export const libraryDir = (userId: string, category: LibraryCategory): string =>
+  path.join(repoRoot, "library", userId, category);
 
 const isValidFilename = (name: string): boolean =>
   /^[a-zA-Z0-9._-]+$/.test(name) && !name.startsWith(".");
 
-export const listLibraryAssets = (category?: LibraryCategory): LibraryAsset[] => {
+const mediaUrlFor = (userId: string, category: LibraryCategory, filename: string): string =>
+  `/api/media/library/${userId}/${category}/${filename}`;
+
+export const listLibraryAssets = (userId: string, category?: LibraryCategory): LibraryAsset[] => {
   const categories = category ? [category] : LIBRARY_CATEGORIES.map((c) => c.id);
   return categories.flatMap((cat) => {
-    const dir = libraryDir(cat);
+    const dir = libraryDir(userId, cat);
     if (!fs.existsSync(dir)) return [];
     return fs
       .readdirSync(dir)
@@ -33,7 +44,7 @@ export const listLibraryAssets = (category?: LibraryCategory): LibraryAsset[] =>
         return {
           category: cat,
           filename,
-          mediaUrl: `/api/media/library/${cat}/${filename}`,
+          mediaUrl: mediaUrlFor(userId, cat, filename),
           sizeBytes: stat.size,
           updatedAt: stat.mtime.toISOString(),
         };
@@ -42,13 +53,14 @@ export const listLibraryAssets = (category?: LibraryCategory): LibraryAsset[] =>
   });
 };
 
-/** Writes a file into the category, de-duping filenames by suffixing -2, -3, ... */
+/** Writes a file into the user's category, de-duping filenames by suffixing -2, -3, ... */
 export const saveLibraryAsset = (
+  userId: string,
   category: LibraryCategory,
   filename: string,
   data: Buffer,
 ): LibraryAsset => {
-  const dir = libraryDir(category);
+  const dir = libraryDir(userId, category);
   fs.mkdirSync(dir, { recursive: true });
 
   const ext = path.extname(filename);
@@ -65,22 +77,22 @@ export const saveLibraryAsset = (
   return {
     category,
     filename: finalName,
-    mediaUrl: `/api/media/library/${category}/${finalName}`,
+    mediaUrl: mediaUrlFor(userId, category, finalName),
     sizeBytes: stat.size,
     updatedAt: stat.mtime.toISOString(),
   };
 };
 
-export const deleteLibraryAsset = (category: LibraryCategory, filename: string): void => {
+export const deleteLibraryAsset = (userId: string, category: LibraryCategory, filename: string): void => {
   if (!isValidFilename(filename)) throw new Error(`invalid filename "${filename}"`);
-  const filePath = path.join(libraryDir(category), filename);
+  const filePath = path.join(libraryDir(userId, category), filename);
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 };
 
 /** Copies an asset within its category, reusing saveLibraryAsset's -2, -3, ... de-dupe. */
-export const duplicateLibraryAsset = (category: LibraryCategory, filename: string): LibraryAsset => {
+export const duplicateLibraryAsset = (userId: string, category: LibraryCategory, filename: string): LibraryAsset => {
   if (!isValidFilename(filename)) throw new Error(`invalid filename "${filename}"`);
-  const filePath = path.join(libraryDir(category), filename);
+  const filePath = path.join(libraryDir(userId, category), filename);
   if (!fs.existsSync(filePath)) throw new Error(`asset "${filename}" not found in ${category}`);
-  return saveLibraryAsset(category, filename, fs.readFileSync(filePath));
+  return saveLibraryAsset(userId, category, filename, fs.readFileSync(filePath));
 };

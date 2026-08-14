@@ -3,6 +3,8 @@ import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { jobExists, readJobManifest, writeJobManifest, jobDir, invalidateTakeArtifacts } from "../../../../lib/jobs";
 import { isLibraryCategory, libraryDir } from "../../../../lib/library";
+import { getRequestUser } from "../../../../lib/auth";
+import { MAX_JOB_ASSET_BYTES } from "../../../../lib/uploadLimits";
 import { loadFormat } from "@backend/pipeline/loader";
 import { allSlots } from "@backend/pipeline/intake";
 import { formatAssetsDir } from "@backend/pipeline/paths";
@@ -88,14 +90,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     return NextResponse.json({ slot: slotName, binding: manifest.bindings[slotName] });
   }
 
-  // Dragged in from the Library: copy by reference instead of re-uploading bytes.
+  // Dragged in from the Library: copy by reference instead of re-uploading
+  // bytes. Always the CALLER's own library (getRequestUser(), never a
+  // client-supplied id) — see lib/library.ts's per-user layout.
   const libraryRef = formData.get("libraryRef");
   if (typeof libraryRef === "string") {
+    const requester = await getRequestUser();
+    if (!requester) {
+      return NextResponse.json({ error: "log in required" }, { status: 401 });
+    }
     const { category, filename } = JSON.parse(libraryRef);
     if (!isLibraryCategory(category)) {
       return NextResponse.json({ error: `invalid library category "${category}"` }, { status: 400 });
     }
-    const srcPath = path.join(libraryDir(category), filename);
+    const srcPath = path.join(libraryDir(requester.id, category), filename);
     if (!fs.existsSync(srcPath)) {
       return NextResponse.json({ error: "library asset not found" }, { status: 404 });
     }
@@ -117,6 +125,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
   const files = formData.getAll("file").filter((f): f is File => f instanceof File);
   if (files.length === 0) {
     return NextResponse.json({ error: "missing file or libraryRef" }, { status: 400 });
+  }
+  const oversized = files.find((f) => f.size > MAX_JOB_ASSET_BYTES);
+  if (oversized) {
+    return NextResponse.json(
+      { error: `"${oversized.name}" is too large (max ${Math.round(MAX_JOB_ASSET_BYTES / (1024 * 1024 * 1024))}GB)` },
+      { status: 413 },
+    );
   }
 
   if (!isMultiSlot) {

@@ -112,7 +112,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
         const edl = JSON.parse(fs.readFileSync(edlPath, "utf8"));
         writeStatus(jobId, { status: "done", startedAt, finishedAt, edl });
       } else {
-        writeStatus(jobId, { status: "error", startedAt, finishedAt, error: stderrTail || `build exited with code ${code}` });
+        const error = stderrTail || `build exited with code ${code}`;
+        console.error(`build failed for job "${jobId}":\n${error}`);
+        writeStatus(jobId, { status: "error", startedAt, finishedAt, error });
       }
     });
   });
@@ -125,5 +127,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ jobId: 
   if (!jobExists(jobId)) {
     return NextResponse.json({ error: "job not found" }, { status: 404 });
   }
-  return NextResponse.json(readStatus(jobId) ?? { status: "idle" });
+  const status = readStatus(jobId) ?? { status: "idle" as const };
+  // A pipeline failure's stderr tail can carry absolute server paths, stack
+  // traces, or a raw Anthropic/Gemini SDK error — fine for triage, not for
+  // a friend's browser. Full detail is already in the journal (see the
+  // console.error above); only an admin gets it here too.
+  if (status.status === "error") {
+    const user = await getRequestUser();
+    if (!user?.isAdmin) {
+      return NextResponse.json({ ...status, error: "the build failed — ask an admin to check the server logs" });
+    }
+  }
+  return NextResponse.json(status);
 }
