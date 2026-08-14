@@ -59,6 +59,30 @@ export const previewCachePath = (sourceAbsPath: string, suffix: string): string 
   return path.join(dir, `${base}.${fingerprint}${suffix}`);
 };
 
+/**
+ * Quantizes a poster-frame timestamp into a short, filename-safe token for
+ * folding into previewCachePath's `suffix` — see preview-thumbnail's route,
+ * the only caller. Without this, two timeline clips built from the SAME
+ * source file at different trim points (a common split-take shape) both
+ * resolve to previewCachePath's plain ".thumb.jpg" suffix, so whichever one
+ * asks first "wins" the cache file forever — a re-request for the second
+ * clip's own midpoint finds the first clip's thumbnail already sitting at
+ * that path, calls it fresh (see previewMedia.ts's isFresh, which only
+ * checks the SOURCE file's mtime, oblivious to atSec), and never
+ * regenerates. The wrong frame then keeps showing until the source itself
+ * changes.
+ *
+ * Centisecond precision (round to the nearest 0.01s) rather than the raw
+ * float: plenty fine-grained to tell genuinely different requested frames
+ * apart, while collapsing floating-point noise from the arithmetic that
+ * produces these (MediaPanel.tsx's thumbnailUrl uses a clip's midpoint,
+ * `srcInSec + (srcOutSec - srcInSec) / 2`) into the same cache entry
+ * instead of minting a new file per rounding error. Clamps negative input
+ * to 0 to match what ensurePreviewThumbnail's own ffmpeg `-ss` arg does —
+ * without this, a negative atSec's cache key wouldn't match the frame
+ * ffmpeg actually extracts. */
+export const thumbnailAtSecToken = (atSec: number): string => Math.round(Math.max(0, atSec) * 100).toString(36);
+
 /** The public/ URL a cache path is reachable at once written — Next's
  *  static file server handles it directly from there on (Range requests
  *  included), no further routing through this API needed. */
