@@ -266,6 +266,12 @@ const main = async () => {
   if (wants("trim")) {
     write("trim", trims);
     for (const d of trims.diagnostics) console.log(`    ${d}`);
+    // trim() can mutate word timestamps in place on `transcript` (see its
+    // own doc comment) when the non-speech-edge pass re-anchors a word
+    // whisper mistimed into a cut sigh/breath — re-persist so the fix
+    // survives a later `--only <stage>` re-run that reads transcript.json
+    // from disk instead of recomputing it.
+    write("transcript", transcript);
   }
   if (stop("trim")) return;
 

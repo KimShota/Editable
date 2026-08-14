@@ -26,26 +26,37 @@ import {
  *      into an adjacent word's timestamp by seconds, occasionally past the
  *      clip's own duration). Head and tail dead air is cut regardless of
  *      what whisper thinks the first/last word's time is.
- *   2. NON-SPEECH EDGE — a sigh, breath, or throat-clear at a take's very
- *      edge is audible (so pass 1 keeps it — it isn't silence) but carries
- *      no words (so whisper never transcribed it there). Neither the
- *      dead-air pass above nor the filler pass below can see this on their
- *      own: dead air only looks at silence, filler only looks at
- *      transcribed words. This pass looks at the acoustic profile of the
- *      wordless span itself — quieter and noisier (higher zero-crossing
- *      rate, i.e. no voiced low-frequency periodicity) than the speech
- *      right next to it — and only cuts when that profile actually reads
- *      as non-speech, never just because a gap exists (whisper can
- *      legitimately miss a real word right at a clip's edge).
- *   3. FILLER — a leading or trailing chunk of REAL speech, separated from
+ *   2. FILLER — a leading or trailing chunk of REAL speech, separated from
  *      the rest by a pause long enough to read as structural (not just a
  *      breath), gets judged: is it part of delivering what the slot asked
  *      for, or something said before/after that ("okay cool um", a false
- *      start, an aside)? An LLM judges using the slot's own instructions
- *      as the yardstick, falling back to a filler-word heuristic with no
- *      resolver. Either way, only the ANSWER (keep/drop this chunk) comes
- *      from that judgment — the actual cut always lands on the real,
- *      audio-grounded chunk boundary, never on a whisper timestamp.
+ *      start, an aside)? A cheap filler-word heuristic always runs and
+ *      sets the default verdict; when a resolver is available it can
+ *      override that default in EITHER direction, but only when it
+ *      answers with real confidence — an ambiguous answer, a schema miss,
+ *      or an API error (e.g. no credits) all fall back to the heuristic's
+ *      call rather than silently keeping everything, so a down/broken
+ *      resolver degrades to "dumber" trimming, never to "no trimming".
+ *      Either way, only the ANSWER (keep/drop this chunk) comes from that
+ *      judgment — the actual cut always lands on the real, audio-grounded
+ *      chunk boundary, never on a whisper timestamp.
+ *   3. NON-SPEECH EDGE — a sigh, breath, or throat-clear at a take's very
+ *      edge is audible (so pass 1 keeps it — it isn't silence) but is its
+ *      own acoustically-isolated speech region, separate from the take's
+ *      main content (so pass 1 stops at its boundary, not past it). This
+ *      pass compares that edge region's whole-region loudness/noisiness
+ *      against the take's main (longest) region and only cuts — past the
+ *      edge region AND any dead air beyond it, up to the next real
+ *      content — when the profile actually reads as non-speech: much
+ *      quieter on its own, or quieter-and-noisier together (a voiced sigh
+ *      can have a LOWER zero-crossing rate than speech, so loudness alone
+ *      has to be able to decide it). This runs AFTER filler, and
+ *      deliberately ignores whisper's words for the cut decision itself —
+ *      whisper's alignment is exactly what's unreliable in this spot (see
+ *      pass 1), so a word smeared onto this region by mistiming must not
+ *      be able to block the cut the way a real filler word correctly can
+ *      in pass 2. Any such word is instead re-anchored to the new edge
+ *      (see recoverOrphanedEdgeWords) so its caption survives the cut.
  *
  * All three passes only ever move a take's two outer edges inward — the
  * middle of a take is never touched.
@@ -85,30 +96,36 @@ const FILLER_WORDS = new Set([
   "alright", "right", "like", "well", "anyway", "anyways",
 ]);
 
-/** How much wordless-but-audible span at a take's very edge is worth
- *  checking for a sigh/breath/throat-clear — shorter than this is likely
- *  just silencedetect noise right at the padding boundary, not a real
- *  event worth analyzing. */
-const MIN_NONSPEECH_SEC = 0.2;
-/** Above this, a wordless edge span reads as real content (an intro sound,
+/** A candidate edge region must be at least this long to judge acoustically
+ *  — guards against a near-zero-length region from float rounding, not
+ *  against short real events: a region only exists here at all because
+ *  ffmpeg's own silencedetect (d=0.25) already found genuine silence on
+ *  both sides of it, so even a short one is a real, isolated sound. */
+const MIN_NONSPEECH_SEC = 0.08;
+/** Above this, an edge region reads as real content (an intro sound,
  *  something happening on camera) rather than a single breath/sigh, which
  *  is brief by nature — leave it alone rather than guess. */
 const MAX_NONSPEECH_SEC = 2.5;
-/** Length of the adjoining-speech reference window a candidate span's
- *  acoustic profile is judged against — long enough to average out one
- *  word's own attack/decay, short enough to stay "this speaker, right
- *  now" rather than the whole take. */
-const NONSPEECH_REF_SEC = 0.3;
-/** A candidate span must be at least this many dB quieter than the
- *  adjoining speech to read as non-speech — a sigh is breathy, not a
- *  shout. Guards the loudness half of the judgment; a merely-quiet word
- *  still fails the noisiness check below. */
+/** A candidate region must be at least this many dB quieter than the
+ *  take's main region to read as non-speech — a sigh is breathy, not a
+ *  shout. Guards the loudness half of the AND judgment below; a merely-
+ *  quiet word still fails the noisiness check on its own. */
 const NONSPEECH_RMS_MARGIN_DB = 2;
-/** A candidate span's zero-crossing rate (proxy for "broadband turbulent
+/** A candidate region's zero-crossing rate (proxy for "broadband turbulent
  *  air, no dominant voiced period") must be at least this many times the
- *  adjoining speech's own ZCR — a vowel sound has a much lower ZCR than
- *  breath noise. */
+ *  main region's own ZCR — a vowel sound has a much lower ZCR than breath
+ *  noise. Paired with NONSPEECH_RMS_MARGIN_DB above. */
 const NONSPEECH_ZCR_RATIO = 1.3;
+/** A candidate region this many dB quieter than the main region reads as
+ *  non-speech on loudness ALONE, no ZCR agreement required — a voiced
+ *  sigh/breath can have a LOWER zero-crossing rate than speech (it isn't
+ *  always broadband-noisy), which would otherwise never clear the AND
+ *  check above no matter how obviously quiet it is. */
+const NONSPEECH_STRONG_QUIET_MARGIN_DB = 6;
+/** Duration given to a word re-anchored by recoverOrphanedEdgeWords — long
+ *  enough to render as a real caption word, short enough to stay a sliver
+ *  at the very edge of the kept clip. */
+const MIN_RECOVERED_WORD_SEC = 0.08;
 
 type SilenceInterval = { startSec: number; endSec: number };
 /** A maximal span of real (non-silent) audio. */
@@ -242,17 +259,19 @@ const chunkHoldsAnAnchor = (chunkWords: Word[], anchors: LiteralAnchor[]): boole
   anchors.some((a) => matchLiteralAnchor(a, chunkWords) !== null);
 
 /** Judges one candidate edge chunk via the LLM resolver: is it part of
- *  delivering what the slot's instructions ask for? Returns null (no
- *  opinion — keep the chunk) if the resolver is unavailable, fails, or
- *  answers below confidence; otherwise true = filler, drop it. */
+ *  delivering what the slot's instructions ask for? `verdict` is null (no
+ *  confident opinion) if the resolver is unavailable, fails, or answers
+ *  below confidence — callers fall back to the filler-word heuristic in
+ *  that case, rather than treating "the resolver had nothing to say" as
+ *  "keep the chunk". `detail` is always set, for diagnostics. */
 const judgeChunkWithResolver = async (
   resolver: RoleResolver,
   instructions: string,
   chunkWords: Word[],
   edge: "leading" | "trailing",
   clipDurationSec: number,
-): Promise<boolean | null> => {
-  if (chunkWords.length === 0) return null;
+): Promise<{ verdict: boolean | null; detail: string }> => {
+  if (chunkWords.length === 0) return { verdict: null, detail: "resolver: empty chunk" };
   try {
     const resolutions = await resolver.resolveBlock({
       blockId: "filler-check",
@@ -273,12 +292,16 @@ const judgeChunkWithResolver = async (
       blockDurationSec: clipDurationSec,
     });
     const hit = resolutions.find((r) => r.roleId === "chunk");
-    if (!hit) return null;
-    if (hit.confidence >= FILLER_CONFIDENCE_THRESHOLD) return false; // confidently part of the ask
-    if (1 - hit.confidence >= FILLER_CONFIDENCE_THRESHOLD) return true; // confidently filler
-    return null; // ambiguous — don't act on it
-  } catch {
-    return null;
+    if (!hit) return { verdict: null, detail: "resolver: no answer for this chunk" };
+    if (hit.confidence >= FILLER_CONFIDENCE_THRESHOLD) {
+      return { verdict: false, detail: `resolver: confidently part of the ask (${hit.confidence.toFixed(2)})` };
+    }
+    if (1 - hit.confidence >= FILLER_CONFIDENCE_THRESHOLD) {
+      return { verdict: true, detail: `resolver: confidently filler (${hit.confidence.toFixed(2)})` };
+    }
+    return { verdict: null, detail: `resolver: ambiguous (confidence ${hit.confidence.toFixed(2)})` };
+  } catch (err) {
+    return { verdict: null, detail: `resolver error: ${err instanceof Error ? err.message : String(err)}` };
   }
 };
 
@@ -362,86 +385,18 @@ const zeroCrossingRate = (samples: Int16Array): number => {
   return crossings / (samples.length - 1);
 };
 
-/** True only when BOTH acoustic signals agree the candidate span is a
- *  non-speech vocal noise (sigh/breath/throat-clear) rather than real
- *  speech: quieter than the adjoining speech AND acoustically noisier
- *  (higher zero-crossing rate) than it. Requiring both guards against
- *  cutting a merely-quiet trailing word (fails the ZCR check) or a loud
- *  breath (fails the loudness check) on either signal alone. */
-const looksLikeNonSpeechAcoustically = (
-  absPath: string,
-  candidateStartSec: number,
-  candidateEndSec: number,
-  speechRefStartSec: number,
-  speechRefEndSec: number,
-): boolean => {
-  const candidate = readPcmMono(absPath, candidateStartSec, candidateEndSec);
-  const speechRef = readPcmMono(absPath, speechRefStartSec, speechRefEndSec);
-  if (candidate.length === 0 || speechRef.length === 0) return false;
-
-  const quieterThanSpeech = rmsDb(candidate) <= rmsDb(speechRef) - NONSPEECH_RMS_MARGIN_DB;
-
-  const speechZcr = zeroCrossingRate(speechRef);
-  const noisierThanSpeech = speechZcr > 0 && zeroCrossingRate(candidate) >= speechZcr * NONSPEECH_ZCR_RATIO;
-
-  return quieterThanSpeech && noisierThanSpeech;
-};
-
-/** Narrows a take's base (dead-air-only) trim by dropping a leading and/or
- *  trailing span of AUDIBLE, WORDLESS audio — a sigh, breath, or throat-
- *  clear. Only cuts when the span's acoustic profile actually looks
- *  non-speech (see looksLikeNonSpeechAcoustically) — a wordless gap alone
- *  isn't enough, since whisper can legitimately miss a real word right at
- *  a clip's edge. Like trimFiller below, only ever moves the two outer
- *  edges inward. */
-const trimNonSpeechEdge = (
-  base: TakeTrim,
-  regions: SpeechRegion[],
-  words: Word[],
-  absPath: string,
-  label: string,
-  diagnostics: string[],
-): TakeTrim => {
-  if (words.length === 0 || regions.length === 0) return base;
-
-  let srcInSec = base.srcInSec;
-  let srcOutSec = base.srcOutSec;
-
-  const audioStart = regions[0].startSec;
-  const audioEnd = regions[regions.length - 1].endSec;
-  const firstWordStart = Math.max(audioStart, Math.min(...words.map((w) => w.startSec)));
-  const lastWordEnd = Math.min(audioEnd, Math.max(...words.map((w) => w.endSec)));
-
-  const leadingGap = firstWordStart - audioStart;
-  if (leadingGap >= MIN_NONSPEECH_SEC && leadingGap <= MAX_NONSPEECH_SEC) {
-    const refEnd = Math.min(firstWordStart + NONSPEECH_REF_SEC, audioEnd, lastWordEnd);
-    if (
-      refEnd > firstWordStart &&
-      looksLikeNonSpeechAcoustically(absPath, audioStart, firstWordStart, firstWordStart, refEnd)
-    ) {
-      srcInSec = Math.min(Math.max(srcInSec, firstWordStart - PAD_SEC), srcOutSec - 0.1);
-      diagnostics.push(`trimmed leading non-speech audio (sigh/breath) from ${label}`);
-    }
-  }
-
-  const trailingGap = audioEnd - lastWordEnd;
-  if (trailingGap >= MIN_NONSPEECH_SEC && trailingGap <= MAX_NONSPEECH_SEC) {
-    const refStart = Math.max(lastWordEnd - NONSPEECH_REF_SEC, audioStart, firstWordStart);
-    if (
-      lastWordEnd > refStart &&
-      looksLikeNonSpeechAcoustically(absPath, lastWordEnd, audioEnd, refStart, lastWordEnd)
-    ) {
-      srcOutSec = Math.max(Math.min(srcOutSec, lastWordEnd + PAD_SEC), srcInSec + 0.1);
-      diagnostics.push(`trimmed trailing non-speech audio (sigh/breath) from ${label}`);
-    }
-  }
-
-  return { srcInSec, srcOutSec };
-};
-
 /** Narrows a take's base (dead-air-only) trim by dropping a leading and/or
  *  trailing chunk judged to be filler. Only ever moves the two outer
- *  edges inward — the middle of a take is never touched. */
+ *  edges inward — the middle of a take is never touched.
+ *
+ *  The filler-word heuristic ALWAYS runs and sets the default verdict for
+ *  a chunk; a resolver, when available, can override that default in
+ *  EITHER direction but only on a confident answer (see
+ *  judgeChunkWithResolver) — an ambiguous answer, a schema miss, or a
+ *  thrown error (e.g. no API credits) all leave the heuristic's verdict
+ *  standing rather than defaulting to "keep everything". This makes the
+ *  heuristic a floor under the resolver, not a fallback for when the
+ *  resolver is merely absent. */
 const trimFiller = async (
   base: TakeTrim,
   regions: SpeechRegion[],
@@ -465,12 +420,18 @@ const trimFiller = async (
     const chunkWords = wordsInChunk(words, chunk, chunks);
     if (chunkHoldsAnAnchor(chunkWords, anchors)) return;
 
-    const verdict = resolver
-      ? await judgeChunkWithResolver(resolver, instructions, chunkWords, edge, clipDurationSec)
-      : looksLikeFillerHeuristic(chunkWords)
-        ? true
-        : null;
-    if (verdict !== true) return;
+    const heuristicIsFiller = looksLikeFillerHeuristic(chunkWords);
+    let drop = heuristicIsFiller;
+    let detail = heuristicIsFiller ? "heuristic: filler-word match" : "heuristic: not filler";
+
+    if (resolver) {
+      const judged = await judgeChunkWithResolver(resolver, instructions, chunkWords, edge, clipDurationSec);
+      detail = judged.detail;
+      if (judged.verdict !== null) drop = judged.verdict; // confident resolver answer wins either way
+      // else: resolver had no confident opinion — the heuristic's verdict above stands.
+    }
+
+    if (!drop) return;
 
     const quote = chunkWords.map((w) => w.text).join(" ");
     if (edge === "leading") {
@@ -482,7 +443,7 @@ const trimFiller = async (
       srcOutSec = Math.min(srcOutSec, base.srcOutSec);
       chunks.pop();
     }
-    diagnostics.push(`trimmed ${edge} filler "${quote}" from ${label}`);
+    diagnostics.push(`trimmed ${edge} filler "${quote}" from ${label} (${detail})`);
   };
 
   // Trailing first: a leading marker phrase is far more likely to be load-
@@ -492,6 +453,115 @@ const trimFiller = async (
   await tryDropEdge("leading");
 
   return { srcInSec, srcOutSec };
+};
+
+/** Narrows a take's trim (post-filler) by dropping a leading and/or
+ *  trailing acoustically-isolated speech region that reads as non-speech
+ *  (a sigh, breath, throat-clear) — audible enough to survive the dead-air
+ *  pass, but not the take's real content. Ignores whisper's words
+ *  entirely for the cut decision: a region only exists here because
+ *  ffmpeg's own silence detection already found real silence on both
+ *  sides of it, so "is this region non-speech" is answered purely by
+ *  comparing its own loudness/noisiness against the take's main (longest)
+ *  region. Only ever moves the two outer edges inward, and — like the
+ *  filler pass — cuts all the way to the next real content, not just past
+ *  the isolated region itself, so the dead air beyond it goes too. */
+const trimNonSpeechEdge = (
+  base: TakeTrim,
+  regions: SpeechRegion[],
+  absPath: string,
+  label: string,
+  diagnostics: string[],
+): TakeTrim => {
+  if (regions.length < 2) return base; // nothing acoustically isolated from the take's own content
+
+  let srcInSec = base.srcInSec;
+  let srcOutSec = base.srcOutSec;
+
+  const mainRegion = regions.reduce((a, b) => (b.endSec - b.startSec > a.endSec - a.startSec ? b : a));
+  const mainPcm = readPcmMono(absPath, mainRegion.startSec, mainRegion.endSec);
+  const mainDb = rmsDb(mainPcm);
+  const mainZcr = zeroCrossingRate(mainPcm);
+
+  const readsAsNonSpeech = (candidate: SpeechRegion): boolean => {
+    const span = candidate.endSec - candidate.startSec;
+    if (span < MIN_NONSPEECH_SEC || span > MAX_NONSPEECH_SEC) return false;
+    const pcm = readPcmMono(absPath, candidate.startSec, candidate.endSec);
+    if (pcm.length === 0) return false;
+
+    const db = rmsDb(pcm);
+    const quieterThanMain = db <= mainDb - NONSPEECH_RMS_MARGIN_DB;
+    if (!quieterThanMain) return false;
+    if (mainDb - db >= NONSPEECH_STRONG_QUIET_MARGIN_DB) return true; // quiet enough to decide alone
+
+    const noisierThanMain = mainZcr > 0 && zeroCrossingRate(pcm) >= mainZcr * NONSPEECH_ZCR_RATIO;
+    return noisierThanMain;
+  };
+
+  const leading = regions[0];
+  if (leading !== mainRegion && readsAsNonSpeech(leading)) {
+    const next = regions[1];
+    srcInSec = Math.min(Math.max(srcInSec, next.startSec - PAD_SEC), srcOutSec - 0.1);
+    diagnostics.push(`trimmed leading non-speech audio (sigh/breath) from ${label}`);
+  }
+
+  const trailing = regions[regions.length - 1];
+  if (trailing !== mainRegion && trailing !== leading && readsAsNonSpeech(trailing)) {
+    const prev = regions[regions.length - 2];
+    srcOutSec = Math.max(Math.min(srcOutSec, prev.endSec + PAD_SEC), srcInSec + 0.1);
+    diagnostics.push(`trimmed trailing non-speech audio (sigh/breath) from ${label}`);
+  }
+
+  return { srcInSec, srcOutSec };
+};
+
+/** A word the non-speech-edge pass just cut past, despite it carrying real
+ *  (if mistimed) text — whisper's own alignment is what's unreliable in
+ *  exactly this spot (see this file's header comment), so a word whose
+ *  timestamp happens to land in a region that reads acoustically as a
+ *  sigh/breath is not evidence the word wasn't really said; it's evidence
+ *  whisper mistimed it. Re-anchors each such word to a small, ordered
+ *  sliver right at (leading) or right before (trailing) the NEW edge, so
+ *  downstream trimming/clamping (timing.ts's toTrimmedWords) doesn't
+ *  collapse it to zero duration and silently drop it from captions. Only
+ *  called for a non-speech cut — a word dropped by the FILLER pass is
+ *  correctly gone; this only rescues words the acoustic pass, which knows
+ *  nothing about words, cut on their behalf.
+ *
+ *  Mutates `words` in place — deliberately: `words` is the same array the
+ *  caller's Transcript object holds for this take, so trim()'s caller sees
+ *  the correction without a separate return value (see trim()'s own doc
+ *  comment on why transcript.json must be re-written after trim runs). */
+const recoverOrphanedEdgeWords = (
+  words: Word[],
+  edge: "leading" | "trailing",
+  prevEdgeSec: number,
+  newEdgeSec: number,
+): void => {
+  const orphaned =
+    edge === "leading"
+      ? words.filter((w) => w.endSec > prevEdgeSec && w.endSec <= newEdgeSec)
+      : words.filter((w) => w.startSec < prevEdgeSec && w.startSec >= newEdgeSec);
+  if (orphaned.length === 0) return;
+
+  const minSpan = orphaned.length * MIN_RECOVERED_WORD_SEC;
+  if (edge === "leading") {
+    const firstSurviving = words.find((w) => w.endSec > newEdgeSec && !orphaned.includes(w));
+    const ceiling = Math.max(newEdgeSec + minSpan, firstSurviving?.startSec ?? 0);
+    const per = (ceiling - newEdgeSec) / orphaned.length;
+    orphaned.forEach((w, i) => {
+      w.startSec = newEdgeSec + i * per;
+      w.endSec = newEdgeSec + (i + 1) * per;
+    });
+  } else {
+    const lastSurviving = [...words].reverse().find((w) => w.startSec < newEdgeSec && !orphaned.includes(w));
+    const floor = Math.min(newEdgeSec - minSpan, lastSurviving?.endSec ?? newEdgeSec);
+    const per = (newEdgeSec - floor) / orphaned.length;
+    orphaned.forEach((w, i) => {
+      w.endSec = newEdgeSec - i * per;
+      w.startSec = newEdgeSec - (i + 1) * per;
+    });
+  }
 };
 
 /** Cuts a block's total (concatenated) duration down to maxDurationSec by
@@ -535,6 +605,13 @@ export const trimBrollBlock = (block: Block, filled: FilledFormat): BlockTrim =>
   };
 };
 
+/** Module 4 entry point. NOTE: mutates word timestamps in place on the
+ *  `transcript` passed in (see recoverOrphanedEdgeWords) whenever the
+ *  non-speech-edge pass cuts past a whisper-mistimed word — callers that
+ *  persist transcript.json must write it out AFTER calling trim(), not
+ *  before, or the persisted words won't reflect the correction (see
+ *  orchestrate.ts's buildJob, which already writes transcript.json after
+ *  trim runs). */
 export const trim = async (
   format: Format,
   filled: FilledFormat,
@@ -569,13 +646,9 @@ export const trim = async (
       const { trim: base, regions, clipDurationSec } = trimOneTake(file, words);
       const label =
         takeOrder.length > 1 ? `block "${block.id}" take ${pos + 1}/${takeOrder.length}` : `block "${block.id}"`;
-      const deSighed = trimNonSpeechEdge(base, regions, words, file.absPath, label, diagnostics);
-      const remainingRegions = regions.filter(
-        (r) => r.endSec > deSighed.srcInSec && r.startSec < deSighed.srcOutSec,
-      );
-      const narrowed = await trimFiller(
-        deSighed,
-        remainingRegions,
+      const deFillered = await trimFiller(
+        base,
+        regions,
         clipDurationSec,
         words,
         anchors,
@@ -584,6 +657,16 @@ export const trim = async (
         label,
         diagnostics,
       );
+      const remainingRegions = regions.filter(
+        (r) => r.endSec > deFillered.srcInSec && r.startSec < deFillered.srcOutSec,
+      );
+      const narrowed = trimNonSpeechEdge(deFillered, remainingRegions, file.absPath, label, diagnostics);
+      if (narrowed.srcInSec > deFillered.srcInSec) {
+        recoverOrphanedEdgeWords(words, "leading", deFillered.srcInSec, narrowed.srcInSec);
+      }
+      if (narrowed.srcOutSec < deFillered.srcOutSec) {
+        recoverOrphanedEdgeWords(words, "trailing", deFillered.srcOutSec, narrowed.srcOutSec);
+      }
       takes.push(narrowed);
     }
     if (block.maxDurationSec !== undefined) applyMaxDuration(takes, block.maxDurationSec);
