@@ -33,12 +33,30 @@ export const resolveJobAssetAbsPath = (jobId: string, src: string): string | nul
   return resolved;
 };
 
-/** Cache path for a generated preview asset, alongside the original:
- *  public/jobs/<jobId>/assets/_previews/<basename><suffix>. */
+/**
+ * Cache path for a generated preview asset, alongside the original:
+ * public/jobs/<jobId>/assets/_previews/<basename>.<fingerprint><suffix>.
+ *
+ * The fingerprint (source size + mtime, the same pair weakETag in the media
+ * route already treats as "identifies this file's content") makes the path
+ * itself change whenever the source does, which is what lets
+ * next.config.mjs cache these responses `immutable` — a URL that never
+ * changes for changed content is exactly what an immutable cache isn't
+ * safe for. Before this, ensurePreviewProxy/-Thumbnail relied on an mtime
+ * check to know when to regenerate, silently overwriting the SAME
+ * filename in place; a client that had that filename cached (or a CDN in
+ * front of one) would keep serving the old bytes after a re-upload with no
+ * way to know they'd gone stale. Content-addressing trades that for a
+ * smaller cost: replacing a source's content orphans its old cache file
+ * instead of overwriting it (harmless — these are small proxies/thumbnails,
+ * not the source footage itself — but worth knowing if _previews/ disk
+ * usage ever needs trimming). */
 export const previewCachePath = (sourceAbsPath: string, suffix: string): string => {
   const dir = path.join(path.dirname(sourceAbsPath), "_previews");
   const base = path.basename(sourceAbsPath, path.extname(sourceAbsPath));
-  return path.join(dir, `${base}${suffix}`);
+  const stat = fs.statSync(sourceAbsPath);
+  const fingerprint = `${stat.size.toString(36)}.${Math.round(stat.mtimeMs).toString(36)}`;
+  return path.join(dir, `${base}.${fingerprint}${suffix}`);
 };
 
 /** The public/ URL a cache path is reachable at once written — Next's

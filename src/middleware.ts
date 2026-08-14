@@ -67,12 +67,25 @@ const isApiPath = (pathname: string): boolean => pathname.startsWith("/api/");
 /** Extracts a job id from any URL shape that names one:
  *  /jobs/<id>/... (page, and also where staged preview thumbnails under
  *  public/jobs/<id>/... are served from — see previewAssets.ts),
- *  /api/jobs/<id>/..., /api/media/jobs/<id>/... (uploaded assets), and
- *  /api/media/out/<id>.mp4 (the rendered download). Bare /api/jobs (list/
- *  create) has no single job to own yet, so it's deliberately not matched
- *  here — listJobs() itself filters by owner (see app/lib/jobs.ts). */
+ *  /api/jobs/<id>/..., /api/media/jobs/<id>/... (uploaded assets),
+ *  /api/media/out/<id>.mp4 (the rendered download), and
+ *  /api/media/public-jobs/<id>/... — the destination next.config.mjs's
+ *  afterFiles rewrite sends stale-public-snapshot requests to (see that
+ *  rewrite's comment). The rewrite only ever fires from an already-checked
+ *  /jobs/<id>/... request (caught by the first pattern below), but this
+ *  route is reachable directly too, and without its own pattern here that
+ *  direct hit would skip ownership entirely — jobId comes back null, so
+ *  the `if (jobId)` check in the caller never runs. Bare /api/jobs
+ *  (list/create) has no single job to own yet, so it's deliberately not
+ *  matched here — listJobs() itself filters by owner (see app/lib/jobs.ts). */
 const jobIdFromPath = (pathname: string): string | null => {
-  const patterns = [/^\/jobs\/([^/]+)/, /^\/api\/jobs\/([^/]+)/, /^\/api\/media\/jobs\/([^/]+)/, /^\/api\/media\/out\/([^/]+)\.mp4$/];
+  const patterns = [
+    /^\/jobs\/([^/]+)/,
+    /^\/api\/jobs\/([^/]+)/,
+    /^\/api\/media\/jobs\/([^/]+)/,
+    /^\/api\/media\/public-jobs\/([^/]+)/,
+    /^\/api\/media\/out\/([^/]+)\.mp4$/,
+  ];
   for (const pattern of patterns) {
     const match = pattern.exec(pathname);
     if (match) return match[1];
@@ -91,10 +104,33 @@ const libraryUserIdFromPath = (pathname: string): string | null => {
 
 const isReadOnlyMethod = (method: string): boolean => method === "GET" || method === "HEAD";
 
+/**
+ * In-process cache for jobOwnerId, same motivation as session.ts's
+ * sessionCache (a Neon round trip measured ~90ms, and this runs on every
+ * request naming a job — every clip, thumbnail, and Range-seek included).
+ *
+ * A positive hit is cached WITHOUT expiry: job_owners is insert-only (see
+ * createJob/jobs.ts — no update or delete path touches it), so once a
+ * jobId maps to an ownerId that mapping is true for the life of the
+ * process. A miss (no row yet) gets a short TTL instead of the same
+ * treatment, because createJob writes the job's directory to disk
+ * (jobExists() sees it immediately) BEFORE its `insert into job_owners`
+ * resolves — caching that brief gap's "no owner" indefinitely would lock a
+ * user out of the job they just created until the process restarts.
+ */
+const jobOwnerCache = new Map<string, { ownerId: string | null; expiresAt: number }>();
+const JOB_OWNER_CACHE_MISS_TTL_MS = 5_000;
+
 /** null means no owner is recorded for this job (legacy/demo content). */
 const jobOwnerId = async (jobId: string): Promise<string | null> => {
+  const cached = jobOwnerCache.get(jobId);
+  if (cached && cached.expiresAt > Date.now()) return cached.ownerId;
+
   const rows = await sql`select user_id from job_owners where job_id = ${jobId}`;
-  return (rows[0] as { user_id: string } | undefined)?.user_id ?? null;
+  const ownerId = (rows[0] as { user_id: string } | undefined)?.user_id ?? null;
+
+  jobOwnerCache.set(jobId, { ownerId, expiresAt: ownerId !== null ? Infinity : Date.now() + JOB_OWNER_CACHE_MISS_TTL_MS });
+  return ownerId;
 };
 
 const loginRedirect = (req: NextRequest): NextResponse => {

@@ -30,9 +30,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ jobI
   }
 
   // Relative Location — see preview-proxy/route.ts for why an absolute
-  // redirect built from req.url breaks behind a reverse proxy.
+  // redirect built from req.url breaks behind a reverse proxy. Same
+  // bounded (not immutable) Cache-Control too, and for the same reason:
+  // this URL is keyed on `src`/`t`, not on content, so it can't safely be
+  // cached forever — see that route's own comment.
   return new NextResponse(null, {
     status: 307,
-    headers: { Location: previewCacheUrl(cacheAbsPath) },
+    headers: { Location: previewCacheUrl(cacheAbsPath), "Cache-Control": "public, max-age=60" },
   });
 }

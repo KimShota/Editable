@@ -21,6 +21,41 @@ const execFileAsync = promisify(execFile);
  *  run instead of racing separate ones (and corrupting each other's output). */
 const inFlight = new Map<string, Promise<void>>();
 
+/**
+ * Caps how many ffmpeg processes this server runs at once, across every
+ * caller below (preview proxy, thumbnail, and the .mov compat transcode).
+ * Without this, the editor's own prewarm (see Editor.tsx's
+ * warmedPreviewSources effect, which fires one preview-proxy request per
+ * video source in the EDL as soon as it loads — every clip, not just the
+ * one on screen) launches one ffmpeg per source simultaneously. They'd all
+ * compete for the same CPU and finish slowly together, instead of the
+ * clip actually about to play finishing first. 2 leaves headroom for the
+ * Node process itself (request handling, and a render's own headless-
+ * Chromium + ffmpeg work if one happens to be running) rather than handing
+ * every core to preview transcodes.
+ */
+const MAX_CONCURRENT_FFMPEG = 2;
+let activeFfmpeg = 0;
+const ffmpegWaiters: Array<() => void> = [];
+
+const acquireFfmpegSlot = (): Promise<void> => {
+  if (activeFfmpeg < MAX_CONCURRENT_FFMPEG) {
+    activeFfmpeg++;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => ffmpegWaiters.push(resolve));
+};
+
+/** Hands the freed slot straight to the next waiter instead of
+ *  decrementing-then-incrementing — same net effect, but as one
+ *  synchronous step so there's no in-between state where the slot looks
+ *  available to something outside this queue. */
+const releaseFfmpegSlot = (): void => {
+  const next = ffmpegWaiters.shift();
+  if (next) next();
+  else activeFfmpeg--;
+};
+
 const isFresh = (cacheAbsPath: string, sourceAbsPath: string): boolean =>
   fs.existsSync(cacheAbsPath) &&
   fs.statSync(cacheAbsPath).mtimeMs >= fs.statSync(sourceAbsPath).mtimeMs;
@@ -36,12 +71,15 @@ const runFfmpeg = async (cacheAbsPath: string, args: string[]): Promise<void> =>
   const ext = path.extname(cacheAbsPath);
   const base = path.basename(cacheAbsPath, ext);
   const tmpPath = path.join(dir, `${base}.tmp-${process.pid}-${Date.now()}${ext}`);
+  await acquireFfmpegSlot();
   try {
     await execFileAsync("ffmpeg", [...args, tmpPath]);
     fs.renameSync(tmpPath, cacheAbsPath);
   } catch (err) {
     fs.rmSync(tmpPath, { force: true });
     throw err;
+  } finally {
+    releaseFfmpegSlot();
   }
 };
 
@@ -111,6 +149,41 @@ export const ensurePreviewThumbnail = (
       "scale=480:-2",
       "-q:v",
       "4",
+    ]),
+  );
+};
+
+/**
+ * Container/codec-compat transcode for a raw .mov, used by the generic
+ * /api/media/[...path] route: Chrome's <video> element doesn't reliably
+ * play "video/quicktime" even when the underlying codec (typically H.264)
+ * would otherwise work fine, so this re-muxes/re-encodes once to an
+ * ordinary H.264/AAC mp4 (no downscaling — unlike ensurePreviewProxy,
+ * a browser may hit this for a full-quality view, e.g. a resources
+ * dropzone thumbnail's source or a draft review's reference reel).
+ * Cached alongside the source; every later request just serves the cache.
+ * Same isFresh/dedupe/runFfmpeg machinery as the two helpers above, so it
+ * shares their concurrency cap and never blocks the Node event loop —
+ * this used to shell out via execFileSync, which froze request handling
+ * for every other user on the server for the whole transcode.
+ */
+export const ensureMovCompatTranscode = (sourceAbsPath: string, cacheAbsPath: string): Promise<void> => {
+  if (isFresh(cacheAbsPath, sourceAbsPath)) return Promise.resolve();
+  return dedupe(cacheAbsPath, () =>
+    runFfmpeg(cacheAbsPath, [
+      "-y",
+      "-v",
+      "error",
+      "-i",
+      sourceAbsPath,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-c:a",
+      "aac",
+      "-movflags",
+      "+faststart",
     ]),
   );
 };

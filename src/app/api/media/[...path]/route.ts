@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { NextRequest, NextResponse } from "next/server";
-import { repoRoot } from "@backend/pipeline/paths";
+import { publicDir, repoRoot } from "@backend/pipeline/paths";
+import { ensureMovCompatTranscode } from "@backend/pipeline/previewMedia";
 
 /**
  * Generic file streamer for content that lives outside public/ (which Next
@@ -16,10 +16,20 @@ import { repoRoot } from "@backend/pipeline/paths";
  * draft review's verify comparison — can just point an
  * <video>/<img>/<audio> src here.
  *
- * URL shape: /api/media/<root>/<...rest>, root ∈ out | jobs | library | authoring | formats.
+ * URL shape: /api/media/<root>/<...rest>, root ∈ out | jobs | library | authoring | formats
+ * | public-jobs.
+ *
+ * `public-jobs` is distinct from `jobs`: `jobs` resolves under repoRoot/jobs
+ * (a job's original, unstaged files), while `public-jobs` resolves under
+ * publicDir/jobs — the copies stageAssets() stages for Remotion/the browser,
+ * plus the preview-proxy/-thumbnail ffmpeg caches, none of which exist under
+ * repoRoot/jobs. next.config.mjs's afterFiles rewrite sends any
+ * /jobs/<id>/{assets,generated,derived}/... request here whenever Next's own
+ * (boot-time-snapshotted) public folder serving 404s on it — see that
+ * rewrite's own comment for why the snapshot goes stale.
  */
 
-const ALLOWED_ROOTS = new Set(["out", "jobs", "library", "authoring", "formats"]);
+const ALLOWED_ROOTS = new Set(["out", "jobs", "library", "authoring", "formats", "public-jobs"]);
 
 const CONTENT_TYPES: Record<string, string> = {
   ".mp4": "video/mp4",
@@ -81,22 +91,29 @@ const weakETag = (stat: fs.Stats): string => `W/"${stat.size.toString(16)}-${sta
  * caps memory at whatever the platform's own internal chunk size is,
  * regardless of file size.
  *
- * `Cache-Control: no-cache` (NOT no-store, and NOT a long max-age/
- * immutable): out/<jobId>.mp4 gets overwritten by a re-render at the SAME
- * path, and a job's own assets/generated/derived files can likewise be
- * replaced without a path change (see stageAssets/the ffmpeg transcode
- * below) — so this always revalidates with the server rather than trusting
- * a local copy indefinitely. Revalidation is a 304 (via ETag/Last-Modified)
- * that costs one stat() call, not a re-read, which is what actually kills
- * the redundant-refetch half of the memory problem: the browser's own
- * cache serves the bytes it already downloaded instead of re-requesting
- * them from a route that used to advertise itself as uncacheable. */
-function serveFile(filePath: string, contentType: string, req: NextRequest): NextResponse {
+ * Defaults to `Cache-Control: no-cache` (NOT no-store, and NOT a long
+ * max-age/immutable): out/<jobId>.mp4 gets overwritten by a re-render at
+ * the SAME path, and a job's own assets/generated/derived files can
+ * likewise be replaced without a path change (see stageAssets/the ffmpeg
+ * transcode below) — so by default this always revalidates with the
+ * server rather than trusting a local copy indefinitely. Revalidation is a
+ * 304 (via ETag/Last-Modified) that costs one stat() call, not a re-read,
+ * which is what actually kills the redundant-refetch half of the memory
+ * problem: the browser's own cache serves the bytes it already downloaded
+ * instead of re-requesting them from a route that used to advertise itself
+ * as uncacheable.
+ *
+ * `cacheControl` lets a caller opt OUT of that default for paths it can
+ * prove are safe to cache indefinitely — currently only the "public-jobs"
+ * root's own `_previews/` files (see the GET handler below), whose
+ * filenames are content-addressed by previewCachePath specifically so an
+ * immutable cache is safe: a changed source produces a different URL
+ * rather than changed bytes at the same one. */
+function serveFile(filePath: string, contentType: string, req: NextRequest, cacheControl = "no-cache"): NextResponse {
   const stat = fs.statSync(filePath);
   const size = stat.size;
   const etag = weakETag(stat);
   const lastModified = stat.mtime.toUTCString();
-  const cacheControl = "no-cache";
 
   const ifNoneMatch = req.headers.get("if-none-match");
   if (ifNoneMatch && ifNoneMatch === etag) {
@@ -133,7 +150,7 @@ export async function GET(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const rootDir = path.join(repoRoot, root);
+  const rootDir = root === "public-jobs" ? path.join(publicDir, "jobs") : path.join(repoRoot, root);
   const resolved = path.join(rootDir, ...rest);
 
   // Reject any traversal outside the resolved root, however it got encoded.
@@ -154,40 +171,34 @@ export async function GET(
   // ffmpeg render) always reads the ORIGINAL .mov directly via its own
   // absolute path — this only affects what a browser <video>/<audio> tag
   // is served, never what intake/transcribe/assemble operate on.
+  //
+  // ensureMovCompatTranscode runs ffmpeg via execFile (async), not
+  // execFileSync — this used to block the ENTIRE server's event loop for
+  // every other request in flight, for the whole transcode. It also
+  // shares previewMedia.ts's per-source dedupe and process-wide ffmpeg
+  // concurrency cap with the preview-proxy/-thumbnail routes.
   if (path.extname(resolved).toLowerCase() === ".mov") {
     const previewPath = `${resolved}.preview.mp4`;
-    if (!fs.existsSync(previewPath)) {
-      try {
-        execFileSync(
-          "ffmpeg",
-          [
-            "-y",
-            "-v",
-            "error",
-            "-i",
-            resolved,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-c:a",
-            "aac",
-            "-movflags",
-            "+faststart",
-            previewPath,
-          ],
-          { stdio: ["ignore", "ignore", "inherit"] },
-        );
-      } catch {
-        // Transcode failed (corrupt file, missing ffmpeg, etc.) — fall
-        // through and serve the original as-is rather than 500.
-      }
+    try {
+      await ensureMovCompatTranscode(resolved, previewPath);
+    } catch (err) {
+      console.error(`media route: .mov transcode failed for ${resolved}`, err);
+      // Fall through and serve the original as-is rather than 500 — a
+      // corrupt source or missing ffmpeg shouldn't take the whole request
+      // down when the raw file itself is still readable.
     }
     if (fs.existsSync(previewPath)) {
       return serveFile(previewPath, "video/mp4", req);
     }
   }
 
+  // See serveFile's own doc comment: only public-jobs' own _previews/
+  // files are content-addressed (by previewCachePath) and therefore safe
+  // to hand a browser as `immutable` — this is the fallback route's half
+  // of that; next.config.mjs's headers() sets the same value for when
+  // Next serves the identical URL natively (no restart needed) instead of
+  // through this route.
+  const isImmutablePreviewCache = root === "public-jobs" && resolved.includes(`${path.sep}_previews${path.sep}`);
   const contentType = CONTENT_TYPES[path.extname(resolved).toLowerCase()] ?? "application/octet-stream";
-  return serveFile(resolved, contentType, req);
+  return serveFile(resolved, contentType, req, isImmutablePreviewCache ? "public, max-age=31536000, immutable" : undefined);
 }
