@@ -80,17 +80,23 @@ export type SignupResult =
 
 /**
  * Redeems an invite code and creates the account it gates, atomically
- * enough for friends-scale traffic: the invite is claimed (used_at set)
- * only after the user row exists, and if two signups race the same code,
- * the loser's just-created user row is deleted rather than left as an
- * invite-gate bypass.
+ * enough for friends-scale traffic: for a single-use code, the invite is
+ * claimed (used_at set) only after the user row exists, and if two signups
+ * race the same code, the loser's just-created user row is deleted rather
+ * than left as an invite-gate bypass. A `reusable` code (see
+ * db/migrations/006_reusable_invites.sql) skips that claim step entirely —
+ * it's meant to be handed to many people at once, so used_by/used_at stay
+ * null forever for it and it never runs out.
  */
 export const signup = async (email: string, password: string, inviteCode: string): Promise<SignupResult> => {
   const code = inviteCode.trim();
-  const openInvite = await sql`select code from invites where code = ${code} and used_at is null`;
+  const openInvite = await sql`
+    select code, reusable from invites where code = ${code} and (reusable or used_at is null)
+  `;
   if (openInvite.length === 0) {
     return { ok: false, error: "invalid or already-used invite code" };
   }
+  const reusable = (openInvite[0] as { reusable: boolean }).reusable;
 
   const emailNorm = normalizeEmail(email);
   const passwordHash = hashPassword(password);
@@ -107,14 +113,16 @@ export const signup = async (email: string, password: string, inviteCode: string
     return { ok: false, error: "an account with that email already exists" };
   }
 
-  const claimed = await sql`
-    update invites set used_by = ${created.id}, used_at = now()
-    where code = ${code} and used_at is null
-    returning code
-  `;
-  if (claimed.length === 0) {
-    await sql`delete from users where id = ${created.id}`;
-    return { ok: false, error: "that invite code was just used by someone else" };
+  if (!reusable) {
+    const claimed = await sql`
+      update invites set used_by = ${created.id}, used_at = now()
+      where code = ${code} and used_at is null
+      returning code
+    `;
+    if (claimed.length === 0) {
+      await sql`delete from users where id = ${created.id}`;
+      return { ok: false, error: "that invite code was just used by someone else" };
+    }
   }
 
   return { ok: true, user: { id: created.id, email: created.email, isAdmin: created.is_admin } };
