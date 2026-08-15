@@ -14,10 +14,12 @@ export type WizardStepInfo = {
 
 /**
  * Step header + clickable progress bar + Back/Next footer for the
- * resources wizard. Every step stays reachable by clicking its segment
- * (nothing is gated behind completing an earlier one) — same "make
- * changes here until you generate" freedom the single-page board already
- * had, just presented as steps instead of one long scroll.
+ * resources wizard. Steps stay freely reachable by clicking a segment —
+ * same "make changes here until you generate" freedom the single-page
+ * board already had — with one exception the caller enforces, not this
+ * component: ResourcesBoard's attemptGoToStep blocks reaching step 3
+ * until step 2's required footage/photos are filled, so `onSelect`/
+ * `onNext` here may decline to navigate and surface an error instead.
  */
 export function WizardHeader({
   steps,

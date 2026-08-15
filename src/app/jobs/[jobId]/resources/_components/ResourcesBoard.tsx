@@ -99,6 +99,11 @@ export function ResourcesBoard({
    *  a server console.warn, since this is the moment the user can actually
    *  do something about it (fill a slot, re-film a take). */
   const [diagnostics, setDiagnostics] = useState<string[] | null>(null);
+  /** Set when a navigation attempt is blocked by missing step-2 footage
+   *  (see step2Ready below) — cleared automatically once every required
+   *  slot it names is filled, so it can't linger stale after the user
+   *  fixes the gap and clicks elsewhere first. */
+  const [advanceError, setAdvanceError] = useState<string | null>(null);
 
   const takeSlot = format.speakingTakeSlot;
   // A format's speakingTakeSlot is either the MANDATORY, sole way to
@@ -152,6 +157,37 @@ export function ResourcesBoard({
   );
   const filledCount = requiredSlots.filter((s) => bindings[s.name]).length;
   const ready = filledCount === requiredSlots.length;
+
+  /** The footage/photo subset of requiredSlots (step 1's script text slots
+   *  excluded) — for this format that's exactly the speaking take and the
+   *  identity photos, since every other required slot is a per-block clip
+   *  hidden by the mandatory take (see alwaysHiddenSlots above). Used to
+   *  block leaving step 2 without them, rather than only surfacing the gap
+   *  once the user's already on step 3's build screen. */
+  const step2RequiredSlots = useMemo(() => requiredSlots.filter((s) => s.mediaType !== "text"), [requiredSlots]);
+  const step2Ready = step2RequiredSlots.every((s) => bindings[s.name]);
+
+  useEffect(() => {
+    if (step2Ready) setAdvanceError(null);
+  }, [step2Ready]);
+
+  /** Gated wrapper around goToStep: reaching step 3 (the build/review
+   *  step) requires every step-2 footage/photo slot to be filled first —
+   *  without this, "Next" and the header's step tabs both let a user
+   *  reach step 3 with no speaking take or identity photos bound at all
+   *  (see WizardHeader's own doc comment on why nothing was gated before),
+   *  and the only feedback was a disabled "Continue to editor" button once
+   *  already there. Going backward, or forward only as far as step 2,
+   *  stays unrestricted — this only blocks skipping step 2 unfinished. */
+  const attemptGoToStep = (next: number) => {
+    if (next >= 3 && !step2Ready) {
+      const missing = step2RequiredSlots.filter((s) => !bindings[s.name]).map((s) => slotLabel(s));
+      setAdvanceError(`Add these before continuing: ${missing.join(", ")}.`);
+      return;
+    }
+    setAdvanceError(null);
+    goToStep(next);
+  };
   /** "The hook" = the first voice block, true across every format so far
    *  without hardcoding an id string — see content/virality.ts. */
   const hookBlock = useMemo(() => format.blocks.find((b) => b.kind === "voice"), [format]);
@@ -251,28 +287,10 @@ export function ResourcesBoard({
   const suggestionFor = (blockId: string, slotName: string) =>
     script?.suggestions.find((s) => s.blockId === blockId && s.slotName === slotName);
 
-  /** A generation-marked slot is never an upload target — shown as a badge
-   *  explaining why, instead of an actionable (and permanently-empty)
-   *  dropzone (see requiredSlots above for the matching "don't count it"
-   *  half of this). */
-  const generatedSlotBadge = (slot: Slot) => (
-    <div key={slot.name} className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]" />
-        <p className="text-sm font-medium text-[color:var(--ink)]">{slotLabel(slot)}</p>
-        <Pill>auto-generated</Pill>
-      </div>
-      <p className="text-[12px] leading-snug text-[color:var(--ink-dim)]">
-        Generated automatically from your identity photos when you build — nothing to upload here.{" "}
-        {slot.instructions}
-      </p>
-    </div>
-  );
-
   return (
     <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1fr_340px]">
       <div className="flex flex-col gap-6">
-        <WizardHeader steps={STEPS} current={step} onSelect={goToStep} />
+        <WizardHeader steps={STEPS} current={step} onSelect={attemptGoToStep} />
 
         {step === 1 && (
           <>
@@ -333,12 +351,19 @@ export function ResourcesBoard({
             )}
 
             {format.blocks.map((block) => {
-              // Generation-marked slots stay IN this list (unlike
-              // requiredSlots, which excludes them): they render as
-              // generatedSlotBadge rather than a dropzone, so the user can
-              // see the slot exists and why it isn't theirs to fill.
+              // Optional blocks are hidden for the same reason as in step 1's
+              // ScriptLines — a bonus beat nobody's asked to film, whose
+              // unfilled state is the normal path. The block stays in the
+              // format; only its upload card is hidden.
+              if (block.optional) return null;
+              // Generation-marked slots are never an upload target and the
+              // user has nothing to do for them (see requiredSlots' matching
+              // "don't count it" exclusion) — filtered out here entirely
+              // rather than shown as an inert badge, so a block that's 100%
+              // auto-generated (e.g. a beat filmed from identity photos)
+              // doesn't render an empty card at all.
               const footageSlots = block.slots.filter(
-                (s) => s.mediaType !== "text" && !alwaysHiddenSlots.has(s.name),
+                (s) => s.mediaType !== "text" && !s.generation && !alwaysHiddenSlots.has(s.name),
               );
               if (footageSlots.length === 0) return null;
               return (
@@ -350,26 +375,22 @@ export function ResourcesBoard({
                     <Pill>{block.kind === "voice" ? "spoken" : "b-roll"}</Pill>
                   </div>
                   <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                    {footageSlots.map((slot) =>
-                      slot.generation ? (
-                        generatedSlotBadge(slot)
-                      ) : (
-                        <SlotDropzone
-                          key={slot.name}
-                          jobId={jobId}
-                          formatId={format.id}
-                          slot={slot}
-                          binding={bindings[slot.name]}
-                          onChange={setBinding}
-                          multi={block.kind === "voice" && slot.name === block.videoSlot}
-                          coveredNote={
-                            takeCoveredSlots.has(slot.name)
-                              ? "Covered by your speaking take — drop a clip here to film this line separately instead."
-                              : undefined
-                          }
-                        />
-                      ),
-                    )}
+                    {footageSlots.map((slot) => (
+                      <SlotDropzone
+                        key={slot.name}
+                        jobId={jobId}
+                        formatId={format.id}
+                        slot={slot}
+                        binding={bindings[slot.name]}
+                        onChange={setBinding}
+                        multi={block.kind === "voice" && slot.name === block.videoSlot}
+                        coveredNote={
+                          takeCoveredSlots.has(slot.name)
+                            ? "Covered by your speaking take — drop a clip here to film this line separately instead."
+                            : undefined
+                        }
+                      />
+                    ))}
                   </div>
                 </Card>
               );
@@ -541,7 +562,18 @@ export function ResourcesBoard({
           </>
         )}
 
-        <WizardFooterNav current={step} total={STEPS.length} onBack={() => goToStep(step - 1)} onNext={() => goToStep(step + 1)} />
+        {advanceError && (
+          <p className="rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-300">
+            {advanceError}
+          </p>
+        )}
+
+        <WizardFooterNav
+          current={step}
+          total={STEPS.length}
+          onBack={() => attemptGoToStep(step - 1)}
+          onNext={() => attemptGoToStep(step + 1)}
+        />
       </div>
 
       <div className={`xl:sticky xl:top-24 xl:h-[calc(100vh-140px)] ${drawerOpen ? "" : "xl:h-auto"}`}>

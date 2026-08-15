@@ -84,7 +84,20 @@ export function ScriptLines({
       </h2>
       <div className="flex flex-col">
         {format.blocks.map((block, i) => {
+          // An `optional` block is a bonus beat nobody is asked to film, and
+          // leaving it unfilmed is the normal path — assemble.ts skips it
+          // cleanly rather than treating it as missing. Hidden from the
+          // wizard for that reason; the block itself stays in the format, so
+          // the video's structure is unchanged and it can be re-surfaced by
+          // deleting this check alone.
+          if (block.optional) return null;
           if (block.kind !== "voice") {
+            // Auto-generated beats (built from identity photos at build
+            // time, same condition ResourcesBoard's step 2 uses to hide
+            // them there) are nothing the user acts on or needs to read —
+            // only a real b-roll block, which still needs footage filmed
+            // for it, keeps its separator row here.
+            if (block.slots.some((s) => s.generation)) return null;
             return (
               <div key={block.id} className="flex items-center gap-3 py-3 pl-1">
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/15 bg-black/30">

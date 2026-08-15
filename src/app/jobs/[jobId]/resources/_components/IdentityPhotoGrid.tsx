@@ -8,6 +8,33 @@ import { Binding } from "./SlotDropzone";
 const POSITION_LABELS = ["Front", "Side", "Close-up"];
 const MAX_EXTRA = 6;
 
+/** One silhouette per reference-photo position, so an empty box hints at
+ *  the pose to shoot instead of just a bare "+". All three are built from
+ *  overlapping same-color shapes (no strokes) — the usual way to fake a
+ *  unified silhouette without hand-tracing an exact outline. */
+const FrontSilhouette = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 64 88" fill="currentColor" className={className} aria-hidden>
+    <circle cx="32" cy="24" r="17" />
+    <path d="M4 84c0-19.5 12.5-33 28-33s28 13.5 28 33z" />
+  </svg>
+);
+
+const SideSilhouette = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 64 88" fill="currentColor" className={className} aria-hidden>
+    <path d="M18 8C30 4 42 10 44 20 C45 24 43 26 45 28 C49 30 49 32 45 33 C44 36 46 38 43 40 C38 44 30 45 23 43 C15 40 12 32 12 24 C12 15 14 10 18 8 Z" />
+    <path d="M6 84c0-15 6-25 15-25h6c19 0 31 11 31 25z" />
+  </svg>
+);
+
+const CloseUpSilhouette = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 64 88" fill="currentColor" className={className} aria-hidden>
+    <circle cx="32" cy="30" r="27" />
+    <path d="M2 88c0-10.5 5.5-19 12.5-19h35c7 0 12.5 8.5 12.5 19z" />
+  </svg>
+);
+
+const POSITION_SILHOUETTES = [FrontSilhouette, SideSilhouette, CloseUpSilhouette];
+
 const mediaUrl = (jobId: string, file: string) => `/api/media/jobs/${jobId}/${file}`;
 
 async function uploadPhoto(jobId: string, slotName: string, file: File): Promise<Binding> {
@@ -128,8 +155,18 @@ export function IdentityPhotoGrid({
                       Remove
                     </button>
                   </>
+                ) : busyIndex === index ? (
+                  <span className="text-2xl text-white/20">…</span>
                 ) : (
-                  <span className="text-2xl text-white/20">{busyIndex === index ? "…" : "+"}</span>
+                  <>
+                    {(() => {
+                      const Silhouette = POSITION_SILHOUETTES[index] ?? POSITION_SILHOUETTES[POSITION_SILHOUETTES.length - 1];
+                      return <Silhouette className="h-[55%] w-[55%] text-white/15" />;
+                    })()}
+                    <span className="absolute bottom-2 right-2 flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-sm text-white/40">
+                      +
+                    </span>
+                  </>
                 )}
               </div>
               <p className="text-center text-xs text-[color:var(--ink-dim)]">

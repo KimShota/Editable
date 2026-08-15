@@ -395,7 +395,13 @@ export const assemble = (
       // entry is a real pipeline bug (every non-optional block gets one
       // from split/transcribe+trim), hence still a throw.
       if (block.optional) {
-        diagnostics.push(`skipped block "${block.id}" — optional, not filmed (no "${block.videoSlot}" binding)`);
+        // Deliberately NOT a `diagnostics` entry: those surface to the user
+        // as "the build skipped N things — worth a look before you edit"
+        // (see ResourcesBoard's handleBuildStatus), which interrupts the
+        // jump to the editor. The wizard doesn't offer optional blocks as
+        // fields at all, so an unfilmed one is the expected path, not
+        // something the user can act on — server-side log only.
+        console.warn(`assemble: skipping optional block "${block.id}" — not filmed (no "${block.videoSlot}" binding)`);
         continue;
       }
       throw new Error(`assemble: no trim points for block "${block.id}"`);
