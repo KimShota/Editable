@@ -420,7 +420,7 @@ export function Editor({
       <div className="flex h-14 shrink-0 items-center justify-between border-b border-[color:var(--ed-border)] px-4">
         <div className="flex items-center gap-3">
           <Link
-            href="/library"
+            href={`/jobs/${jobId}/resources`}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--ed-ink-dim)] transition-colors hover:bg-[color:var(--ed-raised)] hover:text-[color:var(--ed-ink)]"
           >
             <ArrowLeftIcon className="h-4 w-4" />
