@@ -182,7 +182,9 @@
             "width": 0.8347,
             "height": 0.3414
           },
-          "states": []
+          "states": [],
+          "mergeGroup": "tierBoard",
+          "mergeStartTimeParam": "revealStartAtSec"
         },
         {
           "id": "ev1-sfx",
@@ -303,7 +305,9 @@
             "width": 0.8347,
             "height": 0.3414
           },
-          "states": []
+          "states": [],
+          "mergeGroup": "tierBoard",
+          "mergeStartTimeParam": "revealStartAtSec"
         },
         {
           "id": "ev2-sfx",
@@ -429,7 +433,9 @@
             "width": 0.8347,
             "height": 0.3414
           },
-          "states": []
+          "states": [],
+          "mergeGroup": "tierBoard",
+          "mergeStartTimeParam": "revealStartAtSec"
         },
         {
           "id": "ev3-sfx",
@@ -560,7 +566,9 @@
             "width": 0.8347,
             "height": 0.3414
           },
-          "states": []
+          "states": [],
+          "mergeGroup": "tierBoard",
+          "mergeStartTimeParam": "revealStartAtSec"
         },
         {
           "id": "ev4-sfx",
@@ -696,7 +704,9 @@
             "width": 0.8347,
             "height": 0.3414
           },
-          "states": []
+          "states": [],
+          "mergeGroup": "tierBoard",
+          "mergeStartTimeParam": "revealStartAtSec"
         },
         {
           "id": "ev5-sfx",
@@ -837,7 +847,9 @@
             "width": 0.8347,
             "height": 0.3414
           },
-          "states": []
+          "states": [],
+          "mergeGroup": "tierBoard",
+          "mergeStartTimeParam": "revealStartAtSec"
         },
         {
           "id": "ev6-sfx",

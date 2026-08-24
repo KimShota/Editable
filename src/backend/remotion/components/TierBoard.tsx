@@ -11,15 +11,18 @@ import { DEFAULT_TIERS, parseTierList, tierColor } from "./tiers";
  * (falling back to DEFAULT_TIERS), which is what lets an arbitrary tier
  * set/order still render correctly with zero per-format layout authoring.
  *
- * One block's worth of `entries` — every item revealed in an EARLIER
- * block (see the format's `reveal` param, one item per block) — plus this
- * block's own `reveal`, which THIS instance animates in. Unlike the old
- * per-block board-image behavior, this board never re-pops at a block
- * cut: it renders with no motion of its own (Motion.tsx carries no
- * DEFAULT_MOTION_BY_COMPONENT entry for "TierBoard"), so six back-to-back
- * per-block mounts read as one continuous board that only ever gains
- * logos — matching the reference reel, which is a single board the whole
- * video.
+ * `entries` — every item revealed so far — plus `reveal`, the item THIS
+ * component is currently animating in. category-tier-list-reveal.json
+ * declares one TierBoard event per block, each resolved against its OWN
+ * block's slots exactly as any other per-block event would be, but tags
+ * every one with the SAME `mergeGroup` — assemble.ts folds them into ONE
+ * EdlOverlay spanning the whole video (see schemas.ts's FormatEventSchema
+ * doc comment), so THIS component only ever mounts once. Each block's own
+ * moment arrives as a `states[]` patch (ordinary EdlVideo.tsx machinery)
+ * updating `entries`/`reveal`/`revealStartAtSec` together — no motion or
+ * pop on mount (Motion.tsx carries no DEFAULT_MOTION_BY_COMPONENT entry
+ * for "TierBoard"), so the board reads as one continuous element that
+ * only ever gains logos, matching the reference reel.
  *
  * The reveal animation — grow in centered over the board, hold, then fly
  * (shrink + translate, one continuous transform) into the item's row —
@@ -27,11 +30,12 @@ import { DEFAULT_TIERS, parseTierList, tierColor } from "./tiers";
  * its landing target (which row, which slot index within that row, how
  * much that row has to shrink to fit) is job data no format config can
  * know ahead of time. `useCurrentFrame()` is local to this component's
- * own Sequence, which assemble.ts places at exactly the block's own
- * "nameAudioStart" — so frame 0 here IS the moment the item's name starts
- * playing, and the phase timings below (`revealAtSec`/`revealGrowSec`/
- * `revealHoldSec`/`revealFlySec`) are measured directly off the reference
- * reel from that same anchor.
+ * own (now merged, whole-video) Sequence, not to any one block's own
+ * start — `revealStartAtSec` (its own doc comment below) is what
+ * recovers "frame 0 IS the moment this item's name starts playing" for
+ * whichever block `reveal` belongs to; the phase timings after it
+ * (`revealGrowSec`/`revealHoldSec`/`revealFlySec`) are measured directly
+ * off the reference reel from that same per-block anchor.
  *
  * Every item — landed or flying — renders as an "icon + name" LOCKUP
  * (`name` optional: an icon-only logo still renders exactly as before).
@@ -93,11 +97,28 @@ const Lockup: React.FC<{ item: BoardItem; iconPx: number; fontPx: number; gapPx:
   </div>
 );
 
+/** Fixed pause between a block's own nameAudioStart (see
+ *  `revealStartAtSec`) and the reveal's own grow phase actually starting
+ *  — small enough to feel immediate, long enough that the item doesn't
+ *  pop in before the name audio itself has begun playing. */
+const REVEAL_LEAD_IN_SEC = 0.15;
+
 export const TierBoard: React.FC<{
   tiers?: string;
   entries?: BoardItem[];
   reveal?: BoardItem;
-  revealAtSec?: number;
+  /** Seconds into THIS overlay's own lifetime that `reveal`'s own block
+   *  became active. Mounting this component fresh per block (frame 0 ===
+   *  that block's own nameAudioStart) used to make this implicit; now
+   *  that several blocks' own board events fold into ONE overlay
+   *  spanning the whole video (assemble.ts's mergeGroup — see
+   *  schemas.ts's FormatEventSchema doc comment), `useCurrentFrame()` is
+   *  local to the MERGED overlay's own start instead, so each block's
+   *  own start has to arrive as an explicit value (assemble.ts injects
+   *  it via the format's own `mergeStartTimeParam`). Defaults to 0 for a
+   *  standalone (unmerged) mount, reproducing the old per-block-mount
+   *  behavior exactly. */
+  revealStartAtSec?: number;
   revealGrowSec?: number;
   revealHoldSec?: number;
   revealFlySec?: number;
@@ -107,13 +128,14 @@ export const TierBoard: React.FC<{
   tiers,
   entries = [],
   reveal,
-  revealAtSec = 0.15,
+  revealStartAtSec = 0,
   revealGrowSec = 0.45,
   revealHoldSec = 0.6,
   revealFlySec = 0.35,
   boxWidthPx,
   boxHeightPx,
 }) => {
+  const revealAtSec = revealStartAtSec + REVEAL_LEAD_IN_SEC;
   const frame = useCurrentFrame();
   const { width, height, fps } = useVideoConfig();
   const boxWpx = boxWidthPx ?? width;

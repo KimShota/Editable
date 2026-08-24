@@ -538,6 +538,35 @@ export const FormatEventSchema = z.object({
   states: z.array(FormatEventStateSchema).default([]),
   /** See MotionSpecSchema. Overlay events only — meaningless for sfx. */
   motion: MotionSpecSchema.optional(),
+  /**
+   * Folds this event's own per-block overlay together with every OTHER
+   * block's own event sharing the same `mergeGroup` string into ONE
+   * EdlOverlay spanning from the first's own tlInSec to the last's own
+   * tlOutSec — see assemble.ts's mergeOverlayGroups. Exists for a
+   * component meant to read as ONE continuous on-screen element across
+   * several blocks (e.g. a board that only ever gains state, never
+   * re-pops) even though each block still authors its own event, resolved
+   * against its OWN block's slots/timing exactly as before — only the
+   * FINAL EdlOverlay count changes, not how each member's own params are
+   * derived. Each later member's own resolved params become a synthetic
+   * `states[]` entry on the merged overlay, firing at that member's own
+   * (pre-merge) tlInSec — the same "patch params as the playhead passes
+   * atSec" mechanism `states` already uses, just populated by the merge
+   * instead of hand-authored. Overlay events only; only meaningful paired
+   * with `mergeStartTimeParam`.
+   */
+  mergeGroup: z.string().optional(),
+  /**
+   * The param name that receives, on every member of this event's own
+   * `mergeGroup`, how many seconds into the MERGED overlay's own
+   * lifetime that member's own state activates — e.g. a component
+   * animating relative to its own mount can't otherwise tell, once
+   * merged into one long-lived Sequence, when EACH original block's own
+   * contribution actually began (its `useCurrentFrame()` is now local to
+   * the MERGED overlay's start, not any one member's own). Required
+   * whenever `mergeGroup` is set (checked in FormatSchema's superRefine).
+   */
+  mergeStartTimeParam: z.string().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -839,6 +868,7 @@ export const FormatSchema = z
     let hasGeneratedSlot = false;
     const blockIds = new Set<string>();
     const eventIds = new Set<string>();
+    const mergeGroups = new Map<string, { blockId: string; event: (typeof format.blocks)[number]["events"][number] }[]>();
     for (const block of format.blocks) {
       if (blockIds.has(block.id)) {
         ctx.addIssue({ code: "custom", message: `duplicate block id "${block.id}"` });
@@ -990,6 +1020,23 @@ export const FormatSchema = z
           ctx.addIssue({ code: "custom", message: `duplicate event id "${event.id}"` });
         }
         eventIds.add(event.id);
+        if (event.mergeGroup || event.mergeStartTimeParam) {
+          if (event.kind !== "overlay") {
+            ctx.addIssue({
+              code: "custom",
+              message: `event "${event.id}": mergeGroup/mergeStartTimeParam only apply to "overlay" events`,
+            });
+          }
+          if (!event.mergeGroup || !event.mergeStartTimeParam) {
+            ctx.addIssue({
+              code: "custom",
+              message: `event "${event.id}": mergeGroup and mergeStartTimeParam must both be set, or neither`,
+            });
+          } else {
+            if (!mergeGroups.has(event.mergeGroup)) mergeGroups.set(event.mergeGroup, []);
+            mergeGroups.get(event.mergeGroup)!.push({ blockId: block.id, event });
+          }
+        }
         if (
           (event.timing.kind === "role" || event.timing.kind === "sequence") &&
           !anchorIds.has(event.timing.roleId)
@@ -1022,6 +1069,32 @@ export const FormatSchema = z
               message: `event "${event.id}": unknown anchor "${state.trigger.roleId}" in a state trigger, block "${block.id}"`,
             });
           }
+        }
+      }
+    }
+
+    for (const [group, members] of mergeGroups) {
+      if (members.length < 2) {
+        ctx.addIssue({
+          code: "custom",
+          message: `mergeGroup "${group}" has only one member (event "${members[0]?.event.id}") — mergeGroup is for folding SEVERAL blocks' own events into one overlay, remove it if there's just one`,
+        });
+        continue;
+      }
+      const component = members[0].event.component.component;
+      const startParam = members[0].event.mergeStartTimeParam;
+      for (const m of members) {
+        if (m.event.component.component !== component) {
+          ctx.addIssue({
+            code: "custom",
+            message: `mergeGroup "${group}": event "${m.event.id}" in block "${m.blockId}" uses component "${m.event.component.component}", but the group started with "${component}" — every member must render the same component`,
+          });
+        }
+        if (m.event.mergeStartTimeParam !== startParam) {
+          ctx.addIssue({
+            code: "custom",
+            message: `mergeGroup "${group}": event "${m.event.id}" in block "${m.blockId}" names mergeStartTimeParam "${m.event.mergeStartTimeParam}", but the group started with "${startParam}" — every member must agree`,
+          });
         }
       }
     }

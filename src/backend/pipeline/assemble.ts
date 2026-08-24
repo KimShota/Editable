@@ -429,6 +429,12 @@ export const assemble = (
   const video: EdlVideoSegment[] = [];
   const voiceovers: EdlVoiceover[] = [];
   const overlays: EdlOverlay[] = [];
+  /** event.id -> its own mergeGroup/mergeStartTimeParam (schemas.ts's
+   *  FormatEventSchema doc comment), recorded at push time below and
+   *  consumed by the merge pass right after the main block loop. Kept
+   *  OUT of EdlOverlay itself — it's a pre-merge authoring concept, not
+   *  something a renderer or the final EDL needs to know about. */
+  const mergeMeta = new Map<string, { group: string; startParamKey: string }>();
   const sfx: EdlSfx[] = [];
   const captions: EdlCaptionGroup[] = [];
   const transitions: EdlTransition[] = [];
@@ -777,6 +783,9 @@ export const assemble = (
           motion: event.motion,
           layoutLocked: false,
         });
+        if (event.mergeGroup && event.mergeStartTimeParam) {
+          mergeMeta.set(event.id, { group: event.mergeGroup, startParamKey: event.mergeStartTimeParam });
+        }
       } else {
         const volume = resolvedRef.params.volume;
         const srcInSec = resolvedRef.audioOnsetSec ?? 0;
@@ -1049,6 +1058,60 @@ export const assemble = (
     }
 
     cursor = tlOutSec;
+  }
+
+  // Fold each `mergeGroup` (schemas.ts's FormatEventSchema doc comment) of
+  // per-block overlays into ONE overlay spanning the whole group — so a
+  // component meant to read as one continuous element across several
+  // blocks (e.g. a board that only ever gains state) shows up as ONE clip
+  // in the editor's timeline instead of N per-block re-mounts that happen
+  // to render seamlessly. Grouped by `mergeMeta` (recorded at push time
+  // above), not array adjacency — an interleaved title/subtitle/sfx event
+  // between two group members doesn't break the merge. Each later
+  // member's own resolved params become a synthetic `states[]` entry on
+  // the merged overlay, firing at that member's own (pre-merge) tlInSec,
+  // carrying `mergeStartTimeParam` = seconds since the MERGED overlay's
+  // own start — the only thing a component can't otherwise recover once
+  // its `useCurrentFrame()` is local to the merged Sequence instead of
+  // any one original block's own.
+  if (mergeMeta.size > 0) {
+    const groups = new Map<string, EdlOverlay[]>();
+    for (const ov of overlays) {
+      const meta = mergeMeta.get(ov.id);
+      if (!meta) continue;
+      if (!groups.has(meta.group)) groups.set(meta.group, []);
+      groups.get(meta.group)!.push(ov);
+    }
+    for (const members of groups.values()) members.sort((a, b) => a.tlInSec - b.tlInSec);
+
+    const emittedGroup = new Set<string>();
+    const merged: EdlOverlay[] = [];
+    for (const ov of overlays) {
+      const meta = mergeMeta.get(ov.id);
+      if (!meta) {
+        merged.push(ov);
+        continue;
+      }
+      if (emittedGroup.has(meta.group)) continue;
+      emittedGroup.add(meta.group);
+      const members = groups.get(meta.group)!;
+      const first = members[0];
+      const states: EdlOverlay["states"] = [...first.states];
+      for (const m of members.slice(1)) {
+        const mMeta = mergeMeta.get(m.id)!;
+        states.push({ atSec: m.tlInSec, params: { ...m.params, [mMeta.startParamKey]: m.tlInSec - first.tlInSec } });
+        states.push(...m.states);
+      }
+      states.sort((a, b) => a.atSec - b.atSec);
+      merged.push({
+        ...first,
+        tlOutSec: members[members.length - 1].tlOutSec,
+        params: { ...first.params, [meta.startParamKey]: 0 },
+        states,
+      });
+    }
+    overlays.length = 0;
+    overlays.push(...merged);
   }
 
   // Collapse duplicate simultaneous sfx: the same source firing within
