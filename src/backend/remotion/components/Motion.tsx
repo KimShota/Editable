@@ -88,20 +88,29 @@ const activePhase = (
  *  its own; a component with no entry here (every other registered
  *  component) simply renders with no motion at all, same as before this
  *  system existed. */
-export const DEFAULT_MOTION_BY_COMPONENT: Partial<Record<string, MotionSpec>> = {
-  ImageOverlay: {
-    enter: {
-      durationSec: 5 / 30,
-      opacity: [
-        { at: 0, value: 0, easing: { kind: "linear" } },
-        { at: 1, value: 1, easing: { kind: "linear" } },
-      ],
-      scale: [
-        { at: 0, value: 0.85, easing: { kind: "linear" } },
-        { at: 1, value: 1, easing: { kind: "linear" } },
-      ],
-    },
+const IMAGE_OVERLAY_MOTION: MotionSpec = {
+  enter: {
+    durationSec: 5 / 30,
+    opacity: [
+      { at: 0, value: 0, easing: { kind: "linear" } },
+      { at: 1, value: 1, easing: { kind: "linear" } },
+    ],
+    scale: [
+      { at: 0, value: 0.85, easing: { kind: "linear" } },
+      { at: 1, value: 1, easing: { kind: "linear" } },
+    ],
   },
+};
+
+export const DEFAULT_MOTION_BY_COMPONENT: Partial<Record<string, MotionSpec>> = {
+  ImageOverlay: IMAGE_OVERLAY_MOTION,
+  // TierBoard deliberately has NO default motion here — it mounts fresh
+  // per block (like every other per-block overlay), but a pop-in on each
+  // mount would read as the board re-appearing at every cut. The
+  // reference reel's board is one continuous element for the whole
+  // video; TierBoard.tsx's own `reveal` animation (grow/hold/fly into
+  // the item's row) is the only motion each mount shows, and it plays
+  // out over a fixed board that never itself fades or pops.
 };
 
 export const MotionWrapper: React.FC<{

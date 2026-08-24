@@ -102,3 +102,27 @@ export const extractCloseUpCutaway = (
     outPath,
   ]);
 };
+
+/**
+ * The audio-only mirror of extractCloseUpCutaway: pulls a short window out
+ * of an EXISTING clip with `-vn` instead of `-an` — used by namesTake.ts to
+ * turn one silence-region span of a names-only take into a standalone
+ * clip of just that one spoken name, later dubbed in by assemble.ts over
+ * a voice block's own front silence (see assemble.ts's `leadInSec`).
+ * Re-encoded to AAC rather than `-c:a copy` since the source span rarely
+ * starts on a keyframe-equivalent audio boundary at an arbitrary `-ss`.
+ */
+export const extractAudioOnly = (
+  inputPath: string,
+  outPath: string,
+  opts: { atSec: number; durationSec: number },
+): void => {
+  execFileSync("ffmpeg", [
+    "-y", "-v", "error",
+    "-ss", String(opts.atSec),
+    "-i", inputPath,
+    "-t", String(opts.durationSec),
+    "-vn", "-acodec", "aac",
+    outPath,
+  ]);
+};

@@ -14,6 +14,7 @@ import {
   SplitTakeResult,
   takeIsBound,
 } from "./splitTake";
+import { extractNameAudioClips } from "./namesTake";
 import { readScriptSuggestions } from "./alignToScript";
 import { readTakePrep } from "./prepareTake";
 import { correctTranscript } from "./correctTranscript";
@@ -163,8 +164,18 @@ export const buildJob = async (
   // filled.json on disk stays pure intake output (see generate.ts's
   // applyInserts doc comment) — only inserts.json records what was
   // generated; the merged `filled` below is used in-memory for this run.
-  const { filled, inserts } = await generate(format, intakeFilled, generator);
+  const { filled: filledAfterGenerate, inserts } = await generate(format, intakeFilled, generator);
   writeArtifact(jobId, "inserts", inserts);
+
+  // Splits a bound namesTakeSlot (see FormatSchema's own doc comment) into
+  // one audio-only clip per voice block, registered as a synthetic
+  // "<videoSlot>-nameAudio" binding — a no-op for every format that
+  // doesn't declare namesTakeSlot. Runs here (independent of the main
+  // take's own transcribe/split/trim below) so `filled` carries the new
+  // bindings into everything downstream, same as `generate`'s own inserts.
+  const namesTake = extractNameAudioClips(format, filledAfterGenerate);
+  writeArtifact(jobId, "namesTake", namesTake.clips);
+  const filled = namesTake.filled;
 
   // Single-take (or mixed) mode: whenever this job actually bound a
   // speakingTakeSlot (takeIsBound — a format may merely OFFER it as an
@@ -236,8 +247,15 @@ export const reassembleJob = async (jobDir: string, jobId: string): Promise<Edl>
   // Fresh intake() has no generated bindings — restore them. Inputs are
   // unchanged (same identity photos/StyleProfile/shot/seed), so this is a
   // cache hit (an ffprobe read, no ffmpeg call), keeping reassemble cheap.
-  const { filled, inserts } = await generate(format, intakeFilled, "auto");
+  const { filled: filledAfterGenerate, inserts } = await generate(format, intakeFilled, "auto");
   writeArtifact(jobId, "inserts", inserts);
+
+  // Same restore as generate() above, for namesTakeSlot's own synthetic
+  // "-nameAudio" bindings — also a withCache() hit (same source file, same
+  // region bounds), not a real re-extraction.
+  const namesTake = extractNameAudioClips(format, filledAfterGenerate);
+  writeArtifact(jobId, "namesTake", namesTake.clips);
+  const filled = namesTake.filled;
 
   const transcript = readArtifact("transcript");
   const trims = readArtifact("trim");

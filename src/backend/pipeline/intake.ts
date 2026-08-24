@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { JobManifestSchema } from "./schemas";
+import { JobManifestSchema, SlotFillSchema } from "./schemas";
 import { BoundAsset, BoundFile, FilledFormat, Format, Slot } from "./types";
 import { loadFormat } from "./loader";
 import { matteFramesBatch } from "./generation/matte";
@@ -178,7 +178,7 @@ const checkTalkingHeadFraming = (format: Format, take: BoundFile, errors: string
 };
 
 /** Every slot the format declares: block, shared, music, identity, speaking
- *  take, and final clip slots. */
+ *  take, final clip, and names take slots. */
 export const allSlots = (format: Format): Slot[] => [
   ...format.blocks.flatMap((b) => b.slots),
   ...format.sharedSlots,
@@ -186,6 +186,7 @@ export const allSlots = (format: Format): Slot[] => [
   ...(format.identitySlot ? [format.identitySlot] : []),
   ...(format.speakingTakeSlot ? [format.speakingTakeSlot] : []),
   ...(format.finalClipSlot ? [format.finalClipSlot] : []),
+  ...(format.namesTakeSlot ? [format.namesTakeSlot] : []),
 ];
 
 /** Human-friendly display name for a slot: its authored `label` when the
@@ -206,6 +207,31 @@ const FILL_VERB: Record<Slot["mediaType"], string> = {
   audio: "recorded",
   image: "uploaded",
   text: "filled in",
+};
+
+/** A control slot's own valid option VALUES — authored directly, or read
+ *  from a sibling text slot's own bound value (comma-joined), e.g. a
+ *  per-item "choice" tier picker reading its format's "orderedChoice"
+ *  tierOrder slot. Returns undefined when there's nothing to validate
+ *  against yet (no control, or an optionsFromSlot sibling that isn't
+ *  bound yet — not an error here, just nothing to check). */
+const controlOptionValues = (
+  slot: Slot,
+  bindings: Record<string, z.infer<typeof SlotFillSchema>>,
+): string[] | undefined => {
+  const control = slot.control;
+  if (!control) return undefined;
+  if (control.options) return control.options.map((o) => o.value);
+  if (control.optionsFromSlot) {
+    const source = bindings[control.optionsFromSlot];
+    const raw = source && "text" in source ? source.text : undefined;
+    if (raw === undefined) return undefined;
+    return raw
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+  return undefined;
 };
 
 export const intake = (jobDir: string): FilledFormat => {
@@ -311,6 +337,21 @@ export const intake = (jobDir: string): FilledFormat => {
       if (slot.mediaType !== "text") {
         errors.push(`"${friendlySlotName(slot)}" needs a ${slot.mediaType} file, not text.`);
         continue;
+      }
+      const options = controlOptionValues(slot, manifest.bindings);
+      if (options) {
+        const chosen =
+          slot.control?.kind === "orderedChoice"
+            ? fill.text
+                .split(",")
+                .map((v) => v.trim())
+                .filter(Boolean)
+            : [fill.text.trim()];
+        const invalid = chosen.filter((v) => !options.includes(v));
+        if (invalid.length > 0) {
+          errors.push(`"${friendlySlotName(slot)}" has an invalid choice: ${invalid.join(", ")}.`);
+          continue;
+        }
       }
       bindings[slot.name] = { type: "text", text: fill.text };
       continue;

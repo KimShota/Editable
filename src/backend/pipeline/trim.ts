@@ -127,9 +127,9 @@ const NONSPEECH_STRONG_QUIET_MARGIN_DB = 6;
  *  at the very edge of the kept clip. */
 const MIN_RECOVERED_WORD_SEC = 0.08;
 
-type SilenceInterval = { startSec: number; endSec: number };
+export type SilenceInterval = { startSec: number; endSec: number };
 /** A maximal span of real (non-silent) audio. */
-type SpeechRegion = { startSec: number; endSec: number };
+export type SpeechRegion = { startSec: number; endSec: number };
 
 /** Every silence interval ffmpeg detects in the clip, unmerged, in order.
  *  A silence still open at EOF closes at durationSec. */
@@ -180,8 +180,12 @@ export const detectSilenceIntervals = (
 };
 
 /** The complement of the silence intervals within [0, durationSec] — every
- *  maximal span of real audio. Audio-grounded, independent of whisper. */
-const speechRegions = (silences: SilenceInterval[], durationSec: number): SpeechRegion[] => {
+ *  maximal span of real audio. Audio-grounded, independent of whisper.
+ *  Exported for namesTake.ts, which reuses it to split a names-only take
+ *  into one region per spoken name — same silence-based segmentation as
+ *  dead-air trimming, just consumed as a list of spans instead of a single
+ *  in/out point. */
+export const speechRegions = (silences: SilenceInterval[], durationSec: number): SpeechRegion[] => {
   const regions: SpeechRegion[] = [];
   let cursor = 0;
   for (const s of silences) {

@@ -59,6 +59,7 @@ import { VideoOverlay } from "./components/VideoOverlay";
 import { CutawayOverlay } from "./components/CutawayOverlay";
 import { StickerTitle } from "./components/StickerTitle";
 import { SkillCard } from "./components/SkillCard";
+import { TierBoard } from "./components/TierBoard";
 import { Captions } from "./components/Captions";
 import { KaraokeTitleLayer } from "./components/KaraokeTitleLayer";
 import { TriptychNameStamp } from "./components/TriptychNameStamp";
@@ -84,6 +85,7 @@ const OVERLAY_COMPONENTS: Record<
   StickerTitle: StickerTitle as React.FC<Record<string, unknown>>,
   SkillCard: SkillCard as React.FC<Record<string, unknown>>,
   TriptychNameStamp: TriptychNameStamp as React.FC<Record<string, unknown>>,
+  TierBoard: TierBoard as React.FC<Record<string, unknown>>,
 };
 
 /**

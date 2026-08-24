@@ -85,13 +85,20 @@ export const concatenateTakesForMatching = (
   takeTrims: TakeTrim[],
 ): { words: Word[]; blockDurationSec: number } => concatenateTakesWith(rawTakes, takeTrims, toClampedWords);
 
-/** Resolve an anchored position ("blockEnd − 0.9s") to seconds from block start. */
+/** Resolve an anchored position ("blockEnd − 0.9s") to seconds from block
+ *  start. `leadInSec` — how far BEFORE block start (0) a block's own
+ *  names-take dub window extends, see assemble.ts's own `leadInSec` — only
+ *  matters for the "nameAudioStart" anchor; every other call site (e.g.
+ *  resolveRoles.ts's anchor-fallback resolution, which has no lead-in
+ *  concept at all) omits it and gets the pre-existing behavior unchanged. */
 export const anchoredTimeSec = (
   at: AnchoredTime,
   blockDurationSec: number,
+  leadInSec = 0,
 ): number => {
-  const base = at.anchor === "blockStart" ? 0 : blockDurationSec;
-  return clamp(base + at.offsetSec, 0, blockDurationSec);
+  const base = at.anchor === "blockStart" ? 0 : at.anchor === "blockEnd" ? blockDurationSec : -leadInSec;
+  const floor = at.anchor === "nameAudioStart" ? -leadInSec : 0;
+  return clamp(base + at.offsetSec, floor, blockDurationSec);
 };
 
 /** Throws if a caption group's own [tlInSec, tlOutSec) window doesn't fully

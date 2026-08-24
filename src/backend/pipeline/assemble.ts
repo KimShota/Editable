@@ -287,10 +287,61 @@ export const assemble = (
         // resolved into the `blockId` param this function was CALLED
         // with, by the caller, before we ever see it here).
       } else {
-        params[key] = value;
+        const prefixedText = /^(.+)TextSlot$/.exec(key);
+        const prefixedImage = /^(.+)ImageSlot$/.exec(key);
+        if (prefixedText) {
+          const text = textAsset(filled, String(value));
+          if (text === undefined) return { skipReason: `text slot "${value}" is not filled` };
+          params[prefixedText[1]] = text;
+        } else if (prefixedImage) {
+          const asset = fileAsset(filled, String(value));
+          if (!asset) return { skipReason: `image slot "${value}" is not filled` };
+          params[prefixedImage[1]] = stage(asset);
+        } else {
+          params[key] = resolveNestedSlots(value);
+        }
       }
     }
     return { component: ref.component, params, audioDurationSec, audioOnsetSec: onsetSec, mediaWidth, mediaHeight };
+  };
+
+  /**
+   * Recursively resolves PREFIXED slot-indirection keys
+   * (`<name>TextSlot`/`<name>ImageSlot`) anywhere inside a nested params
+   * value — arrays/objects at any depth — e.g. TierBoard's own `entries`
+   * array, each item `{ logoImageSlot, tierTextSlot }`. See
+   * ComponentRefSchema's doc comment for the full contract.
+   *
+   * Unlike a ref's own TOP-LEVEL slot keys (handled in
+   * resolveComponentParams above, where an unfilled slot skips the whole
+   * event), an unfilled slot found HERE just drops the CONTAINING OBJECT
+   * from whichever array holds it — a missing logo doesn't appear on the
+   * board instead of hiding the whole board. Bare (unprefixed)
+   * textSlot/imageSlot/audioSlot/videoSlot/textAnchor are not recognized
+   * at this level — those only ever apply at a ref's own top level.
+   */
+  const resolveNestedSlots = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      return value.map(resolveNestedSlots).filter((v) => v !== undefined);
+    }
+    if (value === null || typeof value !== "object") return value;
+    const out: Record<string, unknown> = {};
+    for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+      const textMatch = /^(.+)TextSlot$/.exec(key);
+      const imageMatch = /^(.+)ImageSlot$/.exec(key);
+      if (textMatch) {
+        const text = textAsset(filled, String(v));
+        if (text === undefined) return undefined;
+        out[textMatch[1]] = text;
+      } else if (imageMatch) {
+        const asset = fileAsset(filled, String(v));
+        if (!asset) return undefined;
+        out[imageMatch[1]] = stage(asset);
+      } else {
+        out[key] = resolveNestedSlots(v);
+      }
+    }
+    return out;
   };
 
   /** Where an anchor's chosen edge (start/end/captureStart) actually lands. */
@@ -307,16 +358,18 @@ export const assemble = (
   };
 
   /** Resolve a timing (fixed anchor or anchor span edge) to trimmed-block
-   *  seconds. Not for "sequence" timings — those go through
+   *  seconds (negative when it lands inside a "nameAudioStart" lead-in —
+   *  see anchoredTimeSec). Not for "sequence" timings — those go through
    *  resolveSequenceAtSec, which can drop an event instead of always
    *  returning a number. */
   const timingSec = (
     timing: FormatEvent["timing"],
     blockId: string,
     blockDurationSec: number,
+    leadInSec = 0,
   ): number => {
     if (timing.kind === "fixed") {
-      return anchoredTimeSec(timing, blockDurationSec);
+      return anchoredTimeSec(timing, blockDurationSec, leadInSec);
     }
     if (timing.kind === "sequence") {
       throw new Error(`assemble: a "sequence" timing can't be used as an "until" — only as an event's own timing`);
@@ -361,6 +414,7 @@ export const assemble = (
     event: FormatEvent,
     blockId: string,
     blockDurationSec: number,
+    leadInSec = 0,
   ): { atSec: number } | { skipReason: string } => {
     const override = overrides?.events[event.id];
     if (override?.timeSec !== undefined) {
@@ -369,7 +423,7 @@ export const assemble = (
     if (event.timing.kind === "sequence") {
       return resolveSequenceAtSec(event.timing, blockId, blockDurationSec);
     }
-    return { atSec: timingSec(event.timing, blockId, blockDurationSec) };
+    return { atSec: timingSec(event.timing, blockId, blockDurationSec, leadInSec) };
   };
 
   const video: EdlVideoSegment[] = [];
@@ -407,9 +461,26 @@ export const assemble = (
       throw new Error(`assemble: no trim points for block "${block.id}"`);
     }
 
+    // A names-take dub (see namesTake.ts) plays over the FRONT of this
+    // block's own already-recorded silence, right up to where trim.ts
+    // decided the real content starts — never more than that room
+    // actually allows. 0 for every block/format that never binds a
+    // namesTakeSlot (the overwhelmingly common case), which is what makes
+    // every formula below a no-op for them.
+    const nameAudioAsset = block.kind === "voice" ? fileAsset(filled, `${block.videoSlot}-nameAudio`) : undefined;
+    const leadInSec = nameAudioAsset?.durationSec ? Math.min(nameAudioAsset.durationSec, trim.takes[0].srcInSec) : 0;
+
     const blockDurationSec = trim.takes.reduce((s, t) => s + (t.srcOutSec - t.srcInSec), 0);
-    const tlInSec = cursor;
-    const tlOutSec = cursor + blockDurationSec;
+    // "blockStart" keeps meaning exactly what it always has — where this
+    // block's own real trimmed content begins — for every OTHER mechanism
+    // in this file (captions, roleEdgeSec anchors, ecuCutaway, ordinary
+    // "blockStart"-anchored events): shifting tlInSec later by leadInSec
+    // is the only change needed to make room for the lead-in, because
+    // every one of those already computes its own position as tlInSec +
+    // (something relative to trimmed-clip time). The lead-in segment
+    // itself, pushed below, occupies [cursor, tlInSec) — BEFORE this.
+    const tlInSec = cursor + leadInSec;
+    const tlOutSec = tlInSec + blockDurationSec;
     blockSpans.set(block.id, { tlInSec, tlOutSec });
 
     // A block is usually one clip (one take === the whole trim), but a
@@ -429,8 +500,47 @@ export const assemble = (
     // block (the only kind that ever sets captionVariant "karaokeTitle").
     const fgAsset = block.captionVariant === "karaokeTitle" ? fileAsset(filled, `${block.videoSlot}-fg`) : undefined;
 
-    let segCursor = tlInSec;
+    let segCursor = cursor;
     let lastSegId = block.id;
+
+    // The lead-in itself: a MUTED video segment showing the tail of the
+    // room the creator already left before they start really talking
+    // (same file the real segment below is about to use, srcOutSec
+    // pinned to the take's own srcInSec so the cut into real footage is
+    // exactly where trim.ts already decided speech begins — zero gap,
+    // zero overlap), paired with an EdlVoiceover over the identical
+    // window playing the isolated name-audio instead of that room's own
+    // (silent) audio. Same "video keeps rolling, audio comes from
+    // elsewhere" pattern as the hasUsableVideo:false branch below, just
+    // triggered by a bound nameAudio instead of a missing-video take.
+    if (leadInSec > 0 && nameAudioAsset) {
+      const firstFile = takeFiles[takeOrder[0] ?? 0];
+      const leadInSrcOut = trim.takes[0].srcInSec;
+      const leadInSrcIn = Math.max(0, leadInSrcOut - leadInSec);
+      video.push({
+        id: `${block.id}__namelead`,
+        blockId: block.id,
+        src: stage(firstFile),
+        srcInSec: leadInSrcIn,
+        srcOutSec: leadInSrcOut,
+        srcDurationSec: firstFile.durationSec,
+        tlInSec: segCursor,
+        tlOutSec: segCursor + leadInSec,
+        muted: true,
+        volume: 1,
+      });
+      voiceovers.push({
+        id: `${block.id}__nameAudio`,
+        blockId: block.id,
+        src: stage(nameAudioAsset),
+        srcInSec: 0,
+        srcOutSec: Math.min(nameAudioAsset.durationSec ?? leadInSec, leadInSec),
+        tlInSec: segCursor,
+        tlOutSec: segCursor + leadInSec,
+        volume: 1,
+      });
+      segCursor += leadInSec;
+    }
     // Ordinary path: every take has real (or unknown, i.e. assumed real)
     // video — unchanged from before this block ever had voiceover support,
     // so every other format/job takes this exact branch with zero behavior
@@ -592,7 +702,7 @@ export const assemble = (
         diagnostics.push(`skipped "${event.id}" in block "${block.id}" — ${resolvedRef.skipReason}`);
         continue;
       }
-      const placement = eventTimeSec(event, block.id, blockDurationSec);
+      const placement = eventTimeSec(event, block.id, blockDurationSec, leadInSec);
       if ("skipReason" in placement) {
         diagnostics.push(`skipped "${event.id}" in block "${block.id}" — ${placement.skipReason}`);
         continue;
@@ -600,7 +710,7 @@ export const assemble = (
       const atSec = tlInSec + placement.atSec;
       // End priority: `until` (an anchor span edge) > durationSec > block end.
       const endSec = event.until
-        ? tlInSec + timingSec(event.until, block.id, blockDurationSec)
+        ? tlInSec + timingSec(event.until, block.id, blockDurationSec, leadInSec)
         : event.durationSec
           ? Math.min(atSec + event.durationSec, tlOutSec)
           : tlOutSec;
@@ -647,7 +757,7 @@ export const assemble = (
             );
             continue;
           }
-          const stateAtSec = clamp(tlInSec + timingSec(state.trigger, block.id, blockDurationSec), atSec, endSec);
+          const stateAtSec = clamp(tlInSec + timingSec(state.trigger, block.id, blockDurationSec, leadInSec), atSec, endSec);
           resolvedStates.push({ atSec: stateAtSec, params: resolvedStateParams.params });
         }
         resolvedStates.sort((a, b) => a.atSec - b.atSec);

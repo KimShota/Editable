@@ -1,0 +1,863 @@
+{
+  "id": "category-tier-list-reveal",
+  "name": "[Category] Tier List",
+  "niche": "Finance",
+  "description": "A talking-head ranks several brands/items — filmed as one continuous take or as separate clips per item, plus a short separate clip of just the item names said back to back. Each item's logo pops in and drops into its S/A/B/C/D row on a tier board we draw for you, timed off you saying its name — no board or screenshot images to prepare, and nothing has to be said out loud for timing except each item's own name.",
+  "fps": 30,
+  "width": 720,
+  "height": 1280,
+  "captionStyle": {
+    "component": "Captions",
+    "params": {
+      "position": "lowerThird"
+    }
+  },
+  "musicVolume": 0.5,
+  "sharedSlots": [
+    {
+      "name": "dropSfx",
+      "mediaType": "audio",
+      "required": false,
+      "instructions": "A short punchy pop/thud that fires each time an item's logo lands in its tier row."
+    }
+  ],
+  "namesTakeSlot": {
+    "name": "namesTake",
+    "mediaType": "video",
+    "required": true,
+    "label": "Names take",
+    "instructions": "One clip, nothing else: say each item's name back to back, in the SAME order as items 1-6 below, with a clear pause between each name. We pull out just each name and use it to time that item's reveal — you don't need to say the tier out loud, that's what the pickers below are for."
+  },
+  "blocks": [
+    {
+      "id": "item-1",
+      "title": "Hook + First Item",
+      "kind": "voice",
+      "videoSlot": "talk1",
+      "slots": [
+        {
+          "name": "talk1",
+          "mediaType": "video",
+          "required": true,
+          "label": "Item 1 — your take",
+          "instructions": "Medium selfie shot, hold steady. Talk about your first item — its weaknesses, why it earned a low tier. No need to lead with its name or tier; your names take handles the reveal timing."
+        },
+        {
+          "name": "titleText",
+          "mediaType": "text",
+          "required": true,
+          "instructions": "The video's title, bracketing your niche, e.g. '🇨🇦 Bank Tier List' or '[Category] Tier List'. Rendered on a white pill top-center."
+        },
+        {
+          "name": "subtitleText",
+          "mediaType": "text",
+          "required": false,
+          "instructions": "A short qualifier line under the title, e.g. '($100k+ net worth, has 3 bank accounts)'."
+        },
+        {
+          "name": "tier1",
+          "mediaType": "text",
+          "required": true,
+          "label": "Item 1 — tier",
+          "instructions": "Which row this item's logo drops into.",
+          "control": {
+            "kind": "choice",
+            "options": [
+              {
+                "value": "S",
+                "color": "#FF7F7F"
+              },
+              {
+                "value": "A",
+                "color": "#FFBF7F"
+              },
+              {
+                "value": "B",
+                "color": "#FFDF7F"
+              },
+              {
+                "value": "C",
+                "color": "#7FFF7F"
+              },
+              {
+                "value": "D",
+                "color": "#7FFFFF"
+              }
+            ]
+          }
+        },
+        {
+          "name": "name1",
+          "mediaType": "text",
+          "required": false,
+          "label": "Item 1 — name",
+          "instructions": "The item's display name, shown next to its icon on the tier board. Auto-filled from your names take — edit here only if we misheard it."
+        },
+        {
+          "name": "logo1",
+          "mediaType": "image",
+          "required": true,
+          "label": "Item 1 — logo",
+          "instructions": "Transparent PNG logo of this item."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [],
+      "events": [
+        {
+          "id": "ev1-title",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "titleText",
+              "variant": "title"
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "durationSec": 4.5,
+          "layout": {
+            "x": 0.11,
+            "y": 0.075,
+            "width": 0.66,
+            "height": 0.05
+          },
+          "states": []
+        },
+        {
+          "id": "ev1-subtitle",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "subtitleText",
+              "variant": "description"
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "durationSec": 4.5,
+          "layout": {
+            "x": 0.19,
+            "y": 0.125,
+            "width": 0.5,
+            "height": 0.04
+          },
+          "states": []
+        },
+        {
+          "id": "ev1-board",
+          "kind": "overlay",
+          "component": {
+            "component": "TierBoard",
+            "params": {
+              "entries": [],
+              "reveal": {
+                "logoImageSlot": "logo1",
+                "tierTextSlot": "tier1",
+                "nameTextSlot": "name1"
+              }
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.0833,
+            "y": 0.5711,
+            "width": 0.8347,
+            "height": 0.3414
+          },
+          "states": []
+        },
+        {
+          "id": "ev1-sfx",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "dropSfx",
+              "volume": 0.7
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 1.55
+          },
+          "states": []
+        }
+      ],
+      "nameTextSlot": "name1"
+    },
+    {
+      "id": "item-2",
+      "title": "Second Item",
+      "kind": "voice",
+      "videoSlot": "talk2",
+      "slots": [
+        {
+          "name": "talk2",
+          "mediaType": "video",
+          "required": true,
+          "label": "Item 2 — your take",
+          "instructions": "Same framing. Talk about your second item — the reasons it lands where it does."
+        },
+        {
+          "name": "tier2",
+          "mediaType": "text",
+          "required": true,
+          "label": "Item 2 — tier",
+          "instructions": "Which row this item's logo drops into.",
+          "control": {
+            "kind": "choice",
+            "options": [
+              {
+                "value": "S",
+                "color": "#FF7F7F"
+              },
+              {
+                "value": "A",
+                "color": "#FFBF7F"
+              },
+              {
+                "value": "B",
+                "color": "#FFDF7F"
+              },
+              {
+                "value": "C",
+                "color": "#7FFF7F"
+              },
+              {
+                "value": "D",
+                "color": "#7FFFFF"
+              }
+            ]
+          }
+        },
+        {
+          "name": "name2",
+          "mediaType": "text",
+          "required": false,
+          "label": "Item 2 — name",
+          "instructions": "The item's display name, shown next to its icon on the tier board. Auto-filled from your names take — edit here only if we misheard it."
+        },
+        {
+          "name": "logo2",
+          "mediaType": "image",
+          "required": true,
+          "label": "Item 2 — logo",
+          "instructions": "Transparent PNG logo of this item."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [],
+      "events": [
+        {
+          "id": "ev2-board",
+          "kind": "overlay",
+          "component": {
+            "component": "TierBoard",
+            "params": {
+              "entries": [
+                {
+                  "logoImageSlot": "logo1",
+                  "tierTextSlot": "tier1",
+                  "nameTextSlot": "name1"
+                }
+              ],
+              "reveal": {
+                "logoImageSlot": "logo2",
+                "tierTextSlot": "tier2",
+                "nameTextSlot": "name2"
+              }
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.0833,
+            "y": 0.5711,
+            "width": 0.8347,
+            "height": 0.3414
+          },
+          "states": []
+        },
+        {
+          "id": "ev2-sfx",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "dropSfx",
+              "volume": 0.7
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 1.55
+          },
+          "states": []
+        }
+      ],
+      "nameTextSlot": "name2"
+    },
+    {
+      "id": "item-3",
+      "title": "Third Item",
+      "kind": "voice",
+      "videoSlot": "talk3",
+      "slots": [
+        {
+          "name": "talk3",
+          "mediaType": "video",
+          "required": true,
+          "label": "Item 3 — your take",
+          "instructions": "Same framing. Talk about your third item — praise its ecosystem/strengths."
+        },
+        {
+          "name": "tier3",
+          "mediaType": "text",
+          "required": true,
+          "label": "Item 3 — tier",
+          "instructions": "Which row this item's logo drops into.",
+          "control": {
+            "kind": "choice",
+            "options": [
+              {
+                "value": "S",
+                "color": "#FF7F7F"
+              },
+              {
+                "value": "A",
+                "color": "#FFBF7F"
+              },
+              {
+                "value": "B",
+                "color": "#FFDF7F"
+              },
+              {
+                "value": "C",
+                "color": "#7FFF7F"
+              },
+              {
+                "value": "D",
+                "color": "#7FFFFF"
+              }
+            ]
+          }
+        },
+        {
+          "name": "name3",
+          "mediaType": "text",
+          "required": false,
+          "label": "Item 3 — name",
+          "instructions": "The item's display name, shown next to its icon on the tier board. Auto-filled from your names take — edit here only if we misheard it."
+        },
+        {
+          "name": "logo3",
+          "mediaType": "image",
+          "required": true,
+          "label": "Item 3 — logo",
+          "instructions": "Transparent PNG logo of this item."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [],
+      "events": [
+        {
+          "id": "ev3-board",
+          "kind": "overlay",
+          "component": {
+            "component": "TierBoard",
+            "params": {
+              "entries": [
+                {
+                  "logoImageSlot": "logo1",
+                  "tierTextSlot": "tier1",
+                  "nameTextSlot": "name1"
+                },
+                {
+                  "logoImageSlot": "logo2",
+                  "tierTextSlot": "tier2",
+                  "nameTextSlot": "name2"
+                }
+              ],
+              "reveal": {
+                "logoImageSlot": "logo3",
+                "tierTextSlot": "tier3",
+                "nameTextSlot": "name3"
+              }
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.0833,
+            "y": 0.5711,
+            "width": 0.8347,
+            "height": 0.3414
+          },
+          "states": []
+        },
+        {
+          "id": "ev3-sfx",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "dropSfx",
+              "volume": 0.7
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 1.55
+          },
+          "states": []
+        }
+      ],
+      "nameTextSlot": "name3"
+    },
+    {
+      "id": "item-4",
+      "title": "Fourth Item",
+      "kind": "voice",
+      "videoSlot": "talk4",
+      "slots": [
+        {
+          "name": "talk4",
+          "mediaType": "video",
+          "required": true,
+          "label": "Item 4 — your take",
+          "instructions": "Same framing. Talk about your top pick — why it's the best."
+        },
+        {
+          "name": "tier4",
+          "mediaType": "text",
+          "required": true,
+          "label": "Item 4 — tier",
+          "instructions": "Which row this item's logo drops into.",
+          "control": {
+            "kind": "choice",
+            "options": [
+              {
+                "value": "S",
+                "color": "#FF7F7F"
+              },
+              {
+                "value": "A",
+                "color": "#FFBF7F"
+              },
+              {
+                "value": "B",
+                "color": "#FFDF7F"
+              },
+              {
+                "value": "C",
+                "color": "#7FFF7F"
+              },
+              {
+                "value": "D",
+                "color": "#7FFFFF"
+              }
+            ]
+          }
+        },
+        {
+          "name": "name4",
+          "mediaType": "text",
+          "required": false,
+          "label": "Item 4 — name",
+          "instructions": "The item's display name, shown next to its icon on the tier board. Auto-filled from your names take — edit here only if we misheard it."
+        },
+        {
+          "name": "logo4",
+          "mediaType": "image",
+          "required": true,
+          "label": "Item 4 — logo",
+          "instructions": "Transparent PNG logo of this item."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [],
+      "events": [
+        {
+          "id": "ev4-board",
+          "kind": "overlay",
+          "component": {
+            "component": "TierBoard",
+            "params": {
+              "entries": [
+                {
+                  "logoImageSlot": "logo1",
+                  "tierTextSlot": "tier1",
+                  "nameTextSlot": "name1"
+                },
+                {
+                  "logoImageSlot": "logo2",
+                  "tierTextSlot": "tier2",
+                  "nameTextSlot": "name2"
+                },
+                {
+                  "logoImageSlot": "logo3",
+                  "tierTextSlot": "tier3",
+                  "nameTextSlot": "name3"
+                }
+              ],
+              "reveal": {
+                "logoImageSlot": "logo4",
+                "tierTextSlot": "tier4",
+                "nameTextSlot": "name4"
+              }
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.0833,
+            "y": 0.5711,
+            "width": 0.8347,
+            "height": 0.3414
+          },
+          "states": []
+        },
+        {
+          "id": "ev4-sfx",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "dropSfx",
+              "volume": 0.7
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 1.55
+          },
+          "states": []
+        }
+      ],
+      "nameTextSlot": "name4"
+    },
+    {
+      "id": "item-5",
+      "title": "Fifth Item",
+      "kind": "voice",
+      "videoSlot": "talk5",
+      "slots": [
+        {
+          "name": "talk5",
+          "mediaType": "video",
+          "required": true,
+          "label": "Item 5 — your take",
+          "instructions": "Same framing. Short beat: a one-line reason this item is basic/entry-level."
+        },
+        {
+          "name": "tier5",
+          "mediaType": "text",
+          "required": true,
+          "label": "Item 5 — tier",
+          "instructions": "Which row this item's logo drops into.",
+          "control": {
+            "kind": "choice",
+            "options": [
+              {
+                "value": "S",
+                "color": "#FF7F7F"
+              },
+              {
+                "value": "A",
+                "color": "#FFBF7F"
+              },
+              {
+                "value": "B",
+                "color": "#FFDF7F"
+              },
+              {
+                "value": "C",
+                "color": "#7FFF7F"
+              },
+              {
+                "value": "D",
+                "color": "#7FFFFF"
+              }
+            ]
+          }
+        },
+        {
+          "name": "name5",
+          "mediaType": "text",
+          "required": false,
+          "label": "Item 5 — name",
+          "instructions": "The item's display name, shown next to its icon on the tier board. Auto-filled from your names take — edit here only if we misheard it."
+        },
+        {
+          "name": "logo5",
+          "mediaType": "image",
+          "required": true,
+          "label": "Item 5 — logo",
+          "instructions": "Transparent PNG logo of this item."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [],
+      "events": [
+        {
+          "id": "ev5-board",
+          "kind": "overlay",
+          "component": {
+            "component": "TierBoard",
+            "params": {
+              "entries": [
+                {
+                  "logoImageSlot": "logo1",
+                  "tierTextSlot": "tier1",
+                  "nameTextSlot": "name1"
+                },
+                {
+                  "logoImageSlot": "logo2",
+                  "tierTextSlot": "tier2",
+                  "nameTextSlot": "name2"
+                },
+                {
+                  "logoImageSlot": "logo3",
+                  "tierTextSlot": "tier3",
+                  "nameTextSlot": "name3"
+                },
+                {
+                  "logoImageSlot": "logo4",
+                  "tierTextSlot": "tier4",
+                  "nameTextSlot": "name4"
+                }
+              ],
+              "reveal": {
+                "logoImageSlot": "logo5",
+                "tierTextSlot": "tier5",
+                "nameTextSlot": "name5"
+              }
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.0833,
+            "y": 0.5711,
+            "width": 0.8347,
+            "height": 0.3414
+          },
+          "states": []
+        },
+        {
+          "id": "ev5-sfx",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "dropSfx",
+              "volume": 0.7
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 1.55
+          },
+          "states": []
+        }
+      ],
+      "nameTextSlot": "name5"
+    },
+    {
+      "id": "item-6",
+      "title": "Sixth Item",
+      "kind": "voice",
+      "videoSlot": "talk6",
+      "slots": [
+        {
+          "name": "talk6",
+          "mediaType": "video",
+          "required": true,
+          "label": "Item 6 — your take",
+          "instructions": "Same framing. Final beat: call out this item's standout product."
+        },
+        {
+          "name": "tier6",
+          "mediaType": "text",
+          "required": true,
+          "label": "Item 6 — tier",
+          "instructions": "Which row this item's logo drops into.",
+          "control": {
+            "kind": "choice",
+            "options": [
+              {
+                "value": "S",
+                "color": "#FF7F7F"
+              },
+              {
+                "value": "A",
+                "color": "#FFBF7F"
+              },
+              {
+                "value": "B",
+                "color": "#FFDF7F"
+              },
+              {
+                "value": "C",
+                "color": "#7FFF7F"
+              },
+              {
+                "value": "D",
+                "color": "#7FFFFF"
+              }
+            ]
+          }
+        },
+        {
+          "name": "name6",
+          "mediaType": "text",
+          "required": false,
+          "label": "Item 6 — name",
+          "instructions": "The item's display name, shown next to its icon on the tier board. Auto-filled from your names take — edit here only if we misheard it."
+        },
+        {
+          "name": "logo6",
+          "mediaType": "image",
+          "required": true,
+          "label": "Item 6 — logo",
+          "instructions": "Transparent PNG logo of this item."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [],
+      "events": [
+        {
+          "id": "ev6-board",
+          "kind": "overlay",
+          "component": {
+            "component": "TierBoard",
+            "params": {
+              "entries": [
+                {
+                  "logoImageSlot": "logo1",
+                  "tierTextSlot": "tier1",
+                  "nameTextSlot": "name1"
+                },
+                {
+                  "logoImageSlot": "logo2",
+                  "tierTextSlot": "tier2",
+                  "nameTextSlot": "name2"
+                },
+                {
+                  "logoImageSlot": "logo3",
+                  "tierTextSlot": "tier3",
+                  "nameTextSlot": "name3"
+                },
+                {
+                  "logoImageSlot": "logo4",
+                  "tierTextSlot": "tier4",
+                  "nameTextSlot": "name4"
+                },
+                {
+                  "logoImageSlot": "logo5",
+                  "tierTextSlot": "tier5",
+                  "nameTextSlot": "name5"
+                }
+              ],
+              "reveal": {
+                "logoImageSlot": "logo6",
+                "tierTextSlot": "tier6",
+                "nameTextSlot": "name6"
+              }
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.0833,
+            "y": 0.5711,
+            "width": 0.8347,
+            "height": 0.3414
+          },
+          "states": []
+        },
+        {
+          "id": "ev6-sfx",
+          "kind": "sfx",
+          "component": {
+            "component": "Sfx",
+            "params": {
+              "audioSlot": "dropSfx",
+              "volume": 0.7
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "nameAudioStart",
+            "offsetSec": 1.55
+          },
+          "states": []
+        }
+      ],
+      "nameTextSlot": "name6"
+    }
+  ]
+}

@@ -25,9 +25,22 @@ import { z } from "zod";
  * A reference to a reusable renderer component plus its parameters.
  * Format configs never contain animation code — only these references.
  *
- * Slot indirection: overlay params may use `textSlot` / `imageSlot`
- * (slot names) instead of literal `text` / `src`. Assembly resolves them
- * against the job's bindings so the EDL is fully self-contained.
+ * Slot indirection: overlay params may use `textSlot` / `imageSlot` /
+ * `audioSlot` / `videoSlot` (slot names) at the ref's own TOP LEVEL
+ * instead of literal `text` / `src`. Assembly (assemble.ts's
+ * resolveComponentParams) resolves them against the job's bindings so the
+ * EDL is fully self-contained; an unfilled top-level slot skips the whole
+ * event.
+ *
+ * PREFIXED slot indirection: a param named `<name>TextSlot` or
+ * `<name>ImageSlot` resolves into a param named `<name>` instead of the
+ * fixed `text`/`src` — usable both at the ref's own top level and nested
+ * arbitrarily deep inside arrays/objects (assemble.ts's
+ * resolveNestedSlots), e.g. TierBoard's `entries` array of
+ * `{ logoImageSlot, tierTextSlot }`. An unfilled slot found NESTED (not at
+ * the ref's own top level) drops the containing object from its array
+ * instead of skipping the whole event — a missing logo just doesn't
+ * appear on the board.
  */
 export const ComponentRefSchema = z.object({
   component: z.string(),
@@ -45,7 +58,13 @@ export const GradeSchema = z.object({
   temperatureShift: z.number().min(-1).max(1).default(0),
 });
 
-export const AnchorPointSchema = z.enum(["blockStart", "blockEnd"]);
+/** "nameAudioStart" is where a block's own dubbed names-take audio begins
+ *  — BEFORE blockStart when the block has a names-take lead-in (see
+ *  assemble.ts's `leadInSec`), and numerically identical to blockStart
+ *  (both 0) when it doesn't, so it's a safe no-op anywhere authored on a
+ *  block/format that never binds a namesTakeSlot. See
+ *  timing.ts's anchoredTimeSec for the resolution. */
+export const AnchorPointSchema = z.enum(["blockStart", "blockEnd", "nameAudioStart"]);
 
 /** Deterministic position inside a block: anchor point + signed offset. */
 export const AnchoredTimeSchema = z.object({
@@ -307,6 +326,45 @@ export const SlotSchema = z.object({
     .object({
       file: z.string(),
       label: z.string().optional(),
+    })
+    .optional(),
+  /** A `mediaType: "text"` slot only: renders as a chip picker instead of
+   *  a free-text textarea (SlotDropzone.tsx's `slot.control` branch) —
+   *  the bound value is still an ordinary `{text}` binding (just
+   *  constrained to one of a fixed set of options, or that set joined by
+   *  commas for "orderedChoice"), so nothing downstream of intake needs
+   *  to know the text didn't come from free typing.
+   *
+   *  "choice": one option selected, persisted as the bare value, e.g.
+   *  "B" for category-tier-list-reveal's per-item tier picker.
+   *
+   *  "orderedChoice": a subset of options chosen AND ordered by the user,
+   *  persisted as that subset joined with ", " in the chosen order, e.g.
+   *  "D, S, B" for the tierOrder slot the "choice" slots above pull their
+   *  own options from (see tiers.ts's parseTierList, which reads the same
+   *  joined-string shape on the render side). */
+  control: z
+    .object({
+      kind: z.enum(["choice", "orderedChoice"]),
+      options: z
+        .array(
+          z.object({
+            value: z.string(),
+            label: z.string().optional(),
+            color: z.string().optional(),
+          }),
+        )
+        .optional(),
+      /** Take the option list from another text slot's own bound value
+       *  (comma-joined) instead of authoring `options` here — e.g. a
+       *  per-item "choice" tier picker reading the format's own
+       *  "orderedChoice" tierOrder slot, so the two can never list
+       *  different tiers. Must name an earlier text slot in the SAME
+       *  format (checked in FormatSchema's superRefine). */
+      optionsFromSlot: z.string().optional(),
+    })
+    .refine((c) => c.options !== undefined || c.optionsFromSlot !== undefined, {
+      message: "control needs either options or optionsFromSlot",
     })
     .optional(),
 });
@@ -613,6 +671,15 @@ export const BlockSchema = z.object({
    *  unbound, assemble.ts skips the block entirely (diagnostic, not an
    *  error) instead of throwing on a missing trim entry. */
   optional: z.boolean().default(false),
+  /** Voice blocks only, and only meaningful alongside the format's own
+   *  `namesTakeSlot`: which of this block's own text slots gets
+   *  auto-filled from that clip's transcribed name (namesTake.ts), when
+   *  the user hasn't already typed a value there themselves. Must name a
+   *  text slot declared in this block's own `slots`, and that slot is
+   *  expected to be `required: false` — a REQUIRED text slot would block
+   *  the build (intake.ts's "every required slot filled" check) before
+   *  namesTake.ts's own auto-fill ever gets a chance to run. */
+  nameTextSlot: z.string().optional(),
   /** Legacy field: semantic anchors only. New formats use `anchors`. */
   roles: z.array(SemanticAnchorSchema).default([]),
   anchors: z.array(AnchorSchema).default([]),
@@ -687,6 +754,28 @@ export const FormatSchema = z
      *  separately from the speaking take — optional polish, mediaType
      *  "video". Only meaningful alongside speakingTakeSlot. */
     finalClipSlot: SlotSchema.optional(),
+    /**
+     * A separate take where the creator says each voice block's own
+     * "name" (whatever short phrase that block's reveal centers on) back
+     * to back, in block order, nothing else — e.g. category-tier-list-
+     * reveal's item names. namesTake.ts's extractNameAudioClips splits it
+     * into one audio-only clip per voice block (via silence-region
+     * detection, not anchor matching — there's no fixed vocabulary to
+     * match against since the names are user content) and binds each as
+     * a synthetic "<videoSlot>-nameAudio" slot. assemble.ts then dubs
+     * that audio over the front of the block's own already-recorded
+     * silence (see its own `leadInSec` doc comment) and times that
+     * block's reveal events off the new "nameAudioStart" anchor instead
+     * of a spoken-phrase anchor. mediaType must be "video" (the audio is
+     * extracted from it; a bare audio recording works too since only the
+     * track is used, but the slot stays "video" for a consistent capture
+     * UX with speakingTakeSlot). A format that declares this MUST mark it
+     * `required: true` — an event's timing is one fixed spec authored
+     * once, so there's no per-job branching between "time off the
+     * name-audio" and a fallback; every job of this format has to have
+     * one so every event can unconditionally use nameAudioStart.
+     */
+    namesTakeSlot: SlotSchema.optional(),
     blocks: z.array(BlockSchema).min(1),
   })
   .superRefine((format, ctx) => {
@@ -701,6 +790,7 @@ export const FormatSchema = z
     if (format.identitySlot) addSlot(format.identitySlot.name);
     if (format.speakingTakeSlot) addSlot(format.speakingTakeSlot.name);
     if (format.finalClipSlot) addSlot(format.finalClipSlot.name);
+    if (format.namesTakeSlot) addSlot(format.namesTakeSlot.name);
     for (const slot of format.sharedSlots) addSlot(slot.name);
 
     if (format.identitySlot && format.identitySlot.mediaType !== "image") {
@@ -719,6 +809,24 @@ export const FormatSchema = z
       ctx.addIssue({
         code: "custom",
         message: `finalClipSlot "${format.finalClipSlot.name}" must have mediaType "video"`,
+      });
+    }
+    if (format.namesTakeSlot && format.namesTakeSlot.mediaType !== "video") {
+      ctx.addIssue({
+        code: "custom",
+        message: `namesTakeSlot "${format.namesTakeSlot.name}" must have mediaType "video"`,
+      });
+    }
+    if (format.namesTakeSlot && !format.namesTakeSlot.required) {
+      ctx.addIssue({
+        code: "custom",
+        message: `namesTakeSlot "${format.namesTakeSlot.name}" must be required — an event's timing can't branch per-job on whether it's bound`,
+      });
+    }
+    if (format.namesTakeSlot && !format.blocks.some((b) => b.kind === "voice" && !b.optional)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `namesTakeSlot is set but the format has no non-optional voice blocks to derive name clips for`,
       });
     }
     if (format.speakingTakeSlot && !format.blocks.some((b) => b.kind === "voice")) {
@@ -761,6 +869,32 @@ export const FormatSchema = z
           code: "custom",
           message: `block "${block.id}": videoSlot "${block.videoSlot}" must have mediaType "video"`,
         });
+      }
+
+      if (block.nameTextSlot) {
+        if (!format.namesTakeSlot) {
+          ctx.addIssue({
+            code: "custom",
+            message: `block "${block.id}": nameTextSlot is set but the format has no namesTakeSlot to derive it from`,
+          });
+        }
+        const nameSlot = block.slots.find((s) => s.name === block.nameTextSlot);
+        if (!nameSlot) {
+          ctx.addIssue({
+            code: "custom",
+            message: `block "${block.id}": nameTextSlot "${block.nameTextSlot}" is not declared in its slots`,
+          });
+        } else if (nameSlot.mediaType !== "text") {
+          ctx.addIssue({
+            code: "custom",
+            message: `block "${block.id}": nameTextSlot "${block.nameTextSlot}" must have mediaType "text"`,
+          });
+        } else if (nameSlot.required) {
+          ctx.addIssue({
+            code: "custom",
+            message: `block "${block.id}": nameTextSlot "${block.nameTextSlot}" must be required:false — namesTake.ts's auto-fill only runs after intake's required-slot check`,
+          });
+        }
       }
 
       const anchors = [...block.roles, ...block.anchors];
@@ -897,6 +1031,38 @@ export const FormatSchema = z
         code: "custom",
         message: `format declares a generated slot but no "identitySlot" — generation has no identity photos to condition on`,
       });
+    }
+
+    // `control` (choice/orderedChoice chip pickers) only ever makes sense
+    // on a text slot, and `optionsFromSlot` has to name a real sibling
+    // text slot — checked over every slot in the format (block, shared,
+    // music, identity, speaking take, final clip), mirroring intake.ts's
+    // own allSlots() so this can't silently drift from what the pipeline
+    // actually validates against at runtime.
+    const everySlot: z.infer<typeof SlotSchema>[] = [
+      ...format.blocks.flatMap((b) => b.slots),
+      ...format.sharedSlots,
+      ...(format.musicSlot ? [format.musicSlot] : []),
+      ...(format.identitySlot ? [format.identitySlot] : []),
+      ...(format.speakingTakeSlot ? [format.speakingTakeSlot] : []),
+      ...(format.finalClipSlot ? [format.finalClipSlot] : []),
+      ...(format.namesTakeSlot ? [format.namesTakeSlot] : []),
+    ];
+    const textSlotNames = new Set(everySlot.filter((s) => s.mediaType === "text").map((s) => s.name));
+    for (const slot of everySlot) {
+      if (!slot.control) continue;
+      if (slot.mediaType !== "text") {
+        ctx.addIssue({
+          code: "custom",
+          message: `slot "${slot.name}": control only applies to mediaType "text"`,
+        });
+      }
+      if (slot.control.optionsFromSlot && !textSlotNames.has(slot.control.optionsFromSlot)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `slot "${slot.name}": control.optionsFromSlot "${slot.control.optionsFromSlot}" is not a text slot in this format`,
+        });
+      }
     }
   });
 

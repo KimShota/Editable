@@ -98,6 +98,7 @@ export function ScriptingBlockCard({
                   formatId={format.id}
                   slot={slot}
                   binding={bindings[slot.name]}
+                  siblingBindings={bindings}
                   onChange={onChange}
                   onDraftChange={(name, value) => setDrafts((prev) => ({ ...prev, [name]: value }))}
                 />

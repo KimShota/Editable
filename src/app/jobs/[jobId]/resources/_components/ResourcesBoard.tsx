@@ -17,8 +17,8 @@ import { HookFeedbackPanel } from "./HookFeedbackPanel";
 import { WizardFooterNav, WizardHeader, WizardStepInfo } from "./WizardNav";
 
 /** Every slot the format declares: block, shared, music, identity,
- *  speaking-take, and final-clip slots — same shape allSlots() computes
- *  server-side. */
+ *  speaking-take, final-clip, and names-take slots — same shape allSlots()
+ *  computes server-side. */
 const allSlots = (format: Format): Slot[] => [
   ...format.blocks.flatMap((b) => b.slots),
   ...format.sharedSlots,
@@ -26,6 +26,7 @@ const allSlots = (format: Format): Slot[] => [
   ...(format.identitySlot ? [format.identitySlot] : []),
   ...(format.speakingTakeSlot ? [format.speakingTakeSlot] : []),
   ...(format.finalClipSlot ? [format.finalClipSlot] : []),
+  ...(format.namesTakeSlot ? [format.namesTakeSlot] : []),
 ];
 
 /** Three steps, matching the flow this was modeled on: write your lines,
@@ -345,6 +346,26 @@ export function ResourcesBoard({
                     binding={bindings[takeSlot.name]}
                     onChange={setBinding}
                     multi
+                  />
+                </div>
+              </Card>
+            )}
+
+            {format.namesTakeSlot && (
+              <Card className="p-6">
+                <div className="mb-4 flex items-center gap-2">
+                  <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
+                    Names take
+                  </h2>
+                  <Pill>one clip, names only</Pill>
+                </div>
+                <div className="max-w-md">
+                  <SlotDropzone
+                    jobId={jobId}
+                    formatId={format.id}
+                    slot={format.namesTakeSlot}
+                    binding={bindings[format.namesTakeSlot.name]}
+                    onChange={setBinding}
                   />
                 </div>
               </Card>

@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { Slot } from "@backend/pipeline/types";
+import { tierColor } from "@backend/remotion/components/tiers";
 import { LIBRARY_DRAG_MIME, type LibraryDragPayload } from "../../../../lib/dnd";
 import { LineKind, Pill } from "../../../../_components/ui";
 import { slotLabel } from "../../../../lib/slotLabel";
@@ -63,11 +64,39 @@ async function clearSlot(jobId: string, slotName: string, index?: number): Promi
   return data.binding;
 }
 
+/** A control slot's own option list — authored directly on `slot.control`,
+ *  or (optionsFromSlot) pulled from a sibling text slot's own CURRENT
+ *  binding, comma-split — e.g. category-tier-list-reveal's per-item
+ *  "choice" tier pickers reading its "orderedChoice" tierOrder slot, so
+ *  each one always offers exactly the tiers the user picked, in the order
+ *  they put them in. Options resolved this way carry no authored
+ *  label/color (the sibling binding is just plain text) — chip color
+ *  falls back to tiers.ts's tierColor() in that case. */
+function resolveControlOptions(
+  slot: Slot,
+  siblingBindings: Record<string, Binding | undefined>,
+): Array<{ value: string; label?: string; color?: string }> {
+  const control = slot.control;
+  if (!control) return [];
+  if (control.options) return control.options;
+  if (control.optionsFromSlot) {
+    const source = siblingBindings[control.optionsFromSlot];
+    const raw = source && "text" in source ? source.text : "";
+    return raw
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean)
+      .map((value) => ({ value }));
+  }
+  return [];
+}
+
 export function SlotDropzone({
   jobId,
   formatId,
   slot,
   binding,
+  siblingBindings,
   onChange,
   multi = false,
   coveredNote,
@@ -80,6 +109,11 @@ export function SlotDropzone({
   formatId?: string;
   slot: Slot;
   binding?: Binding;
+  /** The whole job's binding map — needed only by a `slot.control` with
+   *  `optionsFromSlot` (see resolveControlOptions above), which has to read
+   *  ANOTHER slot's current value, not just its own. Omit for a call site
+   *  whose slots never declare a control (harmless either way). */
+  siblingBindings?: Record<string, Binding | undefined>;
   onChange: (slotName: string, binding: Binding | undefined) => void;
   /** A voice block's main clip may be filmed as several separate takes
    *  (e.g. the marker line and the explanation shot apart) — dropping more
@@ -102,6 +136,136 @@ export function SlotDropzone({
   const [dragOver, setDragOver] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  if (slot.mediaType === "text" && slot.control) {
+    const control = slot.control;
+    const options = resolveControlOptions(slot, siblingBindings ?? {});
+    const currentText = binding && "text" in binding ? binding.text : "";
+
+    const persist = async (nextValue: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        onChange(slot.name, nextValue ? await bindText(jobId, slot.name, nextValue) : await clearSlot(jobId, slot.name));
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    const chipClass = (selected: boolean) =>
+      `rounded-full px-3 py-1 text-xs font-bold text-black transition-opacity disabled:cursor-not-allowed ${
+        selected ? "" : "opacity-40 hover:opacity-70"
+      }`;
+
+    if (control.kind === "choice") {
+      return (
+        <SlotShell slot={slot} filled={!!currentText}>
+          <div className="flex flex-wrap gap-2">
+            {options.map((opt) => {
+              const selected = currentText === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => persist(selected ? "" : opt.value)}
+                  className={chipClass(selected)}
+                  style={{ backgroundColor: opt.color ?? tierColor(opt.value) }}
+                >
+                  {opt.label ?? opt.value}
+                </button>
+              );
+            })}
+          </div>
+          {options.length === 0 && (
+            <p className="text-[12px] text-[color:var(--ink-dim)]">
+              {control.optionsFromSlot ? `Fill in "${control.optionsFromSlot}" first.` : "No options."}
+            </p>
+          )}
+          {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+        </SlotShell>
+      );
+    }
+
+    // orderedChoice: the full option universe up top (click to toggle
+    // inclusion), the currently-chosen subset below it as a reorderable
+    // list — one text binding, "value, value, …" in the order shown.
+    const chosen = currentText
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+    const toggle = (value: string) => {
+      const next = chosen.includes(value) ? chosen.filter((v) => v !== value) : [...chosen, value];
+      persist(next.join(", "));
+    };
+    const move = (index: number, dir: -1 | 1) => {
+      const next = [...chosen];
+      const target = index + dir;
+      if (target < 0 || target >= next.length) return;
+      [next[index], next[target]] = [next[target], next[index]];
+      persist(next.join(", "));
+    };
+
+    return (
+      <SlotShell slot={slot} filled={chosen.length > 0}>
+        <div className="flex flex-wrap gap-2">
+          {options.map((opt) => {
+            const selected = chosen.includes(opt.value);
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={busy}
+                onClick={() => toggle(opt.value)}
+                className={chipClass(selected)}
+                style={{ backgroundColor: opt.color ?? tierColor(opt.value) }}
+              >
+                {opt.label ?? opt.value}
+              </button>
+            );
+          })}
+        </div>
+        {chosen.length > 0 && (
+          <div className="mt-2 flex flex-col gap-1">
+            {chosen.map((value, i) => {
+              const opt = options.find((o) => o.value === value);
+              return (
+                <div
+                  key={value}
+                  className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2 py-1"
+                >
+                  <span
+                    className="h-3 w-3 shrink-0 rounded-full"
+                    style={{ backgroundColor: opt?.color ?? tierColor(value) }}
+                  />
+                  <span className="flex-1 text-sm text-[color:var(--ink)]">{opt?.label ?? value}</span>
+                  <button
+                    type="button"
+                    disabled={busy || i === 0}
+                    onClick={() => move(i, -1)}
+                    className="text-xs text-[color:var(--ink-dim)] hover:text-[color:var(--ink)] disabled:opacity-30"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || i === chosen.length - 1}
+                    onClick={() => move(i, 1)}
+                    className="text-xs text-[color:var(--ink-dim)] hover:text-[color:var(--ink)] disabled:opacity-30"
+                  >
+                    ↓
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+      </SlotShell>
+    );
+  }
 
   if (slot.mediaType === "text") {
     const hasText = !!binding && "text" in binding && binding.text.trim().length > 0;
