@@ -88,7 +88,7 @@ const slugify = (s: string): string =>
 export const createJob = async (formatId: string, ownerId: string): Promise<string> => {
   const jobId = `${slugify(formatId)}-${randomBytes(3).toString("hex")}`;
   fs.mkdirSync(path.join(jobDir(jobId), "assets"), { recursive: true });
-  writeJobManifest(jobId, { format: formatId, bindings: {}, lexicon: [] });
+  writeJobManifest(jobId, { format: formatId, bindings: {}, lexicon: [], language: "auto" });
   await sql`insert into job_owners (job_id, user_id) values (${jobId}, ${ownerId})`;
   return jobId;
 };

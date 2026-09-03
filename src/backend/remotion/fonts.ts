@@ -1,5 +1,5 @@
 import { continueRender, delayRender, staticFile } from "remotion";
-import { ARCHIVO_BLACK_FONT, INTER_FONT, MONTSERRAT_ITALIC_FONT, PLAYFAIR_DISPLAY_FONT, POPPINS_FONT } from "../components/style";
+import { ARCHIVO_BLACK_FONT, INTER_FONT, MONTSERRAT_ITALIC_FONT, NOTO_SANS_JP_FONT, PLAYFAIR_DISPLAY_FONT, POPPINS_FONT } from "../components/style";
 
 /**
  * Injects every face the compositions use — Inter (SYSTEM_FONT's pinned
@@ -83,6 +83,34 @@ export const ensureDisplayFonts = (): void => {
       font-style: normal;
       font-display: block;
     }
+    @font-face {
+      font-family: "${NOTO_SANS_JP_FONT}";
+      src: url("${staticFile("fonts/noto-sans-jp-400.woff2")}") format("woff2");
+      font-weight: 400;
+      font-style: normal;
+      font-display: block;
+    }
+    @font-face {
+      font-family: "${NOTO_SANS_JP_FONT}";
+      src: url("${staticFile("fonts/noto-sans-jp-500.woff2")}") format("woff2");
+      font-weight: 500;
+      font-style: normal;
+      font-display: block;
+    }
+    @font-face {
+      font-family: "${NOTO_SANS_JP_FONT}";
+      src: url("${staticFile("fonts/noto-sans-jp-700.woff2")}") format("woff2");
+      font-weight: 700;
+      font-style: normal;
+      font-display: block;
+    }
+    @font-face {
+      font-family: "${NOTO_SANS_JP_FONT}";
+      src: url("${staticFile("fonts/noto-sans-jp-900.woff2")}") format("woff2");
+      font-weight: 900;
+      font-style: normal;
+      font-display: block;
+    }
   `;
   document.head.appendChild(style);
 
@@ -96,6 +124,10 @@ export const ensureDisplayFonts = (): void => {
     document.fonts.load(`700 100px "${POPPINS_FONT}"`),
     document.fonts.load(`800 100px "${POPPINS_FONT}"`),
     document.fonts.load(`900 100px "${POPPINS_FONT}"`),
+    document.fonts.load(`400 100px "${NOTO_SANS_JP_FONT}"`),
+    document.fonts.load(`500 100px "${NOTO_SANS_JP_FONT}"`),
+    document.fonts.load(`700 100px "${NOTO_SANS_JP_FONT}"`),
+    document.fonts.load(`900 100px "${NOTO_SANS_JP_FONT}"`),
   ])
     .catch(() => {
       // Missing/blocked font files degrade to the SYSTEM_FONT fallback in

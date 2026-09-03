@@ -1,3 +1,5 @@
+import { isCjkChar } from "./cjk";
+
 /**
  * Shared styling. The stack was originally the bare OS default (San
  * Francisco on Mac, Segoe on Windows) — clean native look, no font file to
@@ -10,8 +12,16 @@
  * anywhere the file fails to load. Loaded by remotion/fonts.ts.
  */
 export const INTER_FONT = "Inter";
+export const NOTO_SANS_JP_FONT = "Noto Sans JP";
+/** Japanese-glyph fallback — Inter (and every display face below, which all
+ *  end in SYSTEM_FONT) has no CJK coverage, so without this a Japanese run
+ *  inside any of them renders as missing-glyph boxes on the headless render
+ *  host (see this file's own top comment on why a real font file is pinned
+ *  at all there). Sits right after Inter, before the OS fallback names, so
+ *  Latin text still renders in Inter and only Japanese characters fall
+ *  through to it. */
 export const SYSTEM_FONT =
-  '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, Helvetica, Arial, sans-serif';
+  `"Inter", "${NOTO_SANS_JP_FONT}", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, Helvetica, Arial, sans-serif`;
 
 export const TEXT_SHADOW = "0 2px 12px rgba(0,0,0,0.45)";
 
@@ -30,7 +40,9 @@ export const STICKER_ACCENT = "#EC7A5E";
  *  system SERIF (not SYSTEM_FONT) so a blocked font file degrades to a
  *  native serif rather than silently becoming sans-serif. */
 export const PLAYFAIR_DISPLAY_FONT = "Playfair Display Black";
-export const PLAYFAIR_DISPLAY_STACK = `"${PLAYFAIR_DISPLAY_FONT}", Georgia, "Times New Roman", serif`;
+/** Doesn't chain through SYSTEM_FONT (see doc comment above), so needs its
+ *  own Japanese-glyph fallback repeated here rather than inheriting it. */
+export const PLAYFAIR_DISPLAY_STACK = `"${PLAYFAIR_DISPLAY_FONT}", "${NOTO_SANS_JP_FONT}", Georgia, "Times New Roman", serif`;
 
 /** Geometric grotesque (circular bowls, flat-cut terminals) used by the
  *  cs-resources reference reel's hook/resolve/card/CTA text — measured by
@@ -60,8 +72,17 @@ export const KUMAR_RED = "#F80203";
  *  height — width-fit and height-cap combined, not either alone. */
 export const fitDidoneFontSize = (text: string, frameWidth: number, frameHeight?: number, maxPx = 260, minPx = 56): number => {
   const CHAR_WIDTH_FACTOR = 0.62;
+  // A CJK glyph is roughly square (full-width) — much wider than this
+  // Didone serif's average Latin uppercase letter — so a Japanese title
+  // needs its own, larger per-character estimate or it sizes as if it were
+  // half as wide as it actually renders, overflowing the frame.
+  const CJK_CHAR_WIDTH_FACTOR = 1.05;
   const targetWidthPx = frameWidth * 0.9;
-  const raw = targetWidthPx / (Math.max(1, text.length) * CHAR_WIDTH_FACTOR);
+  const estimatedWidthUnits = Array.from(text).reduce(
+    (sum, ch) => sum + (isCjkChar(ch) ? CJK_CHAR_WIDTH_FACTOR : CHAR_WIDTH_FACTOR),
+    0,
+  );
+  const raw = targetWidthPx / Math.max(1, estimatedWidthUnits);
   const heightCap = frameHeight !== undefined ? frameHeight * 0.16 : maxPx;
   return Math.min(maxPx, heightCap, Math.max(minPx, raw));
 };

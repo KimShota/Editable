@@ -81,9 +81,9 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 log "Models (gitignored — they are downloaded, never cloned)"
 sudo -u "$APP_USER" mkdir -p "$APP_DIR/models"
-if [[ ! -f "$APP_DIR/models/ggml-base.en.bin" ]]; then
-  sudo -u "$APP_USER" curl -fL -o "$APP_DIR/models/ggml-base.en.bin" \
-    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+if [[ ! -f "$APP_DIR/models/ggml-medium.bin" ]]; then
+  sudo -u "$APP_USER" curl -fL -o "$APP_DIR/models/ggml-medium.bin" \
+    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
 fi
 # NOT optional on Linux, despite what README.md says: matte.swift's Apple
 # Vision fallback does not exist here, so a missing model means every

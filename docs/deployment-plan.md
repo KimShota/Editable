@@ -207,7 +207,7 @@ non-Node dependency the other five formats don't have.
   system libs Remotion's Linux docs list.
 - **Models** (both gitignored, so they must be downloaded, not cloned) —
   URLs are in `README.md:76-84`:
-  - `models/ggml-base.en.bin` (148MB)
+  - `models/ggml-medium.bin` (1.5GB) — multilingual (English + Japanese)
   - `models/rvm_mobilenetv3_fp32.onnx` (15MB) — **required** on Linux, not
     optional as the README says; the Vision fallback doesn't exist here.
 

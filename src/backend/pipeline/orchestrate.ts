@@ -105,7 +105,7 @@ export const runSplit = (format: Format, filled: FilledFormat, jobId: string): S
   // just-concatenated file.
   const split = isMultiClipTake
     ? splitMultiClipTake(format, coveredBlocks, takePrep, scriptByBlockId)
-    : splitTake(format, coveredBlocks, take.absPath, take.durationSec, scriptByBlockId, takePrep?.words);
+    : splitTake(format, coveredBlocks, take.absPath, take.durationSec, scriptByBlockId, takePrep?.words, filled.language);
   writeArtifact(jobId, "splitTake", split);
   return split;
 };

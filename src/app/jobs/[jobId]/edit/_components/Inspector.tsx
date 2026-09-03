@@ -17,6 +17,7 @@ import {
   defaultLowerThirdFontWeight,
   fitDidoneFontSize,
 } from "@backend/components/style";
+import { splitIntoUnits } from "@backend/components/cjk";
 
 const TRANSITIONS = [
   { value: "cut", label: "Cut" },
@@ -390,7 +391,7 @@ const wordsFromEditedText = (
   tlInSec: number,
   tlOutSec: number,
 ): { text: string; tlStartSec: number; tlEndSec: number }[] | null => {
-  const tokens = editedText.trim().split(/\s+/).filter(Boolean);
+  const tokens = splitIntoUnits(editedText.trim());
   if (tokens.length === 0) return null;
   if (tokens.length === original.length) {
     return original.map((w, i) => ({ ...w, text: tokens[i] }));

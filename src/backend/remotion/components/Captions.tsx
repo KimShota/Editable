@@ -10,6 +10,7 @@ import {
   fitDidoneFontSize,
 } from "../../components/style";
 import { ensureDisplayFonts } from "../fonts";
+import { containsCjk } from "../../components/cjk";
 
 /**
  * Word captions driven by the EDL's caption groups (absolute times). One
@@ -184,6 +185,16 @@ const LowerThirdLine: React.FC<{ group: EdlCaptionGroup; position: string; theme
           // since a caption someone deliberately restyled is no longer
           // meant to track the template's own emphasis palette.
           const color = group.color ?? (isKumar ? KUMAR_RED : isOutro ? OUTRO_YELLOW : isKeywordHit ? HIGHLIGHT : "white");
+          // Whisper's own Japanese/Chinese segmentation gives one "word" per
+          // character (or a short few-character chunk), not a real spaced
+          // word — the ordinary 8px gap either side, applied to every one
+          // of those, would render as visibly broken spacing (Japanese text
+          // is never actually gapped like this). No gap on a side that
+          // touches a CJK word.
+          const prevWord = group.words[i - 1];
+          const nextWord = group.words[i + 1];
+          const marginLeft = prevWord && !containsCjk(prevWord.text) && !containsCjk(w.text) ? 8 : 0;
+          const marginRight = nextWord && !containsCjk(nextWord.text) && !containsCjk(w.text) ? 8 : 0;
           return (
             <span
               key={i}
@@ -198,7 +209,8 @@ const LowerThirdLine: React.FC<{ group: EdlCaptionGroup; position: string; theme
                 textTransform,
                 display: "inline-block",
                 transform: isKeywordHit ? "scale(1.08)" : isActive ? "scale(1.03)" : "scale(1)",
-                margin: "0 8px",
+                marginLeft,
+                marginRight,
               }}
             >
               {w.text}

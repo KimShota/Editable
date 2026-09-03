@@ -3,6 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { ScriptSuggestionSchema } from "../content/schemas";
 import { Transcript, Word } from "./types";
+import { tokenizeWords } from "./tokenize";
 
 /**
  * Deterministic transcript correction against the user's OWN typed script
@@ -28,7 +29,13 @@ import { Transcript, Word } from "./types";
  * — only `text`.
  */
 
-const normalize = (w: string): string => w.toLowerCase().replace(/[^a-z0-9']/g, "");
+/** Unicode-aware (`\p{L}\p{N}`, not `a-z0-9`) so Japanese/CJK text survives
+ *  this strip instead of being deleted outright — an ASCII-only regex here
+ *  used to make wordSimilarity below score every Japanese word pair as a
+ *  vacuous "identical" (both sides normalize to "", and na.length===0 &&
+ *  nb.length===0 short-circuits to 1), silently disabling
+ *  correctTranscript's script-based correction for any Japanese line. */
+const normalize = (w: string): string => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
 
 const levenshtein = (a: string, b: string): number => {
   const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
@@ -109,7 +116,7 @@ const SIMILARITY_FLOOR = 0.5;
  *  the per-block/per-take unit correctTranscript.ts's block loop applies
  *  this to. */
 const alignTake = (words: Word[], scriptText: string): Word[] => {
-  const scriptWords = scriptText.split(/\s+/).filter(Boolean);
+  const scriptWords = tokenizeWords(scriptText);
   if (scriptWords.length === 0) return words;
 
   const pairs = alignWordSequences(

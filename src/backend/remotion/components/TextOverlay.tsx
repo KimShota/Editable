@@ -17,6 +17,7 @@ import {
   fitDidoneFontSize,
 } from "../../components/style";
 import { clampPillPadding, outerInsetPx } from "../../components/textFit";
+import { joinUnits, splitIntoUnits } from "../../components/cjk";
 import { ensureDisplayFonts } from "../fonts";
 
 /**
@@ -40,18 +41,18 @@ type Variant = TextVariant;
  *  degrading sensibly for arbitrary title text. Single-word text (nothing
  *  to split) renders whole on the top line, no bottom line. */
 const splitTitleLines = (text: string): [string, string] => {
-  const words = text.trim().split(/\s+/).filter(Boolean);
+  const words = splitIntoUnits(text.trim());
   if (words.length <= 1) return [text.trim(), ""];
   let bestIdx = 1;
   let bestDiff = Infinity;
   for (let i = 1; i < words.length; i++) {
-    const diff = Math.abs(words.slice(0, i).join(" ").length - words.slice(i).join(" ").length);
+    const diff = Math.abs(joinUnits(words.slice(0, i)).length - joinUnits(words.slice(i)).length);
     if (diff < bestDiff) {
       bestDiff = diff;
       bestIdx = i;
     }
   }
-  return [words.slice(0, bestIdx).join(" "), words.slice(bestIdx).join(" ")];
+  return [joinUnits(words.slice(0, bestIdx)), joinUnits(words.slice(bestIdx))];
 };
 
 /** The reference end card's own layout: title split top/bottom of frame

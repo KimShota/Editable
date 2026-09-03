@@ -1185,6 +1185,12 @@ export const JobManifestSchema = z.object({
    *  passed to the transcript-correction pass (see correctTranscript.ts)
    *  as a bias. Omitted/empty skips correction. */
   lexicon: z.array(z.string()).default([]),
+  /** whisper.cpp language code (e.g. "en", "ja") for this job's
+   *  transcription, or "auto" for per-file automatic language detection —
+   *  the default, since a job's clips can freely mix English and Japanese
+   *  content. `.default()` so an existing job.json on disk from before
+   *  this field existed keeps parsing with no migration. */
+  language: z.string().default("auto"),
 });
 
 /** One probed file — shared shape between a single-file binding and each
@@ -1218,6 +1224,10 @@ export const FilledFormatSchema = z.object({
   bindings: z.record(z.string(), BoundAssetSchema),
   overrides: OverridesSchema.optional(),
   lexicon: z.array(z.string()).default([]),
+  /** Copied straight from JobManifestSchema's own `language` field — see
+   *  its doc comment. Read by transcribe.ts/namesTake.ts wherever they call
+   *  whisper directly. */
+  language: z.string().default("auto"),
   /** Per-block karaoke-title baseline override, keyed by blockId — set by
    *  backgroundReplace.ts ONLY when its own desk-overlap solve shifted a
    *  block's framing down from the manifest's own headTopFrac target (see

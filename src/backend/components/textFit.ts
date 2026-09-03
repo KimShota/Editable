@@ -1,4 +1,5 @@
 import { ARCHIVO_BLACK_STACK, FONT_FAMILY_SHORTHANDS, MONTSERRAT_ITALIC_STACK, PLAYFAIR_DISPLAY_STACK, POPPINS_STACK, SYSTEM_FONT } from "./style";
+import { isCjkChar } from "./cjk";
 
 /**
  * Framework-free text-fit approximation shared by the assemble-time
@@ -31,39 +32,87 @@ const CHAR_WIDTH_FACTOR_BY_STACK: Record<string, number> = {
 };
 const DEFAULT_CHAR_WIDTH_FACTOR = 0.58;
 
+/** A CJK glyph is roughly square (full-width), much wider than a Latin
+ *  lowercase average — used per-character instead of `charWidthFactor`'s
+ *  per-run Latin estimate whenever a unit (see splitIntoUnits) is CJK. */
+const CJK_CHAR_WIDTH_FACTOR = 1.0;
+
 export const charWidthFactor = (fontFamily: string | undefined): number => {
   const stack = fontFamily ? (FONT_FAMILY_SHORTHANDS[fontFamily] ?? fontFamily) : SYSTEM_FONT;
   return CHAR_WIDTH_FACTOR_BY_STACK[stack] ?? DEFAULT_CHAR_WIDTH_FACTOR;
 };
 
-const estimateRunWidthPx = (run: string, fontSizePx: number, factor: number): number => run.length * fontSizePx * factor;
+const estimateUnitWidthPx = (unit: string, fontSizePx: number, factor: number): number =>
+  isCjkChar(unit) ? fontSizePx * CJK_CHAR_WIDTH_FACTOR : unit.length * fontSizePx * factor;
 
-/** Greedy word-wrap within `maxWidthPx`, honoring an authored "\n" as a
- *  hard break (TextOverlay renders with `white-space: pre-line`, and the
- *  CTA slot's own instructions ask authors to write one phrase per line).
- *  An overlong single word still gets its own (overflowing) line rather
- *  than being split mid-word — matches the real CSS, which never sets
- *  `overflow-wrap: anywhere`. */
+/** Breakable units for wrapping, WITH original spacing preserved (unlike
+ *  cjk.ts's own splitIntoUnits, which throws whitespace away — fine for
+ *  finding a title's split point, wrong here since these units get
+ *  reassembled into the literal rendered caption text). An ordinary Latin
+ *  word keeps its own trailing space (if any) glued on, so two adjacent
+ *  word units always came from real whitespace in the source and
+ *  concatenating them back reproduces it exactly; each CJK character is
+ *  still its own unit (Japanese/Chinese text can break between any two of
+ *  them), with any space that happened to follow it (rare — CJK text is
+ *  not normally space-separated) appended onto it directly, since there's
+ *  no separate word unit to carry that trailing space instead. */
+const unitsWithSpacing = (text: string): string[] => {
+  const units: string[] = [];
+  let current = "";
+  for (const ch of Array.from(text)) {
+    if (isCjkChar(ch)) {
+      if (current) {
+        units.push(current);
+        current = "";
+      }
+      units.push(ch);
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (current) {
+        units.push(`${current} `);
+        current = "";
+      } else if (units.length > 0 && !units[units.length - 1].endsWith(" ")) {
+        units[units.length - 1] += " ";
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (current) units.push(current);
+  return units;
+};
+
+/** Greedy wrap within `maxWidthPx`, honoring an authored "\n" as a hard
+ *  break (TextOverlay renders with `white-space: pre-line`, and the CTA
+ *  slot's own instructions ask authors to write one phrase per line). An
+ *  ordinary Latin word may still overflow its own line rather than split
+ *  mid-word — matches the real CSS, which never sets
+ *  `overflow-wrap: anywhere` — while Japanese/Chinese text (no spaces, see
+ *  unitsWithSpacing) can break between any two characters. */
 export const wrapTextEstimate = (text: string, fontSizePx: number, maxWidthPx: number, fontFamily: string | undefined): string[] => {
   const factor = charWidthFactor(fontFamily);
   const lines: string[] = [];
   for (const paragraph of text.split("\n")) {
-    const words = paragraph.split(/\s+/).filter(Boolean);
-    if (words.length === 0) {
+    const units = unitsWithSpacing(paragraph);
+    if (units.length === 0) {
       lines.push("");
       continue;
     }
-    let current = words[0];
-    for (const word of words.slice(1)) {
-      const candidate = `${current} ${word}`;
-      if (estimateRunWidthPx(candidate, fontSizePx, factor) <= maxWidthPx) {
-        current = candidate;
+    let current = "";
+    let currentWidthPx = 0;
+    for (const unit of units) {
+      const unitWidthPx = estimateUnitWidthPx(unit, fontSizePx, factor);
+      if (current && currentWidthPx + unitWidthPx > maxWidthPx) {
+        lines.push(current.trimEnd());
+        current = unit;
+        currentWidthPx = unitWidthPx;
       } else {
-        lines.push(current);
-        current = word;
+        current += unit;
+        currentWidthPx += unitWidthPx;
       }
     }
-    lines.push(current);
+    lines.push(current.trimEnd());
   }
   return lines;
 };

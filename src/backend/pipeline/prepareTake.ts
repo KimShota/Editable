@@ -6,6 +6,7 @@ import { matchLiteralAnchor } from "./literal";
 import { detectSilenceIntervals } from "./trim";
 import { requireWhisperModel, transcribeFile } from "./whisper";
 import { wordSimilarity } from "./alignToScript";
+import { normalizedWords } from "./tokenize";
 import { artifactsDir } from "./paths";
 import { TakePrepSchema } from "./schemas";
 import { BoundFile, Format, LiteralAnchor, TakePrep, TakePrepClip, TakePrepInput, Word } from "./types";
@@ -175,13 +176,13 @@ const detectHasUsableVideo = (clipAbsPath: string, durationSec: number | undefin
   return detectBlackCoverageSec(clipAbsPath) / durationSec < BLACK_COVERAGE_THRESHOLD;
 };
 
-const transcribeClips = (files: BoundFile[], inputs: TakePrepInput[], cached: TakePrep | null): ClipTranscript[] => {
+const transcribeClips = (files: BoundFile[], inputs: TakePrepInput[], cached: TakePrep | null, language: string): ClipTranscript[] => {
   requireWhisperModel();
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-preparetake-"));
   try {
     return files.map((file, uploadIdx) => {
       const cachedClip = cached?.clips.find((c) => sameInput(c.input, inputs[uploadIdx]));
-      const words = cachedClip ? cachedClip.words : transcribeFile(file.absPath, workDir);
+      const words = cachedClip ? cachedClip.words : transcribeFile(file.absPath, workDir, language);
       const hasUsableVideo = cachedClip ? cachedClip.hasUsableVideo : detectHasUsableVideo(file.absPath, file.durationSec);
       return { file, uploadIdx, input: inputs[uploadIdx], words, hasUsableVideo };
     });
@@ -196,12 +197,7 @@ const transcribeClips = (files: BoundFile[], inputs: TakePrepInput[], cached: Ta
 // elsewhere in this pipeline).
 // ---------------------------------------------------------------------------
 
-const scriptWordsOf = (text: string): string[] =>
-  text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s']/g, "")
-    .split(/\s+/)
-    .filter(Boolean);
+const scriptWordsOf = normalizedWords;
 
 /** Concatenates every non-optional voice block's own script.json line, in
  *  format order, alongside a parallel array of which blockId each word came
@@ -609,6 +605,7 @@ export const ensureTakePrep = (
   files: BoundFile[],
   format: Format,
   scriptByBlockId: Map<string, string> | undefined,
+  language: string,
 ): TakePrep => {
   const combinedPath = path.posix.join("derived", `${slotName}-combined.mp4`);
   const absCombinedPath = path.join(jobDir, combinedPath);
@@ -617,7 +614,7 @@ export const ensureTakePrep = (
   const cached = readTakePrep(jobId);
   if (cached && isFresh(cached, inputs, absCombinedPath)) return cached;
 
-  const clips = transcribeClips(files, inputs, cached);
+  const clips = transcribeClips(files, inputs, cached, language);
 
   const scriptWords = scriptByBlockId ? buildScriptWordIndex(format, scriptByBlockId).words : [];
   const placements =

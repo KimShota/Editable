@@ -251,6 +251,7 @@ const runVerify = async (
     formatId: format.id,
     bindings: placeholderBindings,
     lexicon: [],
+    language: "auto",
   };
 
   const { transcript, trim: trims } = deriveTranscriptAndTrim(verifyFormat, filledPlaceholder, split);

@@ -25,8 +25,12 @@ export type { LibraryAsset, LibraryCategory } from "./library-shared";
 export const libraryDir = (userId: string, category: LibraryCategory): string =>
   path.join(repoRoot, "library", userId, category);
 
+/** Unicode-aware (`\p{L}\p{M}\p{N}`, not `a-zA-Z0-9`) so a Japanese
+ *  filename is accepted as-is instead of failing validation outright —
+ *  still rejects path separators, control characters, and anything else
+ *  not a letter/mark/number or safe punctuation. */
 const isValidFilename = (name: string): boolean =>
-  /^[a-zA-Z0-9._-]+$/.test(name) && !name.startsWith(".");
+  /^[\p{L}\p{M}\p{N}._-]+$/u.test(name) && !name.startsWith(".");
 
 const mediaUrlFor = (userId: string, category: LibraryCategory, filename: string): string =>
   `/api/media/library/${userId}/${category}/${filename}`;
@@ -64,7 +68,7 @@ export const saveLibraryAsset = (
   fs.mkdirSync(dir, { recursive: true });
 
   const ext = path.extname(filename);
-  const base = path.basename(filename, ext).replace(/[^a-zA-Z0-9._-]+/g, "-") || "asset";
+  const base = path.basename(filename, ext).replace(/[^\p{L}\p{M}\p{N}._-]+/gu, "-") || "asset";
   let finalName = `${base}${ext}`;
   let n = 2;
   while (fs.existsSync(path.join(dir, finalName))) {

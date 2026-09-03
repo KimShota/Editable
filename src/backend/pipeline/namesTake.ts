@@ -176,7 +176,7 @@ export const extractNameAudioClips = (format: Format, filled: FilledFormat): Nam
         // `nameTextSlot` reference on the board's own entries/reveal
         // params (assemble.ts's resolveNestedSlots) renders the item
         // icon-only instead of dropping the whole item off the board.
-        const words = transcribeFile(absOutPath, whisperWorkDir);
+        const words = transcribeFile(absOutPath, whisperWorkDir, filled.language);
         // whisper.cpp appends terminal punctuation per segment (a single
         // spoken name reads as "Gemini." not "Gemini") — stripped since
         // this is a display label, not a transcript.

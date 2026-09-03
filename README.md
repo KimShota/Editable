@@ -73,8 +73,8 @@ the build — see `src/backend/pipeline/gates.ts`.
 ```bash
 npm install
 brew install ffmpeg whisper-cpp
-curl -L -o models/ggml-base.en.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+curl -L -o models/ggml-medium.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
 
 # RVM (video-native matting for backgroundReplace formats) — optional:
 # falls back to Apple Vision + temporal median if the model file is

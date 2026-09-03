@@ -1,4 +1,6 @@
 import { Block, LiteralAnchor, Word } from "./types";
+import { tokenizeWords } from "./tokenize";
+import { containsCjk } from "../components/cjk";
 
 /**
  * Literal anchor matching — no LLM.
@@ -26,8 +28,13 @@ const NUMBER_WORDS: Record<string, string> = {
   "4th": "fourth", "5th": "fifth",
 };
 
+/** Unicode-aware (`\p{L}\p{N}`, not `a-z0-9`) so a Japanese/CJK marker
+ *  phrase survives this strip instead of being deleted to "" — an
+ *  ASCII-only regex here made `similarity` below score every Japanese
+ *  token pair as vacuously identical, so a marker like "次は" could never
+ *  actually be found in the transcript. */
 const normalize = (raw: string): string => {
-  const bare = raw.toLowerCase().replace(/[^a-z0-9']/g, "");
+  const bare = raw.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
   return NUMBER_WORDS[bare] ?? bare;
 };
 
@@ -57,9 +64,20 @@ const similarity = (a: string, b: string): number => {
 };
 
 const tokenize = (phrase: string): string[] =>
-  phrase.split(/\s+/).map(normalize).filter((t) => t.length > 0);
+  tokenizeWords(phrase).map(normalize).filter((t) => t.length > 0);
 
-/** Mean similarity of the phrase against the window starting at `at`. */
+/** How many EXTRA (or fewer) whisper "word" segments a CJK phrase's own
+ *  matched span may span relative to its character count. Whisper's
+ *  Japanese/Chinese segmentation doesn't reliably give one word per
+ *  phrase character the way it gives one word per Latin word — a
+ *  3-character marker might come back as anywhere from 1 to several
+ *  whisper segments — so a fixed tokens.length-word window (ordinary
+ *  windowScore's assumption, correct for Latin) can miss a real match
+ *  entirely for a CJK phrase. */
+const CJK_WINDOW_SLACK = 2;
+
+/** Mean similarity of the phrase against the window starting at `at` —
+ *  ordinary Latin-phrase matching, one whisper word per phrase token. */
 const windowScore = (words: Word[], at: number, tokens: string[]): number => {
   if (at + tokens.length > words.length) return 0;
   let total = 0;
@@ -69,12 +87,45 @@ const windowScore = (words: Word[], at: number, tokens: string[]): number => {
   return total / tokens.length;
 };
 
-/** Index of the earliest window matching the phrase, or -1. */
-const findPhrase = (words: Word[], tokens: string[]): number => {
-  for (let i = 0; i + tokens.length <= words.length; i++) {
-    if (windowScore(words, i, tokens) >= MIN_SIMILARITY) return i;
+/** Best-scoring window length (and score) for a CJK phrase starting at
+ *  `at`, trying every plausible number of whisper words the phrase's
+ *  characters could have been split across (see CJK_WINDOW_SLACK).
+ *  Compares the WHOLE concatenated span against the whole phrase
+ *  (character-level Levenshtein) rather than token-by-token — the two
+ *  granularities don't line up 1:1 the way Latin words vs. whisper words
+ *  normally do. */
+const bestCjkWindow = (words: Word[], at: number, tokens: string[]): { length: number; score: number } => {
+  const target = tokens.join("");
+  const minLen = Math.max(1, tokens.length - CJK_WINDOW_SLACK);
+  const maxLen = tokens.length + CJK_WINDOW_SLACK;
+  let best = { length: tokens.length, score: 0 };
+  for (let len = minLen; at + len <= words.length && len <= maxLen; len++) {
+    const candidate = words
+      .slice(at, at + len)
+      .map((w) => normalize(w.text))
+      .join("");
+    const score = similarity(candidate, target);
+    if (score > best.score) best = { length: len, score };
   }
-  return -1;
+  return best;
+};
+
+/** Dispatches to bestCjkWindow (variable-length, whole-string comparison)
+ *  for a CJK phrase, or the ordinary fixed-length windowScore otherwise —
+ *  the single place every phrase/window match in this module goes
+ *  through, so a `captureUntil` continuation phrase gets the same
+ *  CJK-aware treatment as a marker phrase. */
+const matchAt = (words: Word[], at: number, tokens: string[], isCjkPhrase: boolean): { length: number; score: number } =>
+  isCjkPhrase ? bestCjkWindow(words, at, tokens) : { length: tokens.length, score: windowScore(words, at, tokens) };
+
+/** Earliest window matching the phrase (position + how many whisper words
+ *  it actually spans), or null. */
+const findPhrase = (words: Word[], tokens: string[], isCjkPhrase: boolean): { at: number; length: number } | null => {
+  for (let i = 0; i < words.length; i++) {
+    const { length, score } = matchAt(words, i, tokens, isCjkPhrase);
+    if (score >= MIN_SIMILARITY) return { at: i, length };
+  }
+  return null;
 };
 
 const endsWithSentenceBreak = (raw: string): boolean => /[.!?]["']?$/.test(raw.trim());
@@ -105,7 +156,7 @@ export type LiteralMatch = {
   capturedText?: string;
 };
 
-type Phrasing = { at: number; tokens: string[]; confidence: number };
+type Phrasing = { at: number; matchedLength: number; confidence: number };
 
 /** Every accepted phrasing that occurs in `words`, best first: highest
  *  confidence, then earliest occurrence, then the order they were listed
@@ -117,20 +168,22 @@ const findPhrasings = (phrases: string[], words: Word[]): Phrasing[] => {
   for (const phrase of phrases) {
     const tokens = tokenize(phrase);
     if (tokens.length === 0) continue;
-    const at = findPhrase(words, tokens);
-    if (at === -1) continue;
-    found.push({ at, tokens, confidence: windowScore(words, at, tokens) });
+    const isCjkPhrase = containsCjk(phrase);
+    const match = findPhrase(words, tokens, isCjkPhrase);
+    if (!match) continue;
+    const { score } = matchAt(words, match.at, tokens, isCjkPhrase);
+    found.push({ at: match.at, matchedLength: match.length, confidence: score });
   }
   return found.sort((a, b) => b.confidence - a.confidence || a.at - b.at);
 };
 
 /** Words spoken after the phrase, up to the next pause, sentence break,
  *  `captureUntil` continuation, or the hard word cap. */
-const collectCapture = (words: Word[], from: number, untilTokens: string[] | null): Word[] => {
+const collectCapture = (words: Word[], from: number, untilTokens: string[] | null, untilIsCjk: boolean): Word[] => {
   const captured: Word[] = [];
   for (let j = from; j < words.length; j++) {
     if (captured.length >= MAX_CAPTURE_WORDS) break;
-    if (untilTokens && windowScore(words, j, untilTokens) >= MIN_SIMILARITY) break;
+    if (untilTokens && matchAt(words, j, untilTokens, untilIsCjk).score >= MIN_SIMILARITY) break;
     const prev = words[j - 1];
     if (captured.length > 0 && endsWithSentenceBreak(prev.text)) break;
     if (words[j].startSec - prev.endSec > CAPTURE_GAP_SEC) break;
@@ -145,9 +198,10 @@ export const matchLiteralAnchor = (
   words: Word[],
 ): LiteralMatch | null => {
   const untilTokens = anchor.captureUntil ? tokenize(anchor.captureUntil) : null;
+  const untilIsCjk = anchor.captureUntil ? containsCjk(anchor.captureUntil) : false;
 
-  for (const { at, tokens, confidence } of findPhrasings(anchor.phrases, words)) {
-    const captured = anchor.capture ? collectCapture(words, at + tokens.length, untilTokens) : [];
+  for (const { at, matchedLength, confidence } of findPhrasings(anchor.phrases, words)) {
+    const captured = anchor.capture ? collectCapture(words, at + matchedLength, untilTokens, untilIsCjk) : [];
 
     // A capture anchor's phrases are meant to be the FIXED marker only, but
     // an authored format can list a variant that also spells out the
@@ -158,11 +212,11 @@ export const matchLiteralAnchor = (
     // every overlay timed off it.
     if (anchor.capture && captured.length === 0) continue;
 
-    const last = at + tokens.length - 1 + captured.length;
+    const last = at + matchedLength - 1 + captured.length;
     return {
       startSec: words[at].startSec,
       endSec: words[last].endSec,
-      phraseEndSec: words[at + tokens.length - 1].endSec,
+      phraseEndSec: words[at + matchedLength - 1].endSec,
       captureStartSec: captured.length > 0 ? captured[0].startSec : undefined,
       confidence,
       quote: words.slice(at, last + 1).map((w) => w.text).join(" "),

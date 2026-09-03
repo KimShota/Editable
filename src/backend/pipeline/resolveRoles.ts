@@ -10,6 +10,7 @@ import {
 } from "./types";
 import { anchoredTimeSec, clamp, concatenateTakesForMatching } from "./timing";
 import { matchLiteralAnchor } from "./literal";
+import { tokenizeWords } from "./tokenize";
 import { pickResolver, ResolverChoice } from "./resolvers";
 import { RoleResolution, SemanticQuery } from "./resolvers/protocol";
 
@@ -126,7 +127,7 @@ export const resolveRoles = async (
         // clean pause after the anchor, it can run most of the way through
         // a short block. Not fatal (captions/edges just look off for that
         // anchor), but easy to miss without a flag.
-        const capturedWords = match.capturedText ? match.capturedText.split(/\s+/).filter(Boolean).length : 0;
+        const capturedWords = match.capturedText ? tokenizeWords(match.capturedText).length : 0;
         if (words.length > 0 && capturedWords / words.length > 0.6) {
           console.warn(
             `resolveRoles: anchor "${anchor.id}" in block "${block.id}" captured ${capturedWords}/${words.length} ` +

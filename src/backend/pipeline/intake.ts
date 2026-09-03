@@ -425,6 +425,7 @@ export const intake = (jobDir: string): FilledFormat => {
               take.files,
               format,
               readScriptSuggestions(absJobDir),
+              manifest.language,
             );
             const absCombined = path.resolve(absJobDir, prep.combinedPath);
             bindings[takeSlotName] = { type: "file", path: prep.combinedPath, absPath: absCombined, ...probeFile(absCombined) };
@@ -487,5 +488,6 @@ export const intake = (jobDir: string): FilledFormat => {
     bindings,
     overrides: manifest.overrides,
     lexicon: manifest.lexicon,
+    language: manifest.language,
   };
 };

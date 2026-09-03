@@ -7,6 +7,7 @@ import { transcribe } from "./transcribe";
 import { ResolverChoice } from "./resolvers";
 import { requireWhisperModel, transcribeFile } from "./whisper";
 import { wordSimilarity } from "./alignToScript";
+import { normalizedWords, tokenizeWords } from "./tokenize";
 import { buildScriptWordIndex, fitAlign, FitResult, MIN_ALIGN_SCORE } from "./prepareTake";
 import {
   Block,
@@ -137,12 +138,7 @@ export type SplitTakeResult = {
 const literalAnchorsOf = (block: Block): LiteralAnchor[] =>
   [...block.roles, ...block.anchors].filter((a): a is LiteralAnchor => a.kind === "literal");
 
-const scriptWordsOf = (text: string): string[] =>
-  text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s']/g, "")
-    .split(/\s+/)
-    .filter(Boolean);
+const scriptWordsOf = normalizedWords;
 
 /**
  * A literal anchor's marker often sits MID-SENTENCE, not at the very start
@@ -186,7 +182,7 @@ export const markerPrecedingWordCount = (
     const idx = lineJoined.indexOf(` ${phraseWords.join(" ")} `);
     if (idx === -1) continue;
     const preceding = lineJoined.slice(0, idx).trim();
-    const count = preceding.length === 0 ? 0 : preceding.split(/\s+/).length;
+    const count = preceding.length === 0 ? 0 : tokenizeWords(preceding).length;
     if (phraseWords.length === matchedPhraseWordCount) return count;
     if (fallback === null) fallback = count;
   }
@@ -261,6 +257,11 @@ export const splitTake = (
    *  seams. Omitted (the ordinary single-uploaded-take path, and verify.ts's
    *  self-check) falls back to running whisper on `absPath` as before. */
   precomputedWords?: Word[],
+  /** whisper.cpp language code (e.g. "en", "ja") or "auto" — see
+   *  JobManifestSchema's own `language` field, the source of this value
+   *  for every real caller. Ignored when precomputedWords is given (no
+   *  transcription happens in that case). */
+  language: string = "auto",
 ): SplitTakeResult => {
   let words: Word[];
   if (precomputedWords) {
@@ -269,7 +270,7 @@ export const splitTake = (
     requireWhisperModel();
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-split-"));
     try {
-      words = transcribeFile(absPath, workDir);
+      words = transcribeFile(absPath, workDir, language);
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }

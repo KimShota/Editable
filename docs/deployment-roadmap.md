@@ -114,7 +114,7 @@ real job queue: weeks of work for an audience of ten.
 
 - **Dockerfile**: Node 24, `ffmpeg`, `whisper.cpp` built from source
   (the pipeline invokes `whisper-cli`), Chrome headless shell for
-  Remotion, plus both model files — `models/ggml-base.en.bin` and
+  Remotion, plus both model files — `models/ggml-medium.bin` and
   `models/rvm_mobilenetv3_fp32.onnx`.
 - **Volume**: mount `jobs/ artifacts/ out/ public/jobs/ library/`. For
   scale, local usage today is 7.4GB of jobs and 5.4GB of `public/jobs`

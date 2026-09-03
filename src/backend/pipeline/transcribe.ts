@@ -31,7 +31,7 @@ export const transcribe = (format: Format, filled: FilledFormat): Transcript => 
       const clip = filled.bindings[block.videoSlot];
 
       if (clip?.type === "file") {
-        const words = transcribeFile(clip.absPath, workDir);
+        const words = transcribeFile(clip.absPath, workDir, filled.language);
         if (words.length === 0) {
           console.warn(
             `transcribe: no speech detected in voice block "${block.id}" (${clip.path})`,
@@ -42,7 +42,7 @@ export const transcribe = (format: Format, filled: FilledFormat): Transcript => 
       }
 
       if (clip?.type === "files") {
-        const rawTakes = clip.files.map((f) => transcribeFile(f.absPath, workDir));
+        const rawTakes = clip.files.map((f) => transcribeFile(f.absPath, workDir, filled.language));
         const takeOrder = orderTakes(block, rawTakes);
         const takes = takeOrder.map((idx) => rawTakes[idx]);
         if (takes.every((w) => w.length === 0)) {
