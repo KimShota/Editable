@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ClipWaveform } from "./ClipWaveform";
+import type { SnapResult } from "./snapping";
 
 /**
  * One clip box on the timeline. Drag/trim gestures are ephemeral (a local
@@ -39,6 +40,8 @@ export function TimelineClip({
   onSelect,
   onCommitMove,
   onCommitTrim,
+  snap,
+  onSnapGuide,
 }: {
   left: number;
   width: number;
@@ -73,10 +76,26 @@ export function TimelineClip({
   onSelect: (additive: boolean) => void;
   onCommitMove?: (deltaSec: number) => void;
   onCommitTrim?: (edge: "in" | "out", deltaSec: number) => void;
+  /** Magnetic alignment: given the pixels the pointer has actually
+   *  traveled, returns the pixels the clip should move — pulled onto a
+   *  neighbouring boundary when one is within reach — plus the second that
+   *  pull landed on. Omitted (or returning a null guideSec) means the drag
+   *  is free. */
+  snap?: (kind: "move" | "in" | "out", rawDeltaPx: number) => SnapResult;
+  /** Reports the snapped-to second up to the timeline, which draws the one
+   *  shared guide line across every track. Null clears it. */
+  onSnapGuide?: (sec: number | null) => void;
 }) {
   const [dragPx, setDragPx] = useState(0);
   const [trimEdge, setTrimEdge] = useState<"in" | "out" | null>(null);
-  const drag = useRef<{ startX: number; kind: "move" | "in" | "out" } | null>(null);
+  const drag = useRef<{ startX: number; kind: "move" | "in" | "out"; rawPx: number } | null>(null);
+
+  // A drag that's still live when this clip goes away (an edit elsewhere
+  // re-keys the row, the panel closes) would otherwise leave its guide line
+  // stranded on screen with nothing left to clear it.
+  const guideRef = useRef(onSnapGuide);
+  guideRef.current = onSnapGuide;
+  useEffect(() => () => guideRef.current?.(null), []);
 
   const beginDrag = (e: React.PointerEvent, kind: "move" | "in" | "out") => {
     if (locked) return;
@@ -90,23 +109,34 @@ export function TimelineClip({
     // in trimEdges — otherwise this is a plain select-only click.
     if (kind === "move" ? !onCommitMove : !onCommitTrim || !trimEdges.includes(kind)) return;
     (e.target as Element).setPointerCapture(e.pointerId);
-    drag.current = { startX: e.clientX, kind };
+    drag.current = { startX: e.clientX, kind, rawPx: 0 };
     if (kind !== "move") setTrimEdge(kind);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (!drag.current) return;
-    setDragPx(e.clientX - drag.current.startX);
+    const rawPx = e.clientX - drag.current.startX;
+    drag.current.rawPx = rawPx;
+    const snapped = snap?.(drag.current.kind, rawPx);
+    // The box is drawn at the SNAPPED offset, not the raw one — the pull is
+    // the feedback, and the guide line only ever appears over a clip edge
+    // that's genuinely sitting on the alignment.
+    setDragPx(snapped ? snapped.deltaPx : rawPx);
+    onSnapGuide?.(snapped?.guideSec ?? null);
   };
 
   const endDrag = () => {
     if (!drag.current) return;
-    const { kind } = drag.current;
+    const { kind, rawPx } = drag.current;
     const movedPx = dragPx;
     drag.current = null;
     setDragPx(0);
     setTrimEdge(null);
-    if (Math.abs(movedPx) < CLICK_THRESHOLD_PX) return;
+    onSnapGuide?.(null);
+    // Judged on the RAW travel: a 1px twitch that a nearby boundary pulled
+    // into a 9px offset is still a click, and committing it as a move would
+    // shove the clip on what the user meant as a select.
+    if (Math.abs(rawPx) < CLICK_THRESHOLD_PX) return;
     const deltaSec = movedPx / pxPerSec;
     if (kind === "move") onCommitMove?.(deltaSec);
     else onCommitTrim?.(kind, deltaSec);
@@ -124,6 +154,7 @@ export function TimelineClip({
       onPointerDown={(e) => beginDrag(e, "move")}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
+      onPointerCancel={endDrag}
       onClick={(e) => e.stopPropagation()}
       style={{
         left: previewLeft,
@@ -179,6 +210,7 @@ export function TimelineClip({
           onPointerDown={(e) => beginDrag(e, "in")}
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
+          onPointerCancel={endDrag}
           className="absolute top-0 bottom-0 left-0 w-2 cursor-ew-resize bg-white/0 group-hover:bg-white/25"
         />
       )}
@@ -187,6 +219,7 @@ export function TimelineClip({
           onPointerDown={(e) => beginDrag(e, "out")}
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
+          onPointerCancel={endDrag}
           className="absolute top-0 right-0 bottom-0 w-2 cursor-ew-resize bg-white/0 group-hover:bg-white/25"
         />
       )}

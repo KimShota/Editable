@@ -39,7 +39,7 @@ const WINDOW_MS = 24 * 60 * 60 * 1000;
  * which would lock everyone out including future non-admins by mistake the
  * moment the env var is merely absent.
  */
-const dailyLimit = (): number => {
+export const dailyLimit = (): number => {
   if (process.env.PIPELINE_DAILY_LIMIT_PER_USER === undefined) return DEFAULT_DAILY_LIMIT;
   const raw = Number(process.env.PIPELINE_DAILY_LIMIT_PER_USER);
   return Number.isFinite(raw) && raw > 0 ? raw : 0;
@@ -86,7 +86,7 @@ const countUsedForFormat = async (userId: string, formatId: string): Promise<num
  * unlimited) so the two never disagree about who's capped.
  */
 export const getQuotaStatus = async (user: SessionUser): Promise<QuotaStatus> => {
-  if (user.isAdmin) return { unlimited: true };
+  if (user.isAdmin || user.plan === "premium") return { unlimited: true };
   const limit = dailyLimit();
   if (limit === 0) return { unlimited: true };
   const used = await countUsed(user.id);
@@ -121,11 +121,12 @@ export const checkAndRecordQuota = async (
     return { ok: false, error: "builds and renders are temporarily paused — try again later", status: 503 };
   }
 
-  // Admins are exempt from every cap here — daily rate AND per-format
-  // lifetime — same reasoning either way: they're the operator, not a
-  // spend risk the quota needs to guard against, and a locked-out admin
-  // can't raise their own limit without SSH access anyway.
-  if (user.isAdmin) return { ok: true };
+  // Admins and premium subscribers are exempt from every cap here — daily
+  // rate AND per-format lifetime. Admins: they're the operator, not a spend
+  // risk the quota needs to guard against, and a locked-out admin can't
+  // raise their own limit without SSH access anyway. Premium: the $50/mo
+  // fee is what buys the exemption — see billing.ts.
+  if (user.isAdmin || user.plan === "premium") return { ok: true };
 
   const formatId = readJobManifest(jobId).format;
 

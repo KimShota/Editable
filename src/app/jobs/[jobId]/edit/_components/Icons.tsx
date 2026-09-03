@@ -96,9 +96,8 @@ export const ZoomInIcon = ({ className }: IconProps) => (
 
 export const MagnetIcon = ({ className }: IconProps) => (
   <svg viewBox="0 0 24 24" fill={base} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M8 4h4v8.5a2 2 0 0 1-4 0V4Z" />
-    <path d="M12 4h4v8.5a2 2 0 0 1-4 0V4Z" />
-    <path d="M8 9H4v3.5a8 8 0 0 0 16 0V9h-4" />
+    <path d="M5 17.5V11a7 7 0 0 1 14 0v6.5h-4V11a3 3 0 0 0-6 0v6.5Z" />
+    <path d="M5 14h4M15 14h4" />
   </svg>
 );
 

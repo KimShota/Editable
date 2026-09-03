@@ -44,7 +44,12 @@ export const getRequestUser = async (): Promise<SessionUser | null> => {
   const id = h.get("x-user-id");
   const email = h.get("x-user-email");
   if (!id || !email) return null;
-  return { id, email, isAdmin: h.get("x-user-is-admin") === "1" };
+  // plan isn't in middleware's trusted headers (see middleware.ts's
+  // docstring on why) — one extra indexed PK lookup, not worth threading a
+  // new header through every request for.
+  const rows = await sql`select plan from users where id = ${id}`;
+  const plan = (rows[0] as { plan: "free" | "premium" } | undefined)?.plan ?? "free";
+  return { id, email, isAdmin: h.get("x-user-is-admin") === "1", plan };
 };
 export const createSession = createSessionToken;
 export const destroySession = destroySessionToken;
@@ -100,12 +105,12 @@ export const signup = async (email: string, password: string, inviteCode: string
 
   const emailNorm = normalizeEmail(email);
   const passwordHash = hashPassword(password);
-  let created: { id: string; email: string; is_admin: boolean };
+  let created: { id: string; email: string; is_admin: boolean; plan: "free" | "premium" };
   try {
     const rows = await sql`
       insert into users (email, email_norm, password_hash)
       values (${email.trim()}, ${emailNorm}, ${passwordHash})
-      returning id, email, is_admin
+      returning id, email, is_admin, plan
     `;
     created = rows[0] as typeof created;
   } catch {
@@ -125,15 +130,17 @@ export const signup = async (email: string, password: string, inviteCode: string
     }
   }
 
-  return { ok: true, user: { id: created.id, email: created.email, isAdmin: created.is_admin } };
+  return { ok: true, user: { id: created.id, email: created.email, isAdmin: created.is_admin, plan: created.plan } };
 };
 
 export const verifyLogin = async (email: string, password: string): Promise<SessionUser | null> => {
   const rows = await sql`
-    select id, email, password_hash, is_admin from users where email_norm = ${normalizeEmail(email)}
+    select id, email, password_hash, is_admin, plan from users where email_norm = ${normalizeEmail(email)}
   `;
-  const row = rows[0] as { id: string; email: string; password_hash: string; is_admin: boolean } | undefined;
+  const row = rows[0] as
+    | { id: string; email: string; password_hash: string; is_admin: boolean; plan: "free" | "premium" }
+    | undefined;
   if (!row || !verifyPassword(password, row.password_hash)) return null;
   await sql`update users set last_login_at = now() where id = ${row.id}`;
-  return { id: row.id, email: row.email, isAdmin: row.is_admin };
+  return { id: row.id, email: row.email, isAdmin: row.is_admin, plan: row.plan };
 };

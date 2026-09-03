@@ -10,6 +10,7 @@ import { isSelected, Selection, SelectionTrack, toggleSelect } from "./selection
 import { buildMajorLadder, chooseTickScale, formatTick } from "./tickScale";
 import { FitIcon, MagnetIcon, ScissorsIcon, TrashIcon, ZoomInIcon, ZoomOutIcon } from "./Icons";
 import { TEXT_OVERLAY_DRAG_TYPE, buildAddTextOverlayOp } from "./textOverlay";
+import { clipEdgeTargets, resolveSnap, snapPoint, type SnapResult, type SnapTarget } from "./snapping";
 
 /** One hue family (indigo → violet → purple) so tracks read as a system;
  *  transitions get the one intentional exception (amber) since they're a
@@ -17,9 +18,14 @@ import { TEXT_OVERLAY_DRAG_TYPE, buildAddTextOverlayOp } from "./textOverlay";
 const TRACK_COLOR = {
   video: "bg-indigo-500/85",
   transition: "bg-amber-500/75",
+  // Overlay text and captions are both "text" now — one merged row (see
+  // the Text row below) — so they share the violet family; captions get
+  // the darker sibling shade so a caption chip still reads as distinct
+  // from an overlay bar sitting right next to it, same as sfx/music stay
+  // distinguishable within the merged Audio row.
   text: "bg-violet-500/80",
   sfx: "bg-purple-400/75",
-  captions: "bg-white/12",
+  captions: "bg-violet-700/85",
   music: "bg-indigo-900/85",
 } as const;
 
@@ -45,6 +51,10 @@ const FREE_MOVE_BIAS = 0.65;
  *  very thing TimelineTracks' memoization exists to avoid), it's
  *  deliberately brief. */
 const ZOOM_ANIM_MS = 180;
+/** Snapping is a working preference, not per-project state — someone who
+ *  turns it off wants it off for the next clip and the next session too,
+ *  not just this job. Kept out of the EDL for exactly that reason. */
+const SNAP_PREF_KEY = "editable-editor-snap";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
@@ -69,13 +79,22 @@ type ClipView = {
   waveformOutSec?: number;
   /** Which EDL array this clip actually lives in — only set where a row
    *  mixes clips from more than one track (the merged Audio row: sfx and
-   *  music clips share one lane visually but are still two different
-   *  arrays underneath). Every other row's clips all share the row's own
+   *  music share one lane; the merged Text row: overlays and captions
+   *  share one lane). Every other row's clips all share the row's own
    *  fixed `track` prop, so this stays unset there. */
-  track?: "sfx" | "music";
+  track?: "sfx" | "music" | "overlay" | "captions";
 };
 
 type FloatTrack = "overlay" | "sfx" | "captions" | "music";
+
+/** Resolves one drag against every other clip's boundaries — see snapping.ts.
+ *  Built once by Timeline (which is the only thing that can see all the
+ *  tracks at once) and handed down to every row. */
+type DragSnapResolver = (input: {
+  edgesSec: number[];
+  excludeKeys: string[];
+  rawDeltaPx: number;
+}) => SnapResult;
 
 /**
  * One track's label + clips + the interactive background that starts a
@@ -95,6 +114,9 @@ function TrackRow({
   pxPerSec,
   locked = false,
   trimEdges = BOTH_TRIM_EDGES,
+  resolveDragSnap,
+  onSnapGuide,
+  snapMove = true,
 }: {
   label: string;
   clips: ClipView[];
@@ -118,6 +140,15 @@ function TrackRow({
   pxPerSec: number;
   locked?: boolean;
   trimEdges?: ("in" | "out")[];
+  resolveDragSnap?: DragSnapResolver;
+  onSnapGuide?: (sec: number | null) => void;
+  /** Whether a whole-clip drag snaps, as opposed to only its trim edges.
+   *  Off for the video row: a video drag doesn't move a clip to a time, it
+   *  reorders it among its neighbours (see commitVideoMove), so latching its
+   *  edge onto a boundary would promise a landing spot the commit doesn't
+   *  honour. Trimming a video clip DOES set a real time, so that still
+   *  snaps. */
+  snapMove?: boolean;
 }) {
   const lanes = useMemo(() => assignLanes(clips), [clips]);
   const rowHeight = laneCount(lanes) * LANE_HEIGHT;
@@ -205,7 +236,42 @@ function TrackRow({
       >
         {clips.map((c) => {
           const clipTrack = c.track ?? track;
-          const clipColorClass = c.track === "music" ? TRACK_COLOR.music : c.track === "sfx" ? TRACK_COLOR.sfx : colorClass;
+          // Which clips this gesture actually moves: a drag on a clip that's
+          // part of a live multi-selection carries the whole group (see
+          // onCommitMove below), so every one of their edges is a candidate
+          // to latch on — and none of them can be a target for it.
+          const movingClips =
+            onGroupMove && selection?.track === clipTrack && selection.ids.length > 1 && selection.ids.includes(c.id)
+              ? clips.filter((x) => (x.track ?? track) === clipTrack && selection.ids.includes(x.id))
+              : [c];
+          const snap: ((kind: "move" | "in" | "out", rawDeltaPx: number) => SnapResult) | undefined = resolveDragSnap
+            ? (kind, rawDeltaPx) => {
+                if (kind === "move" && !snapMove) return { deltaPx: rawDeltaPx, guideSec: null };
+                // A trim is always one clip's one edge, even when the clip
+                // sits in a multi-selection — so only that clip drops out of
+                // the target set; its selected siblings stay put and stay
+                // snappable, which is how you line a trim up with them.
+                const gesturing = kind === "move" ? movingClips : [c];
+                return resolveDragSnap({
+                  edgesSec:
+                    kind === "move"
+                      ? gesturing.flatMap((x) => [x.tlInSec, x.tlOutSec])
+                      : kind === "in"
+                        ? [c.tlInSec]
+                        : [c.tlOutSec],
+                  excludeKeys: gesturing.map((x) => `${x.track ?? track}:${x.id}`),
+                  rawDeltaPx,
+                });
+              }
+            : undefined;
+          const clipColorClass =
+            c.track === "music"
+              ? TRACK_COLOR.music
+              : c.track === "sfx"
+                ? TRACK_COLOR.sfx
+                : c.track === "captions"
+                  ? TRACK_COLOR.captions
+                  : colorClass;
           return (
           <TimelineClip
             key={c.id}
@@ -258,6 +324,8 @@ function TrackRow({
                 : undefined
             }
             onCommitTrim={handlers.trim ? (edge, d) => handlers.trim!(c.id, edge, d, clipTrack) : undefined}
+            snap={snap}
+            onSnapGuide={onSnapGuide}
           />
           );
         })}
@@ -292,14 +360,16 @@ const TimelineTracks = memo(function TimelineTracks({
   useFrames,
   fps,
   videoClips,
-  overlayClips,
+  textClips,
   audioClips,
   transitionClips,
-  captionClips,
   selection,
   onSelect,
   onRulerPointerDown,
   onRulerPointerMove,
+  onRulerPointerUp,
+  resolveDragSnap,
+  onSnapGuide,
   commitVideoMove,
   commitVideoTrim,
   commitTransitionMove,
@@ -314,14 +384,16 @@ const TimelineTracks = memo(function TimelineTracks({
   useFrames: boolean;
   fps: number;
   videoClips: ClipView[];
-  overlayClips: ClipView[];
+  textClips: ClipView[];
   audioClips: ClipView[];
   transitionClips: ClipView[];
-  captionClips: ClipView[];
   selection: Selection;
   onSelect: (s: Selection) => void;
   onRulerPointerDown: (e: React.PointerEvent) => void;
   onRulerPointerMove: (e: React.PointerEvent) => void;
+  onRulerPointerUp: () => void;
+  resolveDragSnap: DragSnapResolver;
+  onSnapGuide: (sec: number | null) => void;
   commitVideoMove: (clipId: string, deltaSec: number) => void;
   commitVideoTrim: (clipId: string, edge: "in" | "out", deltaSec: number) => void;
   commitTransitionMove: (afterClipId: string, deltaSec: number) => void;
@@ -342,6 +414,8 @@ const TimelineTracks = memo(function TimelineTracks({
         className="sticky top-0 z-20 flex h-6 cursor-text border-b border-[color:var(--ed-border)] bg-[color:var(--ed-panel)]"
         onPointerDown={onRulerPointerDown}
         onPointerMove={onRulerPointerMove}
+        onPointerUp={onRulerPointerUp}
+        onPointerCancel={onRulerPointerUp}
       >
         <div className="w-24 shrink-0" />
         <div className="relative flex-1">
@@ -373,6 +447,9 @@ const TimelineTracks = memo(function TimelineTracks({
         selection={selection}
         onSelect={onSelect}
         pxPerSec={pxPerSec}
+        resolveDragSnap={resolveDragSnap}
+        onSnapGuide={onSnapGuide}
+        snapMove={false}
       />
       {transitionClips.length > 0 && (
         <TrackRow
@@ -387,22 +464,32 @@ const TimelineTracks = memo(function TimelineTracks({
           selection={selection}
           onSelect={onSelect}
           pxPerSec={pxPerSec}
+          resolveDragSnap={resolveDragSnap}
+          onSnapGuide={onSnapGuide}
           trimEdges={OUT_TRIM_EDGE_ONLY}
         />
       )}
+      {/* Text overlays and auto-generated captions are both just text on
+          screen, so — same merge the Audio row below already does for sfx
+          + music — they share this one lane. Each clip still remembers its
+          own underlying track (tagged in `textClips`) purely so
+          selection/drag/trim/delete keep routing to the right EDL array;
+          nothing about the EDL itself changed, only how it's drawn. */}
       <TrackRow
-        label="Text & Media"
-        clips={overlayClips}
+        label="Text"
+        clips={textClips}
         colorClass={TRACK_COLOR.text}
         handlers={{
-          move: (id, d) => commitFloatMove("overlay", id, d),
-          trim: (id, edge, d) => commitFloatTrim("overlay", id, edge, d),
+          move: (id, d, track) => commitFloatMove(track as FloatTrack, id, d),
+          trim: (id, edge, d, track) => commitFloatTrim(track as FloatTrack, id, edge, d),
         }}
         track="overlay"
         selection={selection}
         onSelect={onSelect}
         onGroupMove={commitGroupMove}
         pxPerSec={pxPerSec}
+        resolveDragSnap={resolveDragSnap}
+        onSnapGuide={onSnapGuide}
       />
       {/* Sound effects and music beds are both just audio clips — CapCut
           treats them as independent layers on one audio timeline rather
@@ -425,22 +512,8 @@ const TimelineTracks = memo(function TimelineTracks({
           onSelect={onSelect}
           onGroupMove={commitGroupMove}
           pxPerSec={pxPerSec}
-        />
-      )}
-      {captionClips.length > 0 && (
-        <TrackRow
-          label="Captions"
-          clips={captionClips}
-          colorClass={TRACK_COLOR.captions}
-          handlers={{
-            move: (id, d) => commitFloatMove("captions", id, d),
-            trim: (id, edge, d) => commitFloatTrim("captions", id, edge, d),
-          }}
-          track="captions"
-          selection={selection}
-          onSelect={onSelect}
-          onGroupMove={commitGroupMove}
-          pxPerSec={pxPerSec}
+          resolveDragSnap={resolveDragSnap}
+          onSnapGuide={onSnapGuide}
         />
       )}
     </>
@@ -464,17 +537,76 @@ export function Timeline({
 }) {
   const [pxPerSec, setPxPerSec] = useState(70);
   const [containerWidth, setContainerWidth] = useState(800);
-  // The video track is always kept contiguous (see recomputeVideoTrack in
-  // timelineOps.ts) — dragging a clip never opens a gap, it only reorders
-  // it among its neighbors. When this is on, that reorder only fires once
-  // the dragged clip's center passes a neighbor's center (roughly a
-  // clip-width of drag, which reads as "it snapped back" for smaller
-  // nudges). Off, FREE_MOVE_BIAS pulls that threshold in — see
-  // commitVideoMove — so a smaller, still-deliberate drag is enough to
-  // commit the move.
+  // Snapping: dragged clips and the scrubbed playhead latch onto nearby
+  // boundaries (see snapping.ts and resolveDragSnap below), with the green
+  // guide marking each hit. The video row is the one place it means
+  // something different — that track is always kept contiguous (see
+  // recomputeVideoTrack in timelineOps.ts), so a drag there reorders rather
+  // than repositions, and the flag instead controls how far a clip must
+  // travel to count as having passed a neighbor: off, FREE_MOVE_BIAS pulls
+  // that threshold in so a smaller deliberate drag commits the move (see
+  // commitVideoMove).
+  //
+  // Defaults to on, then re-read from localStorage after hydration (see the
+  // effect below) — reading storage during render would desync the first
+  // client render from the server's, same reason Editor.tsx loads its own
+  // saved layout in an effect rather than a lazy initializer.
   const [snapEnabled, setSnapEnabled] = useState(true);
+  // The second a live drag has latched onto, if any — one line drawn across
+  // every track (see the guide's own comment at the bottom of the render),
+  // not per-row, because the whole point is to show that two things on
+  // DIFFERENT rows share an exact time.
+  const [snapGuideSec, setSnapGuideSec] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingScrollLeft = useRef<number | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SNAP_PREF_KEY);
+      if (raw !== null) setSnapEnabled(raw === "true");
+    } catch {
+      // Best-effort — a blocked/full localStorage just means the toggle
+      // starts from its default each session.
+    }
+  }, []);
+
+  const isFirstSnapPersist = useRef(true);
+  useEffect(() => {
+    if (isFirstSnapPersist.current) {
+      isFirstSnapPersist.current = false;
+      return;
+    }
+    try {
+      window.localStorage.setItem(SNAP_PREF_KEY, String(snapEnabled));
+    } catch {
+      // See above — persistence is a convenience, never a requirement.
+    }
+  }, [snapEnabled]);
+
+  const toggleSnap = useCallback(() => {
+    setSnapEnabled((v) => !v);
+    // Whatever was latched on is no longer meaningful the instant the mode
+    // changes, so don't leave its line hanging on screen.
+    setSnapGuideSec(null);
+  }, []);
+
+  // S toggles snapping — the same key Premiere and Resolve use for it, and
+  // it's a mode you flip mid-drag-session often enough that reaching for
+  // the toolbar every time is the wrong ergonomics. Bare key (no modifier)
+  // so it can't collide with the Cmd/Ctrl shortcuts Editor.tsx owns, and
+  // ignored while typing, exactly like that handler does.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (e.key.toLowerCase() !== "s") return;
+      e.preventDefault();
+      toggleSnap();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [toggleSnap]);
 
   // "Full overview" = the whole video fits in the visible width with no
   // scrolling; "frame-level precision" = zoomed in enough to tell
@@ -680,6 +812,7 @@ export function Timeline({
         tlInSec: c.tlInSec,
         tlOutSec: c.tlOutSec,
         label: c.words.map((w) => w.text).join(" "),
+        sublabel: "caption",
       })),
     [edl.captions],
   );
@@ -705,6 +838,58 @@ export function Timeline({
       ...sfxClips.map((c) => ({ ...c, track: "sfx" as const })),
     ],
     [musicClips, sfxClips],
+  );
+
+  // User-placed text overlays and auto-generated captions are both just
+  // text on screen — drawn as one lane (see TimelineTracks' own Text row),
+  // the same merge Audio already does for sfx + music, each tagged with
+  // its real underlying track so selection/drag/trim still route to the
+  // correct EDL array per clip.
+  const textClips: ClipView[] = useMemo(
+    () => [
+      ...overlayClips.map((c) => ({ ...c, track: "overlay" as const })),
+      ...captionClips.map((c) => ({ ...c, track: "captions" as const })),
+    ],
+    [overlayClips, captionClips],
+  );
+
+  // Read through a ref inside the resolver below rather than closed over:
+  // the playhead is a snap target, but it also moves 30 times a second
+  // during playback, and rebuilding the resolver on every frame would
+  // re-render every track row (exactly what TimelineTracks' memo exists to
+  // prevent).
+  const currentTimeRef = useRef(currentTimeSec);
+  currentTimeRef.current = currentTimeSec;
+
+  /** Every fixed point a dragged edge can latch onto: the boundaries of
+   *  every clip on every track (cross-track is the whole point — an overlay
+   *  ending exactly on a cut), plus the start and end of the video. The
+   *  playhead is appended at call time from the ref above. */
+  const snapTargets: SnapTarget[] = useMemo(
+    () => [
+      { sec: 0, key: "timeline:start" },
+      { sec: edl.durationSec, key: "timeline:end" },
+      ...clipEdgeTargets(videoClips, "video"),
+      ...clipEdgeTargets(overlayClips, "overlay"),
+      ...clipEdgeTargets(audioClips, "sfx"),
+      ...clipEdgeTargets(captionClips, "captions"),
+      ...clipEdgeTargets(transitionClips, "transition"),
+    ],
+    [edl.durationSec, videoClips, overlayClips, audioClips, captionClips, transitionClips],
+  );
+
+  const resolveDragSnap = useCallback(
+    ({ edgesSec, excludeKeys, rawDeltaPx }: { edgesSec: number[]; excludeKeys: string[]; rawDeltaPx: number }) => {
+      if (!snapEnabled) return { deltaPx: rawDeltaPx, guideSec: null };
+      return resolveSnap({
+        targets: [...snapTargets, { sec: currentTimeRef.current, key: "playhead" }],
+        edgesSec,
+        excludeKeys,
+        rawDeltaPx,
+        pxPerSec,
+      });
+    },
+    [snapEnabled, snapTargets, pxPerSec],
   );
 
   const contentWidth = Math.max(600, (edl.durationSec + 3) * pxPerSec);
@@ -735,9 +920,19 @@ export function Timeline({
       // the playhead lands a constant TRACK_LABEL_WIDTH px ahead of the
       // cursor.
       const x = clientX - rect.left + el.scrollLeft - TRACK_LABEL_WIDTH;
-      onSeek(Math.max(0, x / pxPerSec));
+      const rawSec = Math.max(0, x / pxPerSec);
+      // Scrubbing latches onto clip boundaries too — parking the playhead
+      // exactly on a cut is what "split here" and "trim to here" are aimed
+      // at, and eyeballing it to the pixel otherwise gets you a frame off.
+      if (!snapEnabled) {
+        onSeek(rawSec);
+        return;
+      }
+      const { sec, guideSec } = snapPoint({ targets: snapTargets, sec: rawSec, pxPerSec });
+      setSnapGuideSec(guideSec);
+      onSeek(sec);
     },
-    [onSeek, pxPerSec],
+    [onSeek, pxPerSec, snapEnabled, snapTargets],
   );
 
   const onRulerPointerDown = useCallback(
@@ -755,6 +950,7 @@ export function Timeline({
     },
     [seekFromClientX],
   );
+  const onRulerPointerUp = useCallback(() => setSnapGuideSec(null), []);
 
   const commitVideoMove = useCallback(
     (clipId: string, deltaSec: number) => {
@@ -780,7 +976,11 @@ export function Timeline({
     (clipId: string, edge: "in" | "out", deltaSec: number) => {
       const clip = edl.video.find((v) => v.id === clipId);
       if (!clip) return;
-      const tlSec = (edge === "in" ? clip.tlInSec : clip.tlOutSec) + deltaSec;
+      // A drag can overshoot past the timeline's own start (a fast pointer
+      // move easily travels further than the clip has room for) — clamped
+      // to 0 rather than sent through and rejected by the server's own
+      // tlSec >= 0 check, same as commitFloatMove already does for a move.
+      const tlSec = Math.max(0, (edge === "in" ? clip.tlInSec : clip.tlOutSec) + deltaSec);
       onOp({ type: "trimEdge", track: "video", id: clipId, edge, tlSec });
     },
     [edl.video, onOp],
@@ -850,7 +1050,7 @@ export function Timeline({
               ? captionClips.find((c) => c.id === clipId)
               : musicClips.find((c) => c.id === clipId);
       if (!view) return;
-      const tlSec = (edge === "in" ? view.tlInSec : view.tlOutSec) + deltaSec;
+      const tlSec = Math.max(0, (edge === "in" ? view.tlInSec : view.tlOutSec) + deltaSec);
       onOp({ type: "trimEdge", track, id: clipId, edge, tlSec });
     },
     [overlayClips, sfxClips, captionClips, musicClips, onOp],
@@ -933,13 +1133,25 @@ export function Timeline({
           <button onClick={deleteSelection} disabled={!canDeleteSelection} title="Delete selected clip(s)" className={toolbarBtnClass}>
             <TrashIcon className="h-4 w-4" />
           </button>
+          <span className="mx-1 h-4 w-px bg-[color:var(--ed-border-strong)]" />
           <button
-            onClick={() => setSnapEnabled((v) => !v)}
-            aria-pressed={snapEnabled}
-            title={snapEnabled ? "Snap: clips align together while dragging" : "Free move: clips reorder with a lighter touch"}
-            className={`${toolbarBtnClass} ${snapEnabled ? "bg-[color:var(--ed-accent-dim)] text-[color:var(--ed-accent)] hover:text-[color:var(--ed-accent)]" : ""}`}
+            onClick={toggleSnap}
+            role="switch"
+            aria-checked={snapEnabled}
+            aria-label="Snapping"
+            title={
+              snapEnabled
+                ? "Snapping ON (S) — dragged clips and the playhead lock onto nearby edges, and a green guide marks the alignment"
+                : "Snapping OFF (S) — clips move freely to wherever you drop them"
+            }
+            className={`flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium transition-colors ${
+              snapEnabled
+                ? "bg-[color:var(--ed-accent-dim)] text-[color:var(--ed-accent)] ring-1 ring-[color:var(--ed-accent)]/40"
+                : "text-[color:var(--ed-ink-dim)] hover:bg-[color:var(--ed-raised)] hover:text-[color:var(--ed-ink)]"
+            }`}
           >
             <MagnetIcon className="h-4 w-4" />
+            Snap
           </button>
         </div>
 
@@ -1003,14 +1215,16 @@ export function Timeline({
             useFrames={useFrames}
             fps={edl.fps}
             videoClips={videoClips}
-            overlayClips={overlayClips}
+            textClips={textClips}
             audioClips={audioClips}
             transitionClips={transitionClips}
-            captionClips={captionClips}
             selection={selection}
             onSelect={onSelect}
             onRulerPointerDown={onRulerPointerDown}
             onRulerPointerMove={onRulerPointerMove}
+            onRulerPointerUp={onRulerPointerUp}
+            resolveDragSnap={resolveDragSnap}
+            onSnapGuide={setSnapGuideSec}
             commitVideoMove={commitVideoMove}
             commitVideoTrim={commitVideoTrim}
             commitTransitionMove={commitTransitionMove}
@@ -1039,9 +1253,26 @@ export function Timeline({
                 if (e.buttons !== 1) return;
                 seekFromClientX(e.clientX);
               }}
+              onPointerUp={onRulerPointerUp}
+              onPointerCancel={onRulerPointerUp}
               className="pointer-events-auto absolute -top-0.5 -left-2.5 h-5 w-5 cursor-ew-resize rounded-full bg-[color:var(--ed-accent)] ring-2 ring-[color:var(--ed-panel)]"
             />
           </div>
+
+          {/* Snap guide — the proof. It only exists while something is
+              latched on, and it spans every track precisely because the
+              claim it makes is cross-track: the edge being dragged and
+              whatever it locked onto are at the SAME time, to the
+              millisecond. Green so it can't be confused with the playhead
+              (violet, always present) sitting a pixel away from it, and
+              above everything since it's the one thing that has to stay
+              readable over a clip it crosses. */}
+          {snapGuideSec !== null && (
+            <div
+              style={{ left: snapGuideSec * pxPerSec + TRACK_LABEL_WIDTH }}
+              className="pointer-events-none absolute top-0 bottom-0 z-40 w-px bg-[color:var(--ed-snap)] shadow-[0_0_0_0.5px_var(--ed-snap-glow),0_0_8px_var(--ed-snap-glow)]"
+            />
+          )}
         </div>
       </div>
     </div>

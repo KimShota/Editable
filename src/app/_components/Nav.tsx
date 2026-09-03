@@ -10,6 +10,8 @@ const LINKS = [
   { href: "/templates", label: "Templates" },
   { href: "/reverse-engineer", label: "Reverse-engineer", adminOnly: true },
   { href: "/library", label: "Library" },
+  { href: "/pricing", label: "Pricing" },
+  { href: "/account", label: "Account", authOnly: true },
 ];
 
 export async function Nav() {
@@ -26,7 +28,7 @@ export async function Nav() {
   } catch (err) {
     console.error("Nav: session lookup failed", err);
   }
-  const links = LINKS.filter((link) => !link.adminOnly || user?.isAdmin);
+  const links = LINKS.filter((link) => (!link.adminOnly || user?.isAdmin) && (!link.authOnly || user));
 
   // Same best-effort shape as the session lookup above — a quota query
   // failure shouldn't take down every page's nav, it just means the badge

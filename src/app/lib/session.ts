@@ -18,7 +18,7 @@ export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 const sha256Hex = (value: string): string => createHash("sha256").update(value).digest("hex");
 
-export type SessionUser = { id: string; email: string; isAdmin: boolean };
+export type SessionUser = { id: string; email: string; isAdmin: boolean; plan: "free" | "premium" };
 
 /**
  * In-process cache for getSessionUser, keyed by the same token hash the DB
@@ -75,13 +75,13 @@ export const getSessionUser = async (token: string | undefined): Promise<Session
   if (cached && cached.expiresAt > Date.now()) return cached.user;
 
   const rows = await sql`
-    select u.id, u.email, u.is_admin
+    select u.id, u.email, u.is_admin, u.plan
     from sessions s
     join users u on u.id = s.user_id
     where s.token_hash = ${tokenHash} and s.expires_at > now()
   `;
-  const row = rows[0] as { id: string; email: string; is_admin: boolean } | undefined;
-  const user = row ? { id: row.id, email: row.email, isAdmin: row.is_admin } : null;
+  const row = rows[0] as { id: string; email: string; is_admin: boolean; plan: "free" | "premium" } | undefined;
+  const user = row ? { id: row.id, email: row.email, isAdmin: row.is_admin, plan: row.plan } : null;
 
   sessionCache.set(tokenHash, {
     user,

@@ -57,8 +57,10 @@ const DEMO_JOB_IDS = new Set(["demo", "five-codes", "five-codes-demo"]);
 
 const LEGACY_WAITLIST_ONLY_ALLOWED = new Set(["/", "/api/waitlist"]);
 
-const PUBLIC_EXACT = new Set(["/", "/login", "/signup"]);
-const PUBLIC_PREFIXES = ["/api/auth/", "/api/waitlist"];
+const PUBLIC_EXACT = new Set(["/", "/login", "/signup", "/pricing"]);
+// /api/billing/webhook: Stripe can't send our session cookie — its own
+// signature check (see that route) is the auth boundary, not this gate.
+const PUBLIC_PREFIXES = ["/api/auth/", "/api/waitlist", "/api/billing/webhook"];
 
 const ADMIN_PREFIXES = ["/authoring", "/api/authoring", "/reverse-engineer", "/api/media/authoring"];
 

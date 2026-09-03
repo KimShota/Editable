@@ -102,6 +102,12 @@ body {
   --ed-accent-ink: #0c0c0f;
   --ed-accent-dim: rgba(179, 102, 255, 0.16);
   --ed-focus: rgba(179, 102, 255, 0.55);
+  /* Alignment guide: the one green in the editor, reserved for "these two
+     edges are on the exact same frame". Deliberately NOT the violet accent —
+     it appears right next to the playhead, and the whole signal is that it's
+     a different kind of statement. */
+  --ed-snap: #3ddc84;
+  --ed-snap-glow: rgba(61, 220, 132, 0.45);
   --ed-danger: #f87171;
   --ed-font-display: "Space Grotesk", ui-sans-serif, sans-serif;
   --ed-font-body: "Inter", ui-sans-serif, sans-serif;
