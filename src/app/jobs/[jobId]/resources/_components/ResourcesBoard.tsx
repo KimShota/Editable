@@ -6,6 +6,7 @@ import type { Edl, Format, Slot } from "@backend/pipeline/types";
 import type { HookFeedbackResult, ScriptSuggestion } from "@backend/content/types";
 import { Button, Card, Pill } from "../../../../_components/ui";
 import { slotLabel } from "../../../../lib/slotLabel";
+import { formatHasScriptStep } from "../../../../lib/wizardSteps";
 import { LibraryPanel } from "../../../../_components/library/LibraryPanel";
 import { Binding, SlotDropzone, bindText } from "./SlotDropzone";
 // import { ScriptPanel } from "./ScriptPanel"; // hidden for now
@@ -34,7 +35,10 @@ const allSlots = (format: Format): Slot[] => [
  *  bound a speaking take) split it into lines before building. A job that
  *  filmed every block's own clip individually — or a format with no
  *  speakingTakeSlot at all — just skips straight from footage to
- *  review+build in Step 3, same step count either way. */
+ *  review+build in Step 3, same step count either way.
+ *
+ *  Step 1 is the one step a format can drop entirely — see `steps` in the
+ *  component below. */
 const STEPS: WizardStepInfo[] = [
   {
     id: 1,
@@ -83,8 +87,19 @@ export function ResourcesBoard({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  /** A format with nothing to script (every voice block is a `repeat`
+   *  template — see formatHasScriptStep) runs as a two-step wizard
+   *  instead: upload the day's footage, review, build. */
+  const hasScriptStep = useMemo(() => formatHasScriptStep(format), [format]);
+  /** The steps this format actually shows, in order. Ids stay 1/2/3 so
+   *  every `step === n` branch below keeps meaning the same screen; only
+   *  the numbering the user sees, and what Back/Next move between, come
+   *  from position in THIS list. */
+  const steps = useMemo(() => (hasScriptStep ? STEPS : STEPS.filter((s) => s.id !== 1)), [hasScriptStep]);
+
   const stepParam = Number(searchParams.get("step"));
-  const step = STEPS.some((s) => s.id === stepParam) ? stepParam : 1;
+  const step = steps.some((s) => s.id === stepParam) ? stepParam : steps[0].id;
+  const stepIndex = steps.findIndex((s) => s.id === step);
 
   const goToStep = (next: number) => router.replace(`${pathname}?step=${next}`, { scroll: false });
 
@@ -291,7 +306,7 @@ export function ResourcesBoard({
   return (
     <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1fr_340px]">
       <div className="flex flex-col gap-6">
-        <WizardHeader steps={STEPS} current={step} onSelect={attemptGoToStep} />
+        <WizardHeader steps={steps} current={step} onSelect={attemptGoToStep} />
 
         {step === 1 && (
           <>
@@ -303,6 +318,10 @@ export function ResourcesBoard({
             {(() => {
               let cardIndex = 0;
               return format.blocks.map((block) => {
+                // Same reason ScriptLines skips these: one value typed
+                // against a template that gets cloned per discovered beat
+                // has no single beat to belong to.
+                if (block.repeat) return null;
                 const textSlots = block.slots.filter((s) => s.mediaType === "text");
                 if (textSlots.length === 0) return null;
                 cardIndex += 1;
@@ -590,10 +609,10 @@ export function ResourcesBoard({
         )}
 
         <WizardFooterNav
-          current={step}
-          total={STEPS.length}
-          onBack={() => attemptGoToStep(step - 1)}
-          onNext={() => attemptGoToStep(step + 1)}
+          current={stepIndex + 1}
+          total={steps.length}
+          onBack={() => attemptGoToStep(steps[stepIndex - 1].id)}
+          onNext={() => attemptGoToStep(steps[stepIndex + 1].id)}
         />
       </div>
 

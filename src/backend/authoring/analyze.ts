@@ -1,9 +1,9 @@
-import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { requireWhisperModel, transcribeFile } from "../pipeline/whisper";
 import { authoringDir } from "../pipeline/paths";
+import { buildShots, detectChangeTimes, downsampleEvenly, extractFrame } from "../pipeline/shotDetect";
 import { Analysis, DenseFrame, Shot } from "./types";
 
 /**
@@ -36,43 +36,7 @@ const MAX_DENSE_FRAMES = 48;
 const DEDUPE_EPS_SEC = 0.15;
 const FRAME_WIDTH = 480;
 
-/** Downsample evenly (not truncate) so later material isn't silently
- *  dropped when a list is over a cap. */
-const downsampleEvenly = <T>(items: T[], max: number): T[] => {
-  if (items.length <= max) return items;
-  const stride = items.length / max;
-  return Array.from({ length: max }, (_, i) => items[Math.floor(i * stride)]);
-};
-
-/** Visual-change timestamps via ffmpeg's `select`+`showinfo` filter, at a
- *  caller-chosen sensitivity. Unlike execFileSync, spawnSync surfaces
- *  stderr (where showinfo logs land) even on a normal (zero) exit. */
-const detectChangeTimes = (sourcePath: string, threshold: number): number[] => {
-  const result = spawnSync(
-    "ffmpeg",
-    ["-i", sourcePath, "-filter:v", `select='gt(scene,${threshold})',showinfo`, "-f", "null", "-"],
-    { encoding: "utf8" },
-  );
-  if (result.status !== 0) {
-    throw new Error(`analyze: ffmpeg change detection failed:\n${(result.stderr ?? "").slice(-2000)}`);
-  }
-  const times: number[] = [];
-  for (const match of result.stderr.matchAll(/pts_time:([\d.]+)/g)) {
-    times.push(Number(match[1]));
-  }
-  return times;
-};
-
-/** Boundaries [0, ...sceneChanges, duration] → contiguous shots, downsampled
- *  to MAX_SHOTS (evenly) if scene detection over-fires. */
-const buildShots = (sceneChangeTimes: number[], durationSec: number): Array<{ startSec: number; endSec: number }> => {
-  const bounds = [0, ...sceneChangeTimes.filter((t) => t > 0 && t < durationSec), durationSec].sort(
-    (a, b) => a - b,
-  );
-  const unique = bounds.filter((t, i) => i === 0 || t - bounds[i - 1] > 0.05);
-  const rawShots = unique.slice(0, -1).map((start, i) => ({ startSec: start, endSec: unique[i + 1] }));
-  return downsampleEvenly(rawShots, MAX_SHOTS);
-};
+const buildShotsCapped = (changeTimes: number[], durationSec: number) => buildShots(changeTimes, durationSec, MAX_SHOTS);
 
 /** Every timestamp worth sampling a frame at for dense visual analysis:
  *  low-threshold change points (catches an overlay reveal a hard-cut
@@ -85,34 +49,6 @@ const buildDenseTimestamps = (denseChangeTimes: number[], durationSec: number): 
   const merged = [...denseChangeTimes.filter((t) => t >= 0 && t < durationSec), ...grid].sort((a, b) => a - b);
   const deduped = merged.filter((t, i) => i === 0 || t - merged[i - 1] > DEDUPE_EPS_SEC);
   return downsampleEvenly(deduped, MAX_DENSE_FRAMES);
-};
-
-const extractFrame = (sourcePath: string, atSec: number, outPath: string): boolean => {
-  try {
-    execFileSync(
-      "ffmpeg",
-      [
-        "-y",
-        "-v",
-        "error",
-        "-ss",
-        atSec.toFixed(3),
-        "-i",
-        sourcePath,
-        "-frames:v",
-        "1",
-        "-vf",
-        `scale=${FRAME_WIDTH}:-2`,
-        "-q:v",
-        "3",
-        outPath,
-      ],
-      { stdio: ["ignore", "ignore", "inherit"] },
-    );
-    return fs.existsSync(outPath);
-  } catch {
-    return false;
-  }
 };
 
 export const analyze = (
@@ -140,13 +76,13 @@ export const analyze = (
   }
 
   const sceneChangeTimes = detectChangeTimes(sourcePath, SCENE_THRESHOLD);
-  const rawShots = buildShots(sceneChangeTimes, durationSec);
+  const rawShots = buildShotsCapped(sceneChangeTimes, durationSec);
 
   const shots: Shot[] = [];
   rawShots.forEach((s, i) => {
     const midSec = (s.startSec + s.endSec) / 2;
     const frameName = `frame_${String(i).padStart(3, "0")}.jpg`;
-    const ok = extractFrame(sourcePath, midSec, path.join(framesDir, frameName));
+    const ok = extractFrame(sourcePath, midSec, path.join(framesDir, frameName), FRAME_WIDTH);
     if (!ok) {
       console.warn(`analyze: failed to extract frame for shot ${i} at ${midSec.toFixed(2)}s — skipping`);
       return;
@@ -160,7 +96,7 @@ export const analyze = (
   const denseFrames: DenseFrame[] = [];
   denseTimestamps.forEach((atSec, i) => {
     const frameName = `dense_${String(i).padStart(3, "0")}.jpg`;
-    const ok = extractFrame(sourcePath, atSec, path.join(framesDir, frameName));
+    const ok = extractFrame(sourcePath, atSec, path.join(framesDir, frameName), FRAME_WIDTH);
     if (!ok) {
       console.warn(`analyze: failed to extract dense frame at ${atSec.toFixed(2)}s — skipping`);
       return;

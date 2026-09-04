@@ -476,7 +476,13 @@ export const assemble = (
     const nameAudioAsset = block.kind === "voice" ? fileAsset(filled, `${block.videoSlot}-nameAudio`) : undefined;
     const leadInSec = nameAudioAsset?.durationSec ? Math.min(nameAudioAsset.durationSec, trim.takes[0].srcInSec) : 0;
 
-    const blockDurationSec = trim.takes.reduce((s, t) => s + (t.srcOutSec - t.srcInSec), 0);
+    // Playback rate for this block (see BlockSchema's `speed`). Every
+    // timeline duration below is SOURCE seconds divided by it, so an 8x
+    // block occupies an eighth of the timeline while still consuming its
+    // whole source span. 1 for every block that doesn't ask, which makes
+    // each of these divisions a no-op for every existing format.
+    const speed = block.speed;
+    const blockDurationSec = trim.takes.reduce((s, t) => s + (t.srcOutSec - t.srcInSec) / speed, 0);
     // "blockStart" keeps meaning exactly what it always has — where this
     // block's own real trimmed content begins — for every OTHER mechanism
     // in this file (captions, roleEdgeSec anchors, ecuCutaway, ordinary
@@ -526,6 +532,9 @@ export const assemble = (
       video.push({
         id: `${block.id}__namelead`,
         blockId: block.id,
+        // A names-take lead-in is pre-roll under dubbed audio; it plays
+        // at real time whatever the block's own speed is.
+        speed: 1,
         src: stage(firstFile),
         srcInSec: leadInSrcIn,
         srcOutSec: leadInSrcOut,
@@ -556,7 +565,7 @@ export const assemble = (
       trim.takes.forEach((t, i) => {
         const file = takeFiles[takeOrder[i] ?? i];
         const segId = trim.takes.length > 1 ? `${block.id}__take${i}` : block.id;
-        const durationSec = t.srcOutSec - t.srcInSec;
+        const durationSec = (t.srcOutSec - t.srcInSec) / speed;
         video.push({
           id: segId,
           blockId: block.id,
@@ -566,8 +575,11 @@ export const assemble = (
           srcDurationSec: file.durationSec,
           tlInSec: segCursor,
           tlOutSec: segCursor + durationSec,
-          // B-roll plays under the music/voice; its own audio is muted.
-          muted: block.kind === "broll",
+          speed,
+          // B-roll plays under the music/voice; its own audio is muted —
+          // and so is anything faster than real time, since sped-up
+          // speech is unlistenable.
+          muted: block.kind === "broll" || speed !== 1,
           volume: 1,
           fgSrc: i === 0 && fgAsset ? stage(fgAsset) : undefined,
         });
@@ -645,6 +657,11 @@ export const assemble = (
               srcDurationSec,
               tlInSec: pendingVoStartSec,
               tlOutSec: pendingVoStartSec + backExtendSec,
+              // The voiceover path (a multi-clip split, splitTake.ts)
+              // carries real audio on its own timeline and has no
+              // meaning at anything but real time — a sped-up block
+              // mutes its audio, so it never reaches this branch.
+              speed: 1,
               muted: true,
               volume: 1,
             });
@@ -657,6 +674,7 @@ export const assemble = (
         video.push({
           id: segId,
           blockId: block.id,
+          speed: 1,
           src: stage(file),
           srcInSec: t.srcInSec,
           srcOutSec: t.srcOutSec,
@@ -686,6 +704,7 @@ export const assemble = (
           video.push({
             id: `${segId}__post`,
             blockId: block.id,
+            speed: 1,
             src: stage(file),
             srcInSec: t.srcOutSec,
             srcOutSec: t.srcOutSec + fwdExtendSec,

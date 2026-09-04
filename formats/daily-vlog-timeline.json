@@ -1,0 +1,138 @@
+{
+  "id": "daily-vlog-timeline",
+  "name": "プロゲーマーの日常",
+  "niche": "vlog",
+  "description": "フルの1日を1本の長尺クリップにまとめて渡すだけで、時刻テロップ付きの高速カット日常vlogに自動編集する。カット数・尺・撮り直しの選別・テロップの文言は素材から都度発見される。",
+  "fps": 30,
+  "width": 1080,
+  "height": 1920,
+  "sharedSlots": [],
+  "speakingTakeSlot": {
+    "name": "dayFootage",
+    "mediaType": "video",
+    "required": true,
+    "label": "その日の素材（結合1本でOK）",
+    "instructions": "1日ぶんのクリップを1本のファイルに結合してアップロードしてください。順番はだいたい時系列であればOKです。カット割り・撮り直しの選別・テロップは自動で生成されます。"
+  },
+  "discovery": {
+    "minBeats": 15,
+    "maxBeats": 45,
+    "minBeatSec": 1.0,
+    "maxBeatSec": 4.5,
+    "targetTotalSec": 75,
+    "prompt": "日本のプロゲーマー/ストリーマーによる「日常vlog」。起床、練習、食事、外出、配信、就寝など、1日のうちの短い瞬間を時系列に並べた早いカットの編集。1つの「beat」は1つの行動・1つの瞬間（例：起床、コーヒーを飲む、練習を始める、ランチに行く、配信する、お風呂に入る、歯磨きする）。カット尺は短く、1〜4秒程度。captionは2〜8文字程度の短い日本語のカジュアルな体言止め・現在形（例：「起床」「いただきます」「ノンカフェインコーヒー」「配信します！」「お風呂入ります」）で、実況ではなく状況ラベルとして書く。素材は本人が1日を撮り溜めた個別クリップを時系列に結合したもので、各クリップの冒頭にはカメラを設置・画角合わせしている数秒がほぼ必ず入っている。そこは使わず、画が落ち着いて本人が実際に喋る/動く所から使うこと。同じ行動を何度も撮り直している場合は同一のretakeGroupIdでまとめる。"
+  },
+  "blocks": [
+    {
+      "id": "beat",
+      "title": "Beat",
+      "kind": "voice",
+      "repeat": true,
+      "videoSlot": "beatClip",
+      "slots": [
+        {
+          "name": "beatClip",
+          "mediaType": "video",
+          "required": false,
+          "label": "Beat clip (auto-derived from the day's footage)",
+          "instructions": "Filled automatically from the speaking take — nothing to upload here directly."
+        }
+      ],
+      "captions": false,
+      "backgroundReplace": false,
+      "silhouette": false,
+      "optional": false,
+      "roles": [],
+      "anchors": [],
+      "events": [
+        {
+          "id": "title",
+          "kind": "overlay",
+          "repeatScope": "first",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "text": "{{title}}",
+              "variant": "description",
+              "fontSize": 96,
+              "fontWeight": 700,
+              "color": "#ffffff",
+              "italic": false,
+              "textCase": "none"
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.07,
+            "y": 0.43,
+            "width": 0.86,
+            "height": 0.2
+          },
+          "states": []
+        },
+        {
+          "id": "beatTime",
+          "kind": "overlay",
+          "repeatScope": "all",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "text": "{{clockTime}}",
+              "variant": "description",
+              "fontSize": 69,
+              "fontWeight": 500,
+              "color": "#ffffff",
+              "italic": true,
+              "textCase": "none"
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.1,
+            "y": 0.544,
+            "width": 0.8,
+            "height": 0.06
+          },
+          "states": []
+        },
+        {
+          "id": "beatCaption",
+          "kind": "overlay",
+          "repeatScope": "all",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "text": "{{caption}}",
+              "variant": "description",
+              "fontSize": 60,
+              "fontWeight": 500,
+              "color": "#ffffff",
+              "italic": true,
+              "textCase": "none"
+            }
+          },
+          "timing": {
+            "kind": "fixed",
+            "anchor": "blockStart",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.08,
+            "y": 0.588,
+            "width": 0.84,
+            "height": 0.09
+          },
+          "states": []
+        }
+      ]
+    }
+  ]
+}

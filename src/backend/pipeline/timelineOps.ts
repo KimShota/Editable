@@ -798,6 +798,9 @@ const applyAddVideo = (edl: Edl, op: Extract<TimelineOp, { type: "addVideo" }>):
     src: op.src,
     srcInSec: 0,
     srcOutSec: op.durationSec,
+    // Media dropped onto the timeline by hand always lands at real time;
+    // the speed field exists for format-authored timelapse beats.
+    speed: 1,
     srcDurationSec: op.durationSec,
     tlInSec: 0,
     tlOutSec: 0,

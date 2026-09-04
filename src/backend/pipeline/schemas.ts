@@ -567,6 +567,15 @@ export const FormatEventSchema = z.object({
    * whenever `mergeGroup` is set (checked in FormatSchema's superRefine).
    */
   mergeStartTimeParam: z.string().optional(),
+  /**
+   * Only meaningful when this event's own block has `repeat: true` (see
+   * BlockSchema's doc comment) — which of the CLONED beats actually get
+   * this event. "all" (default): every beat. "first"/"last": only the
+   * clone expandFormat.ts made for discovery's first/last kept beat — e.g.
+   * an intro title card that should appear once, not once per beat. A
+   * plain (non-repeat) block ignores this field entirely.
+   */
+  repeatScope: z.enum(["all", "first", "last"]).default("all"),
 });
 
 // ---------------------------------------------------------------------------
@@ -579,6 +588,22 @@ export const BlockSchema = z.object({
   title: z.string(),
   /** voice = spoken, gets transcription/trim/roles; broll = silent footage. */
   kind: z.enum(["voice", "broll"]),
+  /**
+   * This block is a TEMPLATE, not concrete content — a variable-length
+   * source (e.g. one long "everything I did today" take) can't be
+   * described as a fixed list of blocks the way every other format is,
+   * since the number of beats differs job to job. A `repeat: true` block
+   * is never built directly: expandFormat.ts clones it into `beat-01`,
+   * `beat-02`, … (one per beat the format's own `discovery` stage found in
+   * the bound speakingTakeSlot) BEFORE intake's second pass and everything
+   * downstream ever sees the format — so trim/resolveRoles/assemble/the
+   * editor all work against an ordinary fixed-block Format, same as any
+   * other, and need no changes of their own. Requires the format to
+   * declare `discovery`; mutually exclusive with `optional` (a repeat
+   * block's own COUNT already handles "this beat may not exist" — a clone
+   * is only ever created for a beat discovery actually found).
+   */
+  repeat: z.boolean().default(false),
   /** Which of this block's slots holds the main footage. */
   videoSlot: z.string(),
   slots: z.array(SlotSchema),
@@ -686,6 +711,16 @@ export const BlockSchema = z.object({
       overlayAtSec: z.number().min(0),
     })
     .optional(),
+  /**
+   * Playback rate for this block's own footage — 1 is real time, 8 plays
+   * it eight times faster and takes an eighth of the timeline. For a beat
+   * whose POINT is that it went on for an hour (a practice session, a
+   * commute, a build), the reference edit compresses it into a couple of
+   * seconds of sped-up footage under a time-range caption rather than
+   * showing a representative slice of it at real speed. Audio is muted
+   * for any block faster than real time — sped-up speech is unusable.
+   */
+  speed: z.number().positive().default(1),
   /** Optional hard cap on the block's duration after trim. */
   maxDurationSec: z.number().positive().optional(),
   /** Voice blocks only, single-take mode: this block is filmed as its OWN
@@ -805,6 +840,31 @@ export const FormatSchema = z
      * one so every event can unconditionally use nameAudioStart.
      */
     namesTakeSlot: SlotSchema.optional(),
+    /**
+     * Required exactly when the format has a `repeat: true` block (see
+     * BlockSchema's doc comment) — config for discover.ts's own pass over
+     * the bound speakingTakeSlot: how many beats to expect, how long each
+     * may run, and a format-specific description of what counts as "one
+     * beat" and what its clockTime/caption should sound like (the ONLY
+     * per-niche knowledge discover.ts needs — the shot-finding/retake-
+     * dedupe/merge machinery itself never changes per format, same
+     * "engine vs. config" split as every other format-specific behavior).
+     */
+    discovery: z
+      .object({
+        minBeats: z.number().int().positive(),
+        maxBeats: z.number().int().positive(),
+        minBeatSec: z.number().positive(),
+        maxBeatSec: z.number().positive(),
+        /** Beats beyond this are dropped (lowest LLM-judged importance
+         *  first) rather than crushed together or left to overrun. */
+        targetTotalSec: z.number().positive(),
+        /** Format-specific instructions folded into discover.ts's own
+         *  prompt — what one beat looks/sounds like in THIS niche, and
+         *  the tone/length its clockTime+caption text should match. */
+        prompt: z.string(),
+      })
+      .optional(),
     blocks: z.array(BlockSchema).min(1),
   })
   .superRefine((format, ctx) => {
@@ -862,6 +922,12 @@ export const FormatSchema = z
       ctx.addIssue({
         code: "custom",
         message: `speakingTakeSlot is set but the format has no voice blocks to derive clips for`,
+      });
+    }
+    if (format.blocks.filter((b) => b.repeat).length > 1) {
+      ctx.addIssue({
+        code: "custom",
+        message: `at most one "repeat" block is supported per format — expandFormat.ts only expands the first one it finds`,
       });
     }
 
@@ -986,6 +1052,24 @@ export const FormatSchema = z
         ctx.addIssue({
           code: "custom",
           message: `block "${block.id}": optional only makes sense in single-take mode (speakingTakeSlot)`,
+        });
+      }
+      if (block.repeat && !format.speakingTakeSlot) {
+        ctx.addIssue({
+          code: "custom",
+          message: `block "${block.id}": repeat only makes sense in single-take mode (speakingTakeSlot)`,
+        });
+      }
+      if (block.repeat && !format.discovery) {
+        ctx.addIssue({
+          code: "custom",
+          message: `block "${block.id}": repeat requires the format to declare "discovery"`,
+        });
+      }
+      if (block.repeat && block.optional) {
+        ctx.addIssue({
+          code: "custom",
+          message: `block "${block.id}": repeat and optional are mutually exclusive`,
         });
       }
 
@@ -1347,6 +1431,11 @@ export const EdlVideoSegmentSchema = z.object({
   tlInSec: z.number().min(0),
   tlOutSec: z.number().positive(),
   muted: z.boolean().default(false),
+  /** Playback rate — see BlockSchema's own `speed`. tlOutSec-tlInSec is
+   *  ALREADY the sped-up (shortened) duration; this field tells the
+   *  renderer how fast to play the source across it, and the timeline
+   *  editor how much source a given timeline span consumes. */
+  speed: z.number().positive().default(1),
   /** Independent of `muted` (which is all-or-nothing) — lets a clip's own
    *  audio be dialed down/up rather than only ever fully on or fully off.
    *  Linear gain; 1 is unity (the source's own recorded level). The editor's

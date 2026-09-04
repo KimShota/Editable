@@ -234,7 +234,17 @@ const controlOptionValues = (
   return undefined;
 };
 
-export const intake = (jobDir: string): FilledFormat => {
+/**
+ * @param formatOverride Pass the already-EXPANDED format (see
+ *   expandFormat.ts) for a format whose `blocks` were generated per-job
+ *   from a `repeat` template — every downstream check here (required
+ *   slots, derivedFromTake, etc.) needs to see the real, per-job block
+ *   list, not the format file's own template block. Omitted (every other
+ *   format, and this same format's own FIRST intake pass, before
+ *   discovery has run yet) falls back to loading `manifest.format` from
+ *   disk as before.
+ */
+export const intake = (jobDir: string, formatOverride?: Format): FilledFormat => {
   const absJobDir = path.resolve(jobDir);
   const manifestPath = path.join(absJobDir, "job.json");
   if (!fs.existsSync(manifestPath)) {
@@ -250,7 +260,7 @@ export const intake = (jobDir: string): FilledFormat => {
     );
   }
   const manifest = manifestParsed.data;
-  const format = loadFormat(manifest.format);
+  const format = formatOverride ?? loadFormat(manifest.format);
 
   const errors: string[] = [];
   const bindings: Record<string, BoundAsset> = {};

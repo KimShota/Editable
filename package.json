@@ -41,6 +41,8 @@
     "pipeline": "tsx src/backend/pipeline/run.ts",
     "matte:proof": "tsx src/backend/pipeline/tools/matteProof.ts",
     "author": "tsx src/backend/authoring/run.ts",
+    "reference:beats": "tsx src/backend/pipeline/tools/buildReferenceBeats.ts",
+    "reference:exemplar": "tsx src/backend/pipeline/tools/registerExemplar.ts",
     "test:anchors": "tsx src/backend/authoring/tools/anchorRobustness.ts",
     "waitlist:export": "tsx src/backend/tools/waitlistExport.ts",
     "reels:sync": "tsx src/backend/tools/reelsSync.ts",

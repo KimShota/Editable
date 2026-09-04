@@ -22,6 +22,7 @@ export const defaultEdl: Edl = {
       tlInSec: 0,
       tlOutSec: 2,
       muted: true,
+    speed: 1,
       volume: 1,
     },
   ],

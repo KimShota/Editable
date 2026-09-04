@@ -14,7 +14,12 @@ export type WizardStepInfo = {
 
 /**
  * Step header + clickable progress bar + Back/Next footer for the
- * resources wizard. Steps stay freely reachable by clicking a segment —
+ * resources wizard. `steps` may be a SUBSET of the wizard's full step
+ * list (a format with nothing to script drops step 1 outright — see
+ * ResourcesBoard's own `steps`), so the number shown is the step's
+ * POSITION in the list it was handed, never its own `id`: skipping a
+ * step must not leave the user reading "Step 2 of 2" on the first
+ * screen. Steps stay freely reachable by clicking a segment —
  * same "make changes here until you generate" freedom the single-page
  * board already had — with one exception the caller enforces, not this
  * component: ResourcesBoard's attemptGoToStep blocks reaching step 3
@@ -30,12 +35,13 @@ export function WizardHeader({
   current: number;
   onSelect: (step: number) => void;
 }) {
-  const step = steps.find((s) => s.id === current) ?? steps[0];
+  const index = Math.max(0, steps.findIndex((s) => s.id === current));
+  const step = steps[index];
   return (
     <div className="mb-8 overflow-hidden rounded-2xl border border-[color:var(--card-border)] bg-[color:var(--card)]">
       <div className="flex flex-wrap items-center justify-between gap-2 px-6 pt-6">
         <p className="font-[family-name:var(--font-display)] text-xs tracking-[0.2em] text-[color:var(--accent)] uppercase">
-          Step {step.id} of {steps.length}
+          Step {index + 1} of {steps.length}
         </p>
         <p className="text-xs text-[color:var(--ink-dim)]">{step.kicker}</p>
       </div>

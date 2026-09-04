@@ -91,6 +91,13 @@ export function ScriptLines({
           // the video's structure is unchanged and it can be re-surfaced by
           // deleting this check alone.
           if (block.optional) return null;
+          // A `repeat` block is a template discover.ts clones once per beat
+          // it finds in the footage, deriving that beat's line from the
+          // footage itself — there is no single line to write for it, and a
+          // box here would suggest otherwise. (A format made only of these
+          // never reaches this component: ResourcesBoard drops step 1
+          // outright — see its `hasScriptStep`.)
+          if (block.repeat) return null;
           if (block.kind !== "voice") {
             // Auto-generated beats (built from identity photos at build
             // time, same condition ResourcesBoard's step 2 uses to hide

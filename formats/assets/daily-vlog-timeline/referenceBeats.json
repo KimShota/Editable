@@ -1,0 +1,227 @@
+{
+  "formatId": "daily-vlog-timeline",
+  "sources": [
+    "サンプル動画１.mp4",
+    "サンプル動画２.mp4",
+    "サンプル動画３.mp4",
+    "サンプル動画４.mp4",
+    "サンプル動画５.mp4"
+  ],
+  "typicalTotalSec": 75,
+  "beats": [
+    {
+      "id": "hook",
+      "order": 0,
+      "label": "冒頭フック（タイトル）",
+      "description": "Cold open. The creator is seated in his gaming chair holding a controller, mid-eFootball play, talking/reacting to the game. The usable framing is settled and fairly tight: his face AND the controller are both in frame. A multi-line title card is burned in over him, always starting with 'ウイイレ日本2位'. IMPORTANT: the raw footage almost always opens with several seconds of the camera being placed and framed — handheld wobble, his back, a half-empty chair, him leaning in and out of frame. That is never the hook; the hook starts after the framing settles and he is actually playing.",
+      "captionExamples": [
+        "ウイイレ日本2位\nプロゲーマーの日常",
+        "ウイイレ日本2位\nインドネシア渡航まで2日\nプロゲーマーの日常",
+        "ウイイレ日本2位\nメンテナンス日の\nプロゲーマーの日常",
+        "ウイイレ日本2位\n負けず嫌いな\nプロゲーマーの日常",
+        "ウイイレ日本2位\n世界大会予選の\nプロゲーマーの日常"
+      ],
+      "typicalClockTime": "",
+      "optional": false,
+      "isTitleBeat": true,
+      "speed": 1,
+      "exemplars": [
+        {
+          "clip": "exemplars/hook-1.mp4",
+          "durationSec": 2.9,
+          "shotCount": 1,
+          "rule": "落ち着いた画角で顔とコントローラーが両方フレームに入り、プレイしながら喋る/リアクションしている瞬間だけを使う。ファイル冒頭のカメラを置いて画角を合わせている数秒（手ブレ・背中・見切れ）は絶対に使わない。",
+          "sourceNote": "タイトルなし.mp4 の 6.43s〜9.33s を本人が手でトリムしたもの"
+        }
+      ]
+    },
+    {
+      "id": "greeting",
+      "order": 1,
+      "label": "起床・朝の挨拶",
+      "description": "Morning wake-up, filmed wide from across the room: bed, window and curtains in frame. He sits UP on the bed, turns to face the camera, and delivers the morning line ('おはようございます!今日も一日、元気にいきましょう!'), closing on a reaction to camera — usually a thumbs-up. The beat is that whole little arc: sitting up → facing camera → the closing gesture. Shots of him with his back to camera, making the bed, tidying, or walking around the bedroom are NOT this beat and are not used at all.",
+      "captionExamples": [
+        "9:00\n起床",
+        "今日も\nGENKIにいきましょー!",
+        "8:01\n勝ち上がると\nRegional Final"
+      ],
+      "typicalClockTime": "8:30",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "exemplars": [
+        {
+          "clip": "exemplars/greeting-1.mp4",
+          "durationSec": 4.3,
+          "shotCount": 1,
+          "rule": "ベッドに起き上がってカメラを正面に見る所から、サムズアップ等のリアクションで締まる所まで、ひとまとまりで使う。布団を整える・部屋を歩き回る・背中を向けているカットは起床ビートではない。",
+          "sourceNote": "タイトルなし.mp4 の 65.30s〜69.60s を本人が手でトリムしたもの"
+        }
+      ]
+    },
+    {
+      "id": "breakfast",
+      "order": 2,
+      "label": "朝食（完全栄養食シェイク）",
+      "description": "Rapid quick-cut sequence: holds a product bag up to his face (usually uFit完全栄養食), does a little 'シャカシャカダンス' shaking the shaker, then drinks ('ゴクゴクっ') and gives a thumbs-up 'おいしー!'. In one episode this is an oatmeal bowl instead (オートミール/チアシード/ハチミツ/ブルーベリー). Standing/seated against a plain wall.",
+      "captionExamples": [
+        "9:02\nuFit完全栄養食\n（ココア味）",
+        "シャカシャカ\nダンス",
+        "ゴクゴクっ",
+        "おいしー!",
+        "8:30\nufit完全栄養食\n（ほうじ茶味）",
+        "11:45\nオートミール"
+      ],
+      "typicalClockTime": "8:30",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "exemplars": []
+    },
+    {
+      "id": "practice",
+      "order": 3,
+      "label": "eFootball練習",
+      "description": "The long daily eFootball practice session: he sits at his desk or in his chair with a controller, playing, often with a smart-speaker clock visible. This beat is a TIMELAPSE — in the finished edit it is a couple of seconds of heavily sped-up footage, not a real-time slice, because the point is that it went on for an hour. So pick a LONG continuous stretch of him actually playing (tens of seconds), not a short representative moment, and caption it with the time RANGE it covered (e.g. '10:30〜11:30') rather than a single instant.",
+      "captionExamples": [
+        "10:30〜11:30\neFootball 練習する",
+        "9:30〜10:30\neFootball練習する",
+        "10:40\neFootballプレイ",
+        "9:30〜11:40\neFootball練習する",
+        "10:00〜13:00\n大会に向けて\neFootballトレーニング",
+        "勝率83%"
+      ],
+      "typicalClockTime": "10:30〜11:30",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 8,
+      "exemplars": []
+    },
+    {
+      "id": "outing",
+      "order": 4,
+      "label": "日中の外出・活動",
+      "description": "The day's variable main activity, usually out of the house: walking (POV of feet/streets), station/townscape B-roll, a sponsor or business meeting, a cafe meeting, meeting viewers, or a haircut. Time-of-day captions in the 11:00–18:00 range with a short label of the activity.",
+      "captionExamples": [
+        "13:30\n向かう",
+        "14:00\nタビオ株式会社\n（メインスポンサーして頂いてます）",
+        "15:00\n近況報告もできて\nめっちゃ楽しかったです",
+        "14:00\nカフェ\nミーティング",
+        "15:30\n視聴者さんに遭遇\n嬉しい!!",
+        "12:00\nランチ行ってきます",
+        "18:00\nいつもカット\nありがとうございます"
+      ],
+      "typicalClockTime": "13:00",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "exemplars": [
+        {
+          "clip": "exemplars/outing-1.mp4",
+          "durationSec": 5.6,
+          "shotCount": 2,
+          "rule": "外出先は「被写体そのものの寄り（コーヒーカップ・商品）」と「人が入った画（友達とのセルフィー）」を2〜3秒ずつ短く畳みかける。移動中や何も起きていない画は使わない。",
+          "sourceNote": "タイトルなし.mp4 の 160.10-162.67 と 164.23-167.27 を本人が手でトリム・連結したもの"
+        },
+        {
+          "clip": "exemplars/outing-2.mp4",
+          "durationSec": 1.23,
+          "shotCount": 1,
+          "rule": "商品お披露目は、商品名がはっきり読めるように掲げ切った所だけを1〜1.5秒で使う。持ち上げる前の喋りや溜めは一切入れない。",
+          "sourceNote": "タイトルなし.mp4 の 211.30-212.53 を本人が手でトリムしたもの"
+        }
+      ]
+    },
+    {
+      "id": "meal",
+      "order": 5,
+      "label": "食事（昼〜夕）",
+      "description": "A meal. The cut that is actually used is him EATING — chopsticks going to his mouth, a mouthful, slurping noodles — usually ending on the reaction ('おいしー!' / a thumbs-up). The lead-in where he is holding the bowl and TALKING about the food, before anything is eaten, is not this beat: if a shot contains both, start the cut at the first bite, not at the talking. A close-up of the food itself can precede it as its own quick cut.",
+      "captionExamples": [
+        "16:10\n卵炒飯",
+        "16:23\nいただきます",
+        "16:05\nお昼ご飯",
+        "13:00\nやねん寿司",
+        "13:10\nお寿司\nいただきます",
+        "13:08\n納豆&"
+      ],
+      "typicalClockTime": "14:00",
+      "optional": true,
+      "isTitleBeat": false,
+      "speed": 1,
+      "exemplars": []
+    },
+    {
+      "id": "bath",
+      "order": 6,
+      "label": "お風呂",
+      "description": "Close-up of the beige Rinnai water-heater control panel on the wall, a finger pressing the up/down button to set the bath temperature, with a spoken 'お風呂入ります'. Caption reads お風呂入ります / お風呂タイム with an evening time.",
+      "captionExamples": [
+        "17:59\nお風呂入ります",
+        "23:00\n帰宅&\nお風呂入ります",
+        "20:48\nお風呂入ります",
+        "21:41\n帰宅&\nお風呂入ります",
+        "19:38\nお風呂タイム"
+      ],
+      "typicalClockTime": "20:00",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "exemplars": []
+    },
+    {
+      "id": "dinner",
+      "order": 7,
+      "label": "夜食（麺類）",
+      "description": "Night meal: overhead shot of noodles boiling in a pot, then a slurping/eating reaction to camera. Usually soba or udon with 'いただきます!/フーフー/おいしい!'.",
+      "captionExamples": [
+        "21:20\nお蕎麦",
+        "21:26\nフーフー",
+        "22:30\n灼熱お蕎麦",
+        "22:35\nいただきます",
+        "20:08\nきのこうどん",
+        "20:15\nおいしー!"
+      ],
+      "typicalClockTime": "21:00",
+      "optional": true,
+      "isTitleBeat": false,
+      "speed": 1,
+      "exemplars": []
+    },
+    {
+      "id": "stream",
+      "order": 8,
+      "label": "ライブ配信",
+      "description": "Night live-stream segment: seen from behind facing a ring light + monitors with the stream/chat on screen, controller in hand, or a to-camera clip announcing 'ライブ配信やっていきます!' / 'ライブ配信終わりましたー!'. Answers viewer questions / plays.",
+      "captionExamples": [
+        "22:00\nTikTokのライブ配信\n終わりました",
+        "23:22\nライブ配信\nやっていきます!",
+        "23:23\n視聴者さんの\n質問に答えていきます",
+        "20:00\nライブ配信\n終わりました",
+        "25:10\nライブ配信\n終わりました",
+        "22:15\n大会\n結果報告しました"
+      ],
+      "typicalClockTime": "22:00",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "exemplars": []
+    },
+    {
+      "id": "signoff",
+      "order": 9,
+      "label": "締めの挨拶",
+      "description": "Closing to camera, either seated on the couch/bed or a dim ceiling/bed shot, delivering the sign-off '今日も皆さんお疲れ様でした!明日もGENKIにいきましょー!'. Signature 'GENKI' caption, no time stamp.",
+      "captionExamples": [
+        "明日も\nGENKIにいこー!",
+        "今日も\n皆さんお疲れ様でした!",
+        "明日も\nGENKIにいきましょー!"
+      ],
+      "typicalClockTime": "",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "exemplars": []
+    }
+  ]
+}

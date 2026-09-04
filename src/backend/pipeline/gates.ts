@@ -820,12 +820,22 @@ const structureGate = (edl: Edl, format: Format | undefined): GateResult => {
   };
 };
 
-export const runGates = (videoPath: string, edl: Edl, matte?: MatteArtifact): GateResult[] => {
-  let format: Format | undefined;
-  try {
-    format = loadFormat(edl.formatId);
-  } catch {
-    format = undefined;
+/**
+ * @param formatOverride Pass the EXPANDED format (see expandFormat.ts) for
+ *   a discovery-based job — `edl.formatId` alone only names the format
+ *   FILE, whose own `repeat` template block never appears in the actual
+ *   EDL (see BlockSchema's doc comment), which would otherwise fail
+ *   structureGate against a block id that was never meant to render as-is.
+ *   Omitted (every other format) falls back to loading the format file.
+ */
+export const runGates = (videoPath: string, edl: Edl, matte?: MatteArtifact, formatOverride?: Format): GateResult[] => {
+  let format: Format | undefined = formatOverride;
+  if (!format) {
+    try {
+      format = loadFormat(edl.formatId);
+    } catch {
+      format = undefined;
+    }
   }
 
   return [

@@ -28,7 +28,9 @@ import { render, stageAssets } from "./render";
 import { runGates } from "./gates";
 import { artifactsDir } from "./paths";
 import { Edl, FilledFormat, Format, MatteArtifact, Transcript, TrimPoints } from "./types";
-import { EdlSchema, MatteArtifactSchema } from "./schemas";
+import { EdlSchema, FormatSchema, MatteArtifactSchema } from "./schemas";
+import { discover, discoverResultToSplitTake, DISCOVER_PIPELINE_VERSION, DiscoverResult } from "./discover";
+import { expandFormat, hasRepeatBlock } from "./expandFormat";
 
 /**
  * Programmatic entry points for the same six-stage pipeline `run.ts` drives
@@ -48,6 +50,60 @@ const writeArtifact = (jobId: string, name: string, data: unknown): void => {
   const dir = artifactsDir(jobId);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(data, null, 2));
+};
+
+/** The EXPANDED format a discovery-based job (see expandFormat.ts) was
+ *  actually built against, when one was persisted — every stage past the
+ *  first intake pass (transcribe/trim/roles/edl) was derived against THIS
+ *  format's own per-job block list, not the format file's `repeat`
+ *  template, so re-deriving anything (a reassemble, a stale-EDL migration)
+ *  must load the same one rather than `loadFormat(formatId)`. Falls back
+ *  to the ordinary format file for every job that never went through
+ *  discovery (format.json is only ever written by buildJob when
+ *  hasRepeatBlock is true — see below). */
+/** job.json's own `format` id, read directly rather than through intake()
+ *  — needed BEFORE intake can run, since intake() itself now needs the
+ *  (possibly expanded) Format handed to it up front (see intake.ts's own
+ *  `formatOverride` param). Left unvalidated: intake() re-parses the same
+ *  file against the full JobManifestSchema immediately afterward, so a
+ *  malformed manifest still fails loudly there, just one call later. */
+const readJobFormatId = (jobDir: string): string => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(jobDir, "job.json"), "utf8"));
+  return manifest.format as string;
+};
+
+const loadJobFormat = (jobId: string, formatId: string): Format => {
+  const file = path.join(artifactsDir(jobId), "format.json");
+  if (fs.existsSync(file)) {
+    try {
+      const parsed = FormatSchema.safeParse(JSON.parse(fs.readFileSync(file, "utf8")));
+      if (parsed.success) return parsed.data;
+    } catch {
+      // fall through to the ordinary format file below
+    }
+  }
+  return loadFormat(formatId);
+};
+
+/** The persisted discovery result (see discover.ts) for a format with a
+ *  `repeat` block. Null before discovery has ever run for this job, OR
+ *  when the cached file predates a shape change (DISCOVER_PIPELINE_VERSION
+ *  mismatch) — same "transparently re-derive rather than misread"
+ *  contract as readSplit above. Caching this (rather than always
+ *  re-running discover()) is what keeps a rebuild cheap: discover() is a
+ *  whisper run plus a multimodal LLM call, both worth paying for exactly
+ *  once per job unless the user explicitly asks to re-discover. */
+export const readDiscovered = (jobId: string): DiscoverResult | null => {
+  const file = path.join(artifactsDir(jobId), "discovered.json");
+  if (!fs.existsSync(file)) return null;
+  let parsed: DiscoverResult;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+  if (parsed.pipelineVersion !== DISCOVER_PIPELINE_VERSION) return null;
+  return parsed;
 };
 
 /** The persisted split (auto or manually adjusted), for a single-take-mode
@@ -153,9 +209,32 @@ export const buildJob = async (
   resolver: ResolverChoice = "auto",
   generator: GeneratorChoice = "auto",
 ): Promise<Edl> => {
-  const intakeFilled = intake(jobDir);
-  writeArtifact(jobId, "filled", intakeFilled);
-  const format = loadFormat(intakeFilled.formatId);
+  const intakeFilled0 = intake(jobDir);
+  writeArtifact(jobId, "filled", intakeFilled0);
+  const baseFormat = loadFormat(intakeFilled0.formatId);
+
+  // A `repeat`-block format (see BlockSchema's own doc comment) has no
+  // fixed block list to build against yet — discover() finds however many
+  // beats the bound speakingTakeSlot actually contains (whisper once, one
+  // multimodal LLM call, cached in discovered.json across rebuilds), then
+  // expandFormat() turns that into an ordinary, fixed-block Format. A
+  // second intake() pass (formatOverride) is what actually clones the
+  // shared take into each new beat block's own videoSlot — see intake.ts's
+  // derivedFromTake, unchanged, just now running against N blocks instead
+  // of one. discoverResultToSplitTake is regenerated every time (cheap,
+  // deterministic) rather than persisted separately, so it can never drift
+  // from discovered.json even on a cache hit.
+  let format = baseFormat;
+  let intakeFilled = intakeFilled0;
+  if (hasRepeatBlock(baseFormat)) {
+    const discovered = readDiscovered(jobId) ?? (await discover(baseFormat, intakeFilled0));
+    writeArtifact(jobId, "discovered", discovered);
+    writeArtifact(jobId, "splitTake", discoverResultToSplitTake(baseFormat, discovered));
+    format = expandFormat(baseFormat, discovered.beats);
+    writeArtifact(jobId, "format", format);
+    intakeFilled = intake(jobDir, format);
+    writeArtifact(jobId, "filled", intakeFilled);
+  }
 
   // Fills any slot the format marks with a `generation` spec (an insert —
   // never a voice block's own spoken clip) before anything else runs, so
@@ -240,9 +319,15 @@ export const reassembleJob = async (jobDir: string, jobId: string): Promise<Edl>
   const readArtifact = (name: string) =>
     JSON.parse(fs.readFileSync(path.join(dir, `${name}.json`), "utf8"));
 
-  const intakeFilled = intake(jobDir); // cheap; picks up any binding/override edits made since build
+  // Loads whichever Format the original build actually ran against —
+  // the persisted EXPANDED format (artifacts/<job>/format.json) for a
+  // discovery-based job, the ordinary format file otherwise (see
+  // loadJobFormat) — since transcript/trim/roles on disk below were
+  // derived against that exact block list, not the format file's own
+  // `repeat` template.
+  const format = loadJobFormat(jobId, readJobFormatId(jobDir));
+  const intakeFilled = intake(jobDir, format); // cheap; picks up any binding/override edits made since build
   writeArtifact(jobId, "filled", intakeFilled);
-  const format = loadFormat(intakeFilled.formatId);
 
   // Fresh intake() has no generated bindings — restore them. Inputs are
   // unchanged (same identity photos/StyleProfile/shot/seed), so this is a
@@ -294,7 +379,8 @@ export const renderJob = (jobId: string): string => {
 
   const matteFile = path.join(dir, "matte.json");
   const matte: MatteArtifact | undefined = fs.existsSync(matteFile) ? JSON.parse(fs.readFileSync(matteFile, "utf8")) : undefined;
-  const gateResults = runGates(outPath, edl, matte);
+  const format = loadJobFormat(jobId, edl.formatId);
+  const gateResults = runGates(outPath, edl, matte, format);
   writeArtifact(jobId, "gates", gateResults);
   const failed = gateResults.filter((r) => r.pass === false);
   if (failed.length > 0) {

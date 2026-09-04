@@ -17,7 +17,9 @@ import { applyInserts, generate } from "./generate";
 import { GeneratorChoice } from "./generation";
 import { transcribe } from "./transcribe";
 import { deriveTranscriptAndTrimWithStandalone, takeIsBound } from "./splitTake";
-import { readSplit, runSplit } from "./orchestrate";
+import { readDiscovered, readSplit, runSplit } from "./orchestrate";
+import { discover, discoverResultToSplitTake, DiscoverResult } from "./discover";
+import { expandFormat, hasRepeatBlock } from "./expandFormat";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
 import { runMatte } from "./matte";
@@ -60,7 +62,7 @@ import { artifactsDir } from "./paths";
  * no-op that passes `filled` through unchanged.
  */
 
-const STAGES = ["intake", "generate", "transcribe", "trim", "matte", "composite", "roles", "assemble", "render"] as const;
+const STAGES = ["intake", "discover", "generate", "transcribe", "trim", "matte", "composite", "roles", "assemble", "render"] as const;
 type Stage = (typeof STAGES)[number];
 
 const parseArgs = (argv: string[]) => {
@@ -169,8 +171,47 @@ const main = async () => {
   // Each stage either runs or is rehydrated from its artifact on disk.
   let filled = wants("intake") ? intake(args.job) : read("filled", FilledFormatSchema);
   if (wants("intake")) write("filled", filled);
-  const format = loadFormat(filled.formatId);
+  let format = loadFormat(filled.formatId);
   if (stop("intake")) return;
+
+  // A `repeat`-block format (see BlockSchema's own doc comment) has no
+  // fixed block list yet — discover() finds however many beats the bound
+  // speakingTakeSlot actually contains, expandFormat() turns that into an
+  // ordinary fixed-block Format, and a second intake() pass clones the
+  // shared take into each new beat's own videoSlot — same three-step
+  // sequence as orchestrate.ts's buildJob, just re-stated here per this
+  // file's own top-of-file doc comment on why the CLI doesn't share that
+  // function. A format with no `repeat` block makes this whole block a
+  // no-op (format/filled pass through unchanged).
+  if (hasRepeatBlock(format)) {
+    const baseFormat = format;
+    let discovered: DiscoverResult;
+    if (wants("discover")) {
+      discovered = readDiscovered(jobId) ?? (await discover(baseFormat, filled));
+      write("discovered", discovered);
+    } else {
+      const cached = readDiscovered(jobId);
+      if (!cached) {
+        throw new Error(
+          `artifact "discovered" not found at ${artifactPath("discovered")} — run the earlier stages first (drop --only)`,
+        );
+      }
+      discovered = cached;
+    }
+    // Regenerated from discovered.json on EVERY invocation, cached or
+    // not (same as orchestrate.ts's buildJob) — it is a cheap
+    // deterministic projection of that file, so deriving it here rather
+    // than only on a fresh discover is what keeps a hand-edited
+    // discovered.json actually taking effect, instead of silently
+    // disagreeing with a stale splitTake.json.
+    write("splitTake", discoverResultToSplitTake(baseFormat, discovered));
+    format = expandFormat(baseFormat, discovered.beats);
+    write("format", format);
+    filled = intake(args.job, format);
+    write("filled", filled);
+    console.log(`  ✔ discover    → ${discovered.beats.length} beats found`);
+  }
+  if (stop("discover")) return;
 
   if (wants("generate")) {
     const result = await generate(format, filled, args.generator);
@@ -331,7 +372,7 @@ const main = async () => {
   const outPath = render(edl, dir);
   console.log(`\n✔ rendered ${path.relative(process.cwd(), outPath)} (${edl.durationSec.toFixed(2)}s, ${edl.width}x${edl.height}@${edl.fps}fps)`);
 
-  const gateResults = runGates(outPath, edl, matteArtifact);
+  const gateResults = runGates(outPath, edl, matteArtifact, format);
   write("gates", gateResults);
   const failed = gateResults.filter((r) => r.pass === false);
   console.log(`\nacceptance gates: ${gateResults.length - failed.length - gateResults.filter((r) => r.pass === null).length} passed, ${failed.length} failed`);

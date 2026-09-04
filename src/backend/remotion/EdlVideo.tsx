@@ -169,6 +169,12 @@ const Segment: React.FC<{
         // and doesn't go through this DOM element at all) is what actually
         // lets it exceed unity.
         useWebAudioApi={previewMode}
+        // A sped-up segment consumes its whole source span across a
+        // proportionally shorter timeline span — assemble.ts already
+        // divided tlOutSec-tlInSec by the same number, so startFrom/endAt
+        // stay in SOURCE frames and playbackRate is what reconciles the
+        // two. 1 for every ordinary segment.
+        playbackRate={seg.speed}
         startFrom={Math.round(seg.srcInSec * fps)}
         endAt={Math.round(seg.srcOutSec * fps)}
         style={{ width: "100%", height: "100%", objectFit: "cover" }}

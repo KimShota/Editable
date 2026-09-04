@@ -9,6 +9,7 @@ import {
   readJobScript,
 } from "../../../lib/jobs";
 import { loadFormat } from "@backend/pipeline/loader";
+import { formatHasScriptStep } from "../../../lib/wizardSteps";
 import { Container, PageHeader } from "../../../_components/ui";
 import { ResourcesBoard } from "./_components/ResourcesBoard";
 
@@ -33,7 +34,11 @@ export default async function ResourcesPage({ params }: { params: Promise<{ jobI
       <PageHeader
         kicker={format.name}
         title="Build your video"
-        subtitle="Three steps: write what appears on screen, add your clips and photos, then build. Frequently-used sounds and memes? Drag them straight from your Library on the right."
+        subtitle={
+          formatHasScriptStep(format)
+            ? "Three steps: write what appears on screen, add your clips and photos, then build. Frequently-used sounds and memes? Drag them straight from your Library on the right."
+            : "Two steps: add your footage, then review and build — this template writes what appears on screen itself, from the footage. Frequently-used sounds and memes? Drag them straight from your Library on the right."
+        }
       />
       <Suspense fallback={null}>
         <ResourcesBoard
