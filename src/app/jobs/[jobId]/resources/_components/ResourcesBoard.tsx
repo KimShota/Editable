@@ -6,7 +6,7 @@ import type { Edl, Format, Slot } from "@backend/pipeline/types";
 import type { HookFeedbackResult, ScriptSuggestion } from "@backend/content/types";
 import { Button, Card, Pill } from "../../../../_components/ui";
 import { slotLabel } from "../../../../lib/slotLabel";
-import { formatHasScriptStep } from "../../../../lib/wizardSteps";
+import { formatDiscoversItsOwnCuts, formatHasScriptStep } from "../../../../lib/wizardSteps";
 import { LibraryPanel } from "../../../../_components/library/LibraryPanel";
 import { Binding, SlotDropzone, bindText } from "./SlotDropzone";
 // import { ScriptPanel } from "./ScriptPanel"; // hidden for now
@@ -91,6 +91,9 @@ export function ResourcesBoard({
    *  template — see formatHasScriptStep) runs as a two-step wizard
    *  instead: upload the day's footage, review, build. */
   const hasScriptStep = useMemo(() => formatHasScriptStep(format), [format]);
+  /** See formatDiscoversItsOwnCuts — swaps step 3's hand-splitting panel
+   *  for an explanation of what the build will do instead. */
+  const discoversOwnCuts = useMemo(() => formatDiscoversItsOwnCuts(format), [format]);
   /** The steps this format actually shows, in order. Ids stay 1/2/3 so
    *  every `step === n` branch below keeps meaning the same screen; only
    *  the numbering the user sees, and what Back/Next move between, come
@@ -513,8 +516,12 @@ export function ResourcesBoard({
                 it's bound, matching cinematic-debut-manifesto's existing
                 "upload it in the previous step first" nudge. An OPTIONAL take
                 only shows once actually bound — no reason to nudge a
-                per-clip-only user toward a step that has nothing to do. */}
-            {takeSlot && (takeRequired || takeIsBound) && (
+                per-clip-only user toward a step that has nothing to do.
+                A discovery-based format shows neither: the split isn't the
+                user's to make here (see formatDiscoversItsOwnCuts), and
+                mounting the panel would kick off a full transcription of the
+                take to align it against a block list that doesn't exist yet. */}
+            {takeSlot && (takeRequired || takeIsBound) && !discoversOwnCuts && (
               <SplitLines
                 jobId={jobId}
                 format={format}
@@ -522,6 +529,25 @@ export function ResourcesBoard({
                 takeFile={speakingTakeFile}
                 takeBound={takeRequired || takeIsBound}
               />
+            )}
+
+            {discoversOwnCuts && (
+              <Card className="p-6">
+                <div className="mb-3 flex items-center gap-2">
+                  <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
+                    Cuts
+                  </h2>
+                  <Pill>found automatically</Pill>
+                </div>
+                <p className="text-sm text-[color:var(--ink-dim)]">
+                  This template finds its own cuts. When you build, it watches the footage you uploaded,
+                  picks the moments worth keeping, drops the retakes, and writes each cut&apos;s on-screen
+                  time and caption — so there&apos;s nothing to split by hand here.
+                </p>
+                <p className="mt-2 text-sm text-[color:var(--ink-dim)]">
+                  You can adjust every cut, and every line of text, in the editor afterwards.
+                </p>
+              </Card>
             )}
 
             {hookBlock && <HookFeedbackPanel jobId={jobId} initialFeedback={initialHookFeedback} />}

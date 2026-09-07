@@ -21,3 +21,19 @@ export const formatHasScriptStep = (format: Format): boolean =>
   format.blocks.some(
     (b) => !b.optional && (b.slots.some((s) => s.mediaType === "text") || (b.kind === "voice" && !b.repeat)),
   );
+
+/**
+ * Whether this format finds its own cuts at build time instead of aligning
+ * the take against a fixed block list.
+ *
+ * A `repeat` block means discover.ts does the splitting: it watches the
+ * footage, decides how many beats are in it, and writes splitTake.json
+ * itself (see discover.ts's discoverResultToSplitTake). The wizard's
+ * "Split your take into lines" panel is the OTHER path — splitTake.ts
+ * walking a known, hand-authored sequence of lines — and running it here
+ * would transcribe the whole take just to align it against the single
+ * unexpanded template block, producing one span covering the entire file,
+ * keyed to a blockId ("beat") that no longer exists once the format is
+ * expanded into beat-01..beat-NN.
+ */
+export const formatDiscoversItsOwnCuts = (format: Format): boolean => format.blocks.some((b) => b.repeat);
