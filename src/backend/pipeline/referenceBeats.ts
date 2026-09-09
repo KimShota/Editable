@@ -55,6 +55,38 @@ export const ReferenceBeatSchema = z.object({
    *  footage under a time-RANGE caption ("10:30〜11:30 eFootball練習する")
    *  rather than showing a slice of it at real speed. */
   speed: z.number().positive().default(1),
+  /** This beat is part of a fixed opening sequence that is filmed and cut
+   *  the same way in EVERY episode — not just "usually present" like an
+   *  ordinary `optional: false` beat, but literally the same shots in the
+   *  same order every time (e.g. this creator's wake-up → greeting →
+   *  product-catch → eat/drink routine). A pinned beat's running-order
+   *  position comes from its own `order` rather than where it happened to
+   *  sit in the source file (see discover.ts's sort), and it is exempt
+   *  from the too-short/lowest-importance drop passes — a beat that is
+   *  ALWAYS there should never be the one that gets cut for length. */
+  pinned: z.boolean().default(false),
+  /** Forces this beat's rendered clock-time overlay to a literal value
+   *  (or "" for no time shown at all — e.g. a reaction beat with no clock
+   *  in the reference episodes), rather than letting the model read one
+   *  off frame. Only meaningful when the value the beat carries genuinely
+   *  never varies — for anything the model reads correctly from footage
+   *  (a smart-speaker clock, an on-screen timer), leave this unset. */
+  fixedClockTime: z.string().optional(),
+  /** Forces this beat's caption text to a literal value, for a beat whose
+   *  spoken line is scripted and identical every episode (e.g. "起床",
+   *  "おいしー!"). Leave unset for a beat whose content genuinely varies
+   *  episode to episode (a product name, a place, a meal) — the model's
+   *  own caption, matched to this beat's captionExamples above, still
+   *  applies. */
+  fixedCaption: z.string().optional(),
+  /** Per-beat span budget (finished/timeline seconds, before `speed`),
+   *  overriding the format's own discovery.minBeatSec/maxBeatSec for just
+   *  this beat — for a beat measurably shorter or longer than the format
+   *  average every time (a half-second product catch; a two-second
+   *  greeting). Unset falls back to the format-wide bounds, same as
+   *  today. */
+  minSec: z.number().positive().optional(),
+  maxSec: z.number().positive().optional(),
   /**
    * Hand-cut EXAMPLES of this beat done right — the creator trimming the
    * moment themselves out of their own raw footage, checked in next to
@@ -91,6 +123,8 @@ export const ReferenceBeatSchema = z.object({
       }),
     )
     .default([]),
+}).refine((b) => b.minSec === undefined || b.maxSec === undefined || b.maxSec >= b.minSec, {
+  message: "maxSec must be >= minSec when both are set",
 });
 
 export const ReferenceBeatSheetSchema = z.object({
@@ -100,6 +134,12 @@ export const ReferenceBeatSheetSchema = z.object({
   sources: z.array(z.string()).default([]),
   /** Typical finished length across the reference videos, seconds. */
   typicalTotalSec: z.number().positive().optional(),
+  /** Free-text provenance note for a sheet that isn't (or isn't purely) a
+   *  `reference:beats` regeneration — e.g. a hand-authored `pinned` split
+   *  of an opening sequence that should NOT be overwritten by re-running
+   *  that tool. Read by nobody except a future human; discover.ts ignores
+   *  it. */
+  notes: z.string().optional(),
   beats: z.array(ReferenceBeatSchema).min(1),
 });
 

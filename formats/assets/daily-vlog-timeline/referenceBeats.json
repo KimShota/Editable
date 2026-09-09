@@ -5,9 +5,13 @@
     "サンプル動画２.mp4",
     "サンプル動画３.mp4",
     "サンプル動画４.mp4",
-    "サンプル動画５.mp4"
+    "サンプル動画５.mp4",
+    "サンプル動画６.mp4",
+    "サンプル動画７.mp4",
+    "サンプル動画８.mp4"
   ],
   "typicalTotalSec": 75,
+  "notes": "Beats 0-9 (hook through practice) were split and hand-tuned from the original 4-beat sheet using measured cut lengths across サンプル動画６/７/８ (the opening routine is identical, ~12-15s total, across all three) — see plan/daily-vlog-intro-fixed.md. They are marked \"pinned\": true so discover.ts orders them by this sheet's own `order` instead of source position, and never drops them for being short or low-importance. Re-running `npm run reference:beats` would overwrite this split with a fresh 4-ish-beat guess — regenerate beats 10-15 only, or re-apply the pinned split by hand afterwards.",
   "beats": [
     {
       "id": "hook",
@@ -19,12 +23,18 @@
         "ウイイレ日本2位\nインドネシア渡航まで2日\nプロゲーマーの日常",
         "ウイイレ日本2位\nメンテナンス日の\nプロゲーマーの日常",
         "ウイイレ日本2位\n負けず嫌いな\nプロゲーマーの日常",
-        "ウイイレ日本2位\n世界大会予選の\nプロゲーマーの日常"
+        "ウイイレ日本2位\n世界大会予選の\nプロゲーマーの日常",
+        "ウイイレ日本2位\n世界一目指す\nプロゲーマーの日常",
+        "ウイイレ日本2位\n1日トレーニングする\nプロゲーマーの日常",
+        "ウイイレ日本2位\neスポーツ講師を担当する\nプロゲーマーの日常"
       ],
       "typicalClockTime": "",
       "optional": false,
       "isTitleBeat": true,
       "speed": 1,
+      "pinned": true,
+      "minSec": 0.7,
+      "maxSec": 1.8,
       "exemplars": [
         {
           "clip": "exemplars/hook-1.mp4",
@@ -36,53 +46,206 @@
       ]
     },
     {
-      "id": "greeting",
+      "id": "wakeup",
       "order": 1,
-      "label": "起床・朝の挨拶",
-      "description": "Morning wake-up, filmed wide from across the room: bed, window and curtains in frame. He sits UP on the bed, turns to face the camera, and delivers the morning line ('おはようございます!今日も一日、元気にいきましょう!'), closing on a reaction to camera — usually a thumbs-up. The beat is that whole little arc: sitting up → facing camera → the closing gesture. Shots of him with his back to camera, making the bed, tidying, or walking around the bedroom are NOT this beat and are not used at all.",
+      "label": "起床（ベッドから起き上がる）",
+      "description": "One or two very quick shots, filmed wide from across the room with the bed, window and curtains in frame: him getting up off the bed / pulling back the blanket, and/or sitting up and reaching to open the curtain. This is ONLY the physical getting-up motion — it ends before he turns to face the camera and speaks. Do not include him talking to camera here; that is the next beat.",
       "captionExamples": [
-        "9:00\n起床",
-        "今日も\nGENKIにいきましょー!",
-        "8:01\n勝ち上がると\nRegional Final"
+        "9:00\n起床"
       ],
-      "typicalClockTime": "8:30",
+      "typicalClockTime": "9:00",
       "optional": false,
       "isTitleBeat": false,
       "speed": 1,
+      "pinned": true,
+      "fixedClockTime": "9:00",
+      "fixedCaption": "起床",
+      "minSec": 1.2,
+      "maxSec": 2.3,
       "exemplars": [
         {
-          "clip": "exemplars/greeting-1.mp4",
-          "durationSec": 4.3,
+          "clip": "exemplars/wakeup-1.mp4",
+          "durationSec": 0.97,
           "shotCount": 1,
-          "rule": "ベッドに起き上がってカメラを正面に見る所から、サムズアップ等のリアクションで締まる所まで、ひとまとまりで使う。布団を整える・部屋を歩き回る・背中を向けているカットは起床ビートではない。",
-          "sourceNote": "タイトルなし.mp4 の 65.30s〜69.60s を本人が手でトリムしたもの"
+          "rule": "布団を勢いよく放り投げて起き上がる瞬間。まだ寝ている/くるまっているカットは絶対に使わない。カメラの方を向き始める直前まで。",
+          "sourceNote": "ユーザー本人が「タイトルなし.mp4」から手編集した起きるシーンの冒頭部分"
+        },
+        {
+          "clip": "exemplars/wakeup-2.mp4",
+          "durationSec": 0.83,
+          "shotCount": 1,
+          "rule": "布団を勢いよく放り投げて起き上がる瞬間。まだ寝ている/くるまっているカットは絶対に使わない。カメラの方を向き始める直前まで。",
+          "sourceNote": "ユーザー本人が「タイトルなし(2).mp4」から手編集した起きるシーンの冒頭部分"
         }
       ]
     },
     {
-      "id": "breakfast",
+      "id": "morning-greeting",
       "order": 2,
-      "label": "朝食（完全栄養食シェイク）",
-      "description": "Rapid quick-cut sequence: holds a product bag up to his face (usually uFit完全栄養食), does a little 'シャカシャカダンス' shaking the shaker, then drinks ('ゴクゴクっ') and gives a thumbs-up 'おいしー!'. In one episode this is an oatmeal bowl instead (オートミール/チアシード/ハチミツ/ブルーベリー). Standing/seated against a plain wall.",
+      "label": "おはようございます（カメラに向かって挨拶）",
+      "description": "He is now sitting upright on the bed, facing the camera directly and close enough that his face and upper body fill the frame, saying 'おはようございます'. A short single line to camera — comes right after he gets up (previous beat) and right before the longer, more energetic 'GENKIにいきましょー' call (next beat). Do not include the getting-up motion or the longer follow-up line in this beat.",
       "captionExamples": [
-        "9:02\nuFit完全栄養食\n（ココア味）",
-        "シャカシャカ\nダンス",
-        "ゴクゴクっ",
-        "おいしー!",
-        "8:30\nufit完全栄養食\n（ほうじ茶味）",
-        "11:45\nオートミール"
+        "9:01\nおはようございます"
       ],
-      "typicalClockTime": "8:30",
+      "typicalClockTime": "9:01",
       "optional": false,
       "isTitleBeat": false,
       "speed": 1,
+      "pinned": true,
+      "fixedClockTime": "9:01",
+      "fixedCaption": "おはようございます",
+      "minSec": 0.8,
+      "maxSec": 1.6,
+      "exemplars": [
+        {
+          "clip": "exemplars/morning-greeting-1.mp4",
+          "durationSec": 1.33,
+          "shotCount": 1,
+          "rule": "起き上がってすぐ、カメラに正面から向き直って『おはようございます』と話しかけている部分。サムズアップ等のリアクションが始まる前まで。"
+        },
+        {
+          "clip": "exemplars/morning-greeting-2.mp4",
+          "durationSec": 1.5,
+          "shotCount": 2,
+          "rule": "起き上がってすぐ、カメラに正面から向き直って『おはようございます』と話しかけている部分。サムズアップ等のリアクションが始まる前まで。"
+        }
+      ]
+    },
+    {
+      "id": "genki-call",
+      "order": 3,
+      "label": "今日も1日GENKIにいきましょー！（呼びかけ）",
+      "description": "Same to-camera moment continuing right after the greeting, but the longer, higher-energy follow-up line — '今日も1日GENKIにいきましょー!' — often with a bigger gesture or expression. Closes out the bedroom segment before he moves on to breakfast. No clock time is shown on this caption in the reference episodes — just the two-line call itself.",
+      "captionExamples": [
+        "今日も\nGENKIにいきましょー!",
+        "今日も1日\nGENKIにいきましょー!"
+      ],
+      "typicalClockTime": "",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "pinned": true,
+      "fixedClockTime": "",
+      "fixedCaption": "今日も1日\nGENKIにいきましょー!",
+      "minSec": 1.8,
+      "maxSec": 2.8,
+      "exemplars": [
+        {
+          "clip": "exemplars/genki-call-1.mp4",
+          "durationSec": 2.1,
+          "shotCount": 1,
+          "rule": "『今日も1日GENKIにいきましょー!』のエネルギッシュな呼びかけと、それに続くリアクションジェスチャーで終わる部分。"
+        },
+        {
+          "clip": "exemplars/genki-call-2.mp4",
+          "durationSec": 2.1,
+          "shotCount": 1,
+          "rule": "『今日も1日GENKIにいきましょー!』のエネルギッシュな呼びかけと、それに続くリアクションジェスチャーで終わる部分。"
+        }
+      ]
+    },
+    {
+      "id": "product-catch",
+      "order": 4,
+      "label": "uFit完全栄養食を受け取る（袋キャッチ）",
+      "description": "A very quick cut, standing against a plain wall: the product bag appears to drop into frame from above and he catches it with both hands, immediately holding it up facing the camera so the product name and flavor printed on the bag are readable. This is only the catch-and-reveal instant — extremely short, not the whole breakfast sequence. Read the ACTUAL product name and flavor visible on the bag in today's footage for the caption (it changes every episode) rather than copying an example verbatim.",
+      "captionExamples": [
+        "9:03\nuFit完全栄養食\n（黒糖きな粉味）",
+        "9:02\nuFit完全栄養食\n（ココア味）",
+        "9:01\nuFit完全栄養食\n（ほうじ茶味）",
+        "8:30\nufit完全栄養食\n（ほうじ茶味）"
+      ],
+      "typicalClockTime": "9:03",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "pinned": true,
+      "fixedClockTime": "9:03",
+      "minSec": 0.4,
+      "maxSec": 1.1,
+      "exemplars": []
+    },
+    {
+      "id": "shake-dance",
+      "order": 5,
+      "label": "シャカシャカダンス",
+      "description": "He shakes the shaker bottle/bag rhythmically in front of himself, a little dance-like motion, still facing camera, still standing against the plain wall. Comes right after catching the product and right before he actually eats/drinks it. Caption is always 'シャカシャカ\\nダンス' — never a flavor or product name.",
+      "captionExamples": [
+        "シャカシャカ\nダンス"
+      ],
+      "typicalClockTime": "9:03",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "pinned": true,
+      "fixedClockTime": "9:03",
+      "fixedCaption": "シャカシャカ\nダンス",
+      "minSec": 0.8,
+      "maxSec": 1.5,
+      "exemplars": []
+    },
+    {
+      "id": "itadakimasu",
+      "order": 6,
+      "label": "いただきます",
+      "description": "He brings the mug/bowl up toward his mouth and says 'いただきます' right before the first sip or bite, still facing camera. A short to-camera line — distinct from the actual swallowing/eating motion, which is the next beat.",
+      "captionExamples": [
+        "9:03\nいただきます"
+      ],
+      "typicalClockTime": "9:03",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "pinned": true,
+      "fixedClockTime": "9:03",
+      "fixedCaption": "いただきます",
+      "minSec": 1.2,
+      "maxSec": 2.4,
+      "exemplars": []
+    },
+    {
+      "id": "gulp",
+      "order": 7,
+      "label": "ゴクゴクっ（実際に飲む）",
+      "description": "The actual drinking motion — mug tilted up, visibly swallowing. Extremely short, often under a second: use only the swallow itself, not the lead-up of raising the mug to his mouth (that lead-up is the previous いただきます beat).",
+      "captionExamples": [
+        "9:04\nゴクゴクっ"
+      ],
+      "typicalClockTime": "9:04",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "pinned": true,
+      "fixedClockTime": "9:04",
+      "fixedCaption": "ゴクゴクっ",
+      "minSec": 0.35,
+      "maxSec": 1.1,
+      "exemplars": []
+    },
+    {
+      "id": "oishii",
+      "order": 8,
+      "label": "おいしー！（サムズアップ）",
+      "description": "Immediately after drinking, a short reaction shot to camera — big smile and/or thumbs-up, saying 'おいしー!'. No clock time is shown in the reference episodes on this beat; the exclamation caption stands alone.",
+      "captionExamples": [
+        "おいしー!"
+      ],
+      "typicalClockTime": "",
+      "optional": false,
+      "isTitleBeat": false,
+      "speed": 1,
+      "pinned": true,
+      "fixedClockTime": "",
+      "fixedCaption": "おいしー!",
+      "minSec": 0.5,
+      "maxSec": 1.1,
       "exemplars": []
     },
     {
       "id": "practice",
-      "order": 3,
+      "order": 9,
       "label": "eFootball練習",
-      "description": "The long daily eFootball practice session: he sits at his desk or in his chair with a controller, playing, often with a smart-speaker clock visible. This beat is a TIMELAPSE — in the finished edit it is a couple of seconds of heavily sped-up footage, not a real-time slice, because the point is that it went on for an hour. So pick a LONG continuous stretch of him actually playing (tens of seconds), not a short representative moment, and caption it with the time RANGE it covered (e.g. '10:30〜11:30') rather than a single instant.",
+      "description": "The long daily eFootball practice session: he sits at his desk or in his chair with a controller, playing, often with a smart-speaker clock visible. This beat is a TIMELAPSE — in the finished edit it is a couple of seconds of heavily sped-up footage, not a real-time slice, because the point is that it went on for an hour. So pick a LONG continuous stretch of him actually playing (tens of seconds), not a short representative moment, and caption it with the time RANGE it covered (e.g. '10:30〜11:30') rather than a single instant. Always follows directly after breakfast (おいしー!) in the running order.",
       "captionExamples": [
         "10:30〜11:30\neFootball 練習する",
         "9:30〜10:30\neFootball練習する",
@@ -95,11 +258,12 @@
       "optional": false,
       "isTitleBeat": false,
       "speed": 8,
+      "pinned": true,
       "exemplars": []
     },
     {
       "id": "outing",
-      "order": 4,
+      "order": 10,
       "label": "日中の外出・活動",
       "description": "The day's variable main activity, usually out of the house: walking (POV of feet/streets), station/townscape B-roll, a sponsor or business meeting, a cafe meeting, meeting viewers, or a haircut. Time-of-day captions in the 11:00–18:00 range with a short label of the activity.",
       "captionExamples": [
@@ -115,6 +279,7 @@
       "optional": false,
       "isTitleBeat": false,
       "speed": 1,
+      "pinned": false,
       "exemplars": [
         {
           "clip": "exemplars/outing-1.mp4",
@@ -134,7 +299,7 @@
     },
     {
       "id": "meal",
-      "order": 5,
+      "order": 11,
       "label": "食事（昼〜夕）",
       "description": "A meal. The cut that is actually used is him EATING — chopsticks going to his mouth, a mouthful, slurping noodles — usually ending on the reaction ('おいしー!' / a thumbs-up). The lead-in where he is holding the bowl and TALKING about the food, before anything is eaten, is not this beat: if a shot contains both, start the cut at the first bite, not at the talking. A close-up of the food itself can precede it as its own quick cut.",
       "captionExamples": [
@@ -149,11 +314,12 @@
       "optional": true,
       "isTitleBeat": false,
       "speed": 1,
+      "pinned": false,
       "exemplars": []
     },
     {
       "id": "bath",
-      "order": 6,
+      "order": 12,
       "label": "お風呂",
       "description": "Close-up of the beige Rinnai water-heater control panel on the wall, a finger pressing the up/down button to set the bath temperature, with a spoken 'お風呂入ります'. Caption reads お風呂入ります / お風呂タイム with an evening time.",
       "captionExamples": [
@@ -167,11 +333,12 @@
       "optional": false,
       "isTitleBeat": false,
       "speed": 1,
+      "pinned": false,
       "exemplars": []
     },
     {
       "id": "dinner",
-      "order": 7,
+      "order": 13,
       "label": "夜食（麺類）",
       "description": "Night meal: overhead shot of noodles boiling in a pot, then a slurping/eating reaction to camera. Usually soba or udon with 'いただきます!/フーフー/おいしい!'.",
       "captionExamples": [
@@ -186,11 +353,12 @@
       "optional": true,
       "isTitleBeat": false,
       "speed": 1,
+      "pinned": false,
       "exemplars": []
     },
     {
       "id": "stream",
-      "order": 8,
+      "order": 14,
       "label": "ライブ配信",
       "description": "Night live-stream segment: seen from behind facing a ring light + monitors with the stream/chat on screen, controller in hand, or a to-camera clip announcing 'ライブ配信やっていきます!' / 'ライブ配信終わりましたー!'. Answers viewer questions / plays.",
       "captionExamples": [
@@ -205,11 +373,12 @@
       "optional": false,
       "isTitleBeat": false,
       "speed": 1,
+      "pinned": false,
       "exemplars": []
     },
     {
       "id": "signoff",
-      "order": 9,
+      "order": 15,
       "label": "締めの挨拶",
       "description": "Closing to camera, either seated on the couch/bed or a dim ceiling/bed shot, delivering the sign-off '今日も皆さんお疲れ様でした!明日もGENKIにいきましょー!'. Signature 'GENKI' caption, no time stamp.",
       "captionExamples": [
@@ -221,6 +390,7 @@
       "optional": false,
       "isTitleBeat": false,
       "speed": 1,
+      "pinned": false,
       "exemplars": []
     }
   ]

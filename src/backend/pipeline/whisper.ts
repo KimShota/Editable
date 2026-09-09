@@ -96,9 +96,18 @@ export const transcribeFile = (clipAbsPath: string, workDir: string, language: s
   const outPrefix = path.join(workDir, path.basename(clipAbsPath));
   // -ml 1: one TOKEN per segment (not `-sow`'s "one word" — see
   // mergeTokensIntoWords for why that heuristic doesn't work for Japanese).
+  // -mc 0 (max-context 0): stops the decoder from conditioning on its own
+  // previous output. Without it, a stretch of near-silence/room-tone
+  // (a phone left recording while nobody is speaking — common in a
+  // day-long take) can make the model latch onto a phrase and repeat it
+  // verbatim for the rest of that quiet stretch, sometimes for a full
+  // minute, silently destroying every real word timestamp after it.
+  // Verified directly against this pipeline's own footage: identical
+  // audio produced an endless "チョコレートの上に..." loop without -mc 0
+  // and the correct real speech with it.
   execFileSync(
     "whisper-cli",
-    ["-m", MODEL_FILE, "-f", wav, "-oj", "-ml", "1", "-l", language, "-of", outPrefix],
+    ["-m", MODEL_FILE, "-f", wav, "-oj", "-ml", "1", "-mc", "0", "-l", language, "-of", outPrefix],
     { stdio: "ignore" },
   );
 

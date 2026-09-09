@@ -27,3 +27,6 @@ jobs/*
 !jobs/five-codes
 !jobs/five-codes-demo
 /library
+
+# plan folder not included in the repo
+plan

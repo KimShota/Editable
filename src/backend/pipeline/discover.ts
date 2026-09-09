@@ -110,6 +110,22 @@ const EXEMPLAR_FRAMES = 3;
  *  retrying it just spends the same money twice. */
 const MAX_ATTEMPTS = 3;
 const DEFAULT_MODEL = "claude-opus-4-8";
+/** $/1M tokens, first-party API rates — thinking tokens bill as OUTPUT
+ *  tokens (no separate rate), so `output` already covers them. Cache
+ *  columns matter here because the hand-cut exemplar frames (referenceBeats.ts)
+ *  are identical across every job for a given format and sit first in the
+ *  prompt, so they're exactly the kind of stable prefix caching is for —
+ *  see the cost note on `discover`'s own doc comment. Keyed by the exact
+ *  model id; an id not listed here (a future model, a typo in
+ *  EDITABLE_LLM_MODEL) just skips the cost line rather than guessing. */
+const MODEL_PRICING_PER_MTOK: Record<string, { input: number; output: number; cacheWrite: number; cacheRead: number }> = {
+  "claude-opus-4-8": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+  "claude-opus-4-7": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+  "claude-opus-5": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+  "claude-sonnet-5": { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.2 },
+  "claude-sonnet-4-6": { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
+  "claude-haiku-4-5": { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 },
+};
 /** Generous because it is a CEILING, not a spend: only tokens actually
  *  generated are billed. A judgment for every one of up to
  *  CANDIDATE_SHOT_CAP shots, plus the adaptive thinking that a
@@ -121,6 +137,24 @@ const MAX_TOKENS = 64000;
 
 export const DISCOVER_PIPELINE_VERSION = "1";
 
+/** What the one Anthropic call inside `discover` actually cost — logged to
+ *  the console at call time and persisted here so a job's real spend stays
+ *  inspectable after the fact (`artifacts/<job>/discovered.json`) without
+ *  digging through Console usage reports. Absent when discover() was
+ *  skipped entirely (an existing discovered.json was reused — see
+ *  run.ts/orchestrate.ts's `readDiscovered() ??` pattern). `costUsd` is
+ *  omitted when the model id isn't in MODEL_PRICING_PER_MTOK (an unknown
+ *  EDITABLE_LLM_MODEL override) — the token counts are still exact even
+ *  when the price isn't known. */
+export type DiscoverUsage = {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+  costUsd?: number;
+};
+
 export type DiscoverResult = {
   pipelineVersion: string;
   /** Whole-take words, take-relative seconds — carried through unchanged
@@ -129,6 +163,7 @@ export type DiscoverResult = {
   words: Word[];
   durationSec: number;
   beats: DiscoverBeat[];
+  usage?: DiscoverUsage;
 };
 
 type Shot = {
@@ -269,10 +304,21 @@ const formatBeatSheet = (sheet: ReferenceBeatSheet): string =>
   sheet.beats
     .map((b) => {
       const bits = [
-        `- id "${b.id}" (position ${b.order}${b.isTitleBeat ? ", THE COLD OPEN — carries the title card" : ""}${b.optional ? ", optional" : ", appears in every episode"})`,
+        `- id "${b.id}" (position ${b.order}${b.isTitleBeat ? ", THE COLD OPEN — carries the title card" : ""}${b.optional ? ", optional" : ", appears in every episode"}${b.pinned ? ", FIXED OPENING SEQUENCE — same shot, same order, every episode" : ""})`,
         `  ${b.label}: ${b.description}`,
       ];
+      if (b.pinned) {
+        bits.push(
+          `  This beat is part of the fixed opening this creator films identically every time. Your only job for it is to find WHICH shot it is — its running-order position and (if listed below) its clockTime/caption text are fixed by config and NOT taken from what you write.`,
+        );
+      }
       if (b.typicalClockTime) bits.push(`  usual time: ${b.typicalClockTime}`);
+      if (b.fixedClockTime !== undefined) {
+        bits.push(`  clockTime is FIXED at ${JSON.stringify(b.fixedClockTime)} — whatever you write for this shot's clockTime is ignored.`);
+      }
+      if (b.fixedCaption !== undefined) {
+        bits.push(`  caption is FIXED at ${JSON.stringify(b.fixedCaption)} — whatever you write for this shot's caption is ignored.`);
+      }
       if (b.captionExamples.length > 0) {
         bits.push(`  captions used on this beat: ${b.captionExamples.map((c) => JSON.stringify(c)).join(" / ")}`);
       }
@@ -398,6 +444,19 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
    *  the END of the cut regardless of what its clock says (the reference
    *  episodes close on it after the day is over). */
   const signoffBeatId = sheet && sheet.beats.length > 0 ? sheet.beats[sheet.beats.length - 1].id : undefined;
+  /** Beats that are part of a fixed opening sequence — same shots, same
+   *  order, every episode (see referenceBeats.ts's own doc on `pinned`).
+   *  Ordered by the sheet's `order` rather than where they land in the
+   *  file, and exempt from the too-short/lowest-importance drop passes. */
+  const pinnedIds = new Set((sheet?.beats ?? []).filter((b) => b.pinned).map((b) => b.id));
+  const fixedClockById = new Map(
+    (sheet?.beats ?? []).flatMap((b) => (b.fixedClockTime !== undefined ? [[b.id, b.fixedClockTime] as const] : [])),
+  );
+  const fixedCaptionById = new Map(
+    (sheet?.beats ?? []).flatMap((b) => (b.fixedCaption !== undefined ? [[b.id, b.fixedCaption] as const] : [])),
+  );
+  const minSecById = new Map((sheet?.beats ?? []).flatMap((b) => (b.minSec !== undefined ? [[b.id, b.minSec] as const] : [])));
+  const maxSecById = new Map((sheet?.beats ?? []).flatMap((b) => (b.maxSec !== undefined ? [[b.id, b.maxSec] as const] : [])));
 
   requireWhisperModel();
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-discover-"));
@@ -513,6 +572,33 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
     if (!response.parsed_output) {
       throw new Error("discover: model response did not match the expected schema");
     }
+
+    const usage: DiscoverUsage = {
+      model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cacheCreationInputTokens: response.usage.cache_creation_input_tokens ?? 0,
+      cacheReadInputTokens: response.usage.cache_read_input_tokens ?? 0,
+    };
+    const pricing = MODEL_PRICING_PER_MTOK[model];
+    if (pricing) {
+      usage.costUsd =
+        (usage.inputTokens * pricing.input +
+          usage.outputTokens * pricing.output +
+          usage.cacheCreationInputTokens * pricing.cacheWrite +
+          usage.cacheReadInputTokens * pricing.cacheRead) /
+        1_000_000;
+    }
+    const fmt = (n: number) => n.toLocaleString("en-US");
+    console.log(
+      `discover: usage (${model}) — input ${fmt(usage.inputTokens)}` +
+        (usage.cacheCreationInputTokens || usage.cacheReadInputTokens
+          ? ` (+ ${fmt(usage.cacheCreationInputTokens)} cache write, ${fmt(usage.cacheReadInputTokens)} cache read)`
+          : "") +
+        `, output ${fmt(usage.outputTokens)} (incl. thinking)` +
+        (usage.costUsd !== undefined ? ` → $${usage.costUsd.toFixed(3)}` : " → cost unknown for this model"),
+    );
+
     const llm = response.parsed_output;
     const judgmentByShot = new Map(llm.shots.map((s) => [s.shotIndex, s]));
 
@@ -539,6 +625,19 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
        *  budget below is in TIMELINE seconds, so this beat gets to
        *  consume `speed` times as much SOURCE to fill the same space. */
       speed: number;
+      /** True when this shot matched a `pinned` beat — see referenceBeats.ts. */
+      pinned: boolean;
+      /** Per-beat span override (see referenceBeats.ts's minSec/maxSec),
+       *  undefined when this beat uses the format-wide discovery bounds. */
+      minSec?: number;
+      maxSec?: number;
+      /** True when this beat's clockTime came from a `fixedClockTime`
+       *  config value (referenceBeats.ts) — including "" for "this beat
+       *  intentionally shows no clock". Distinguishes that from the model
+       *  simply leaving clockTime blank, which the fill-forward pass below
+       *  DOES inherit forward — an explicitly empty fixed clock must not
+       *  be overwritten by whatever time preceded it. */
+      clockIsFixed: boolean;
     };
     const candidates: Candidate[] = [];
     shots.forEach((shot, i) => {
@@ -565,18 +664,26 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
       const isTitleShot = j.referenceBeatId !== undefined && titleBeatId === j.referenceBeatId;
       const exemplarSec = j.referenceBeatId ? exemplarSecById.get(j.referenceBeatId) : undefined;
       const speed = (j.referenceBeatId ? speedById.get(j.referenceBeatId) : undefined) ?? 1;
+      const pinned = j.referenceBeatId ? pinnedIds.has(j.referenceBeatId) : false;
+      const fixedClock = j.referenceBeatId ? fixedClockById.get(j.referenceBeatId) : undefined;
+      const fixedCaption = j.referenceBeatId ? fixedCaptionById.get(j.referenceBeatId) : undefined;
       if (j.referenceBeatId && refOrder === undefined) {
         console.warn(`discover: shot ${i} claims unknown reference beat "${j.referenceBeatId}" — keeping it in source order`);
       }
       candidates.push({
         shot,
         words: picked,
-        clockTime: j.clockTime,
+        // A pinned beat with a fixedClockTime never varies episode to
+        // episode — trust the config over the model's own read of the
+        // frame (see referenceBeats.ts's own doc comment on the field).
+        clockTime: fixedClock !== undefined ? fixedClock : j.clockTime,
         // The title beat renders the title card alone (the reference
         // episodes put no caption under it), and no caption anywhere
         // repeats the clock — that is a separate overlay, so a model-
         // written "10:00\n起床" would print the time twice on screen.
-        caption: isTitleShot ? "" : stripLeadingClock(j.caption),
+        // A fixedCaption beat's line is scripted and identical every
+        // episode, so it also skips the model's own wording.
+        caption: isTitleShot ? "" : fixedCaption !== undefined ? fixedCaption : stripLeadingClock(j.caption),
         retakeGroupId: j.retakeGroupId,
         best: j.best,
         mergeWithPrevious: j.mergeWithPrevious,
@@ -586,6 +693,10 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
         isSignoff: j.referenceBeatId !== undefined && signoffBeatId === j.referenceBeatId,
         exemplarSec,
         speed,
+        pinned,
+        minSec: j.referenceBeatId ? minSecById.get(j.referenceBeatId) : undefined,
+        maxSec: j.referenceBeatId ? maxSecById.get(j.referenceBeatId) : undefined,
+        clockIsFixed: fixedClock !== undefined,
       });
     });
 
@@ -611,17 +722,22 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
 
     const computeSpan = (c: Candidate): { srcInSec: number; srcOutSec: number; confidence: number } => {
       const { shot, words: picked } = c;
+      // A beat's own minSec/maxSec (referenceBeats.ts) — measured on THIS
+      // exact beat — overrides the format-wide average when the sheet sets
+      // one; otherwise fall back to discovery's bounds, same as before.
+      const baseMinSec = c.minSec ?? discovery.minBeatSec;
+      const baseMaxSec = c.maxSec ?? discovery.maxBeatSec;
       // A beat the creator hand-cut has a measured length of its own;
       // trust that over the format-wide average, with a little headroom
       // so the cut isn't clipped exactly at the exemplar's frame count.
-      const maxTimelineSec = c.exemplarSec ? Math.max(discovery.maxBeatSec, c.exemplarSec * 1.2) : discovery.maxBeatSec;
+      const maxTimelineSec = c.exemplarSec ? Math.max(baseMaxSec, c.exemplarSec * 1.2) : baseMaxSec;
       // Every budget in `discovery` is stated in FINISHED (timeline)
       // seconds. A timelapse beat plays `speed`x faster, so it may eat
       // `speed` times as many SOURCE seconds to occupy the same slot —
       // which is the whole point: an hour of practice becomes three
       // seconds on screen.
       const maxSec = maxTimelineSec * c.speed;
-      const minSec = discovery.minBeatSec * c.speed;
+      const minSec = baseMinSec * c.speed;
       // A timelapse beat needs tens of seconds of continuous footage —
       // far more than one window holds — so it is bounded by the whole
       // scene-detected take the window was cut from. Everything else
@@ -650,7 +766,7 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
       // window on the shot's own midpoint, never wider than the shot
       // itself. Lower confidence: a positional guess, not a real match.
       const shotDur = highSec - lowSec;
-      const targetDur = Math.min(shotDur, (c.exemplarSec ?? (discovery.minBeatSec + discovery.maxBeatSec) / 2) * c.speed);
+      const targetDur = Math.min(shotDur, (c.exemplarSec ?? (baseMinSec + baseMaxSec) / 2) * c.speed);
       const mid = (shot.startSec + shot.endSec) / 2;
       const start = Math.max(lowSec, mid - targetDur / 2);
       const end = Math.min(highSec, start + targetDur);
@@ -671,6 +787,13 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
        *  that make up e.g. "breakfast" still play in the order they were
        *  actually filmed. */
       sourceStartSec: number;
+      /** See Candidate's own `pinned` — carried through so the sort,
+       *  too-short, and lowest-importance passes below can all treat a
+       *  fixed-opening beat differently from a discovered one. */
+      pinned: boolean;
+      minSec?: number;
+      /** See Candidate's own `clockIsFixed`. */
+      clockIsFixed: boolean;
     };
     const beats: Beat[] = [];
     for (const c of survivors) {
@@ -695,22 +818,39 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
         isSignoff: c.isSignoff,
         speed: c.speed,
         sourceStartSec: span.srcInSec,
+        pinned: c.pinned,
+        minSec: c.minSec,
+        clockIsFixed: c.clockIsFixed,
       });
     }
 
     // The running order is the SOURCE order — the day's clips are handed
     // over already in the order they were filmed, which makes filming
     // order the one piece of chronology in this pipeline that is known
-    // rather than inferred. Only two beats move: the cold open (pulled
-    // from anywhere in the day, always first) and the sign-off (always
-    // last), exactly the two exceptions the reference episodes make.
-    // Deliberately NOT sorted by the model's own clockTime: those are
-    // placeholders for the user to correct afterwards, so ordering by
-    // them would let a bad guess reorder footage that was already right.
+    // rather than inferred. Only three things move: the cold open (pulled
+    // from anywhere in the day, always first), the sign-off (always
+    // last), and a `pinned` beat — a fixed opening sequence filmed and
+    // cut the same way every episode, which sorts by the beat sheet's own
+    // `order` instead of wherever it happened to sit in today's file (its
+    // position IS the fact, not a guess about one). Deliberately NOT
+    // sorted by the model's own clockTime: those are placeholders for the
+    // user to correct afterwards, so ordering by them would let a bad
+    // guess reorder footage that was already right.
     if (sheet) {
       const TITLE_KEY = Number.NEGATIVE_INFINITY;
       const SIGNOFF_KEY = Number.POSITIVE_INFINITY;
-      const sortKey = (b: Beat) => (b.isTitle ? TITLE_KEY : b.isSignoff ? SIGNOFF_KEY : b.sourceStartSec);
+      // Pinned beats' refOrder values are small integers (the sheet's own
+      // `order`, e.g. 1-9) — offsetting every unpinned beat's
+      // sourceStartSec above that range keeps the pinned intro sorted
+      // first as a block, in its own fixed order, with everything else
+      // following in source order exactly as before.
+      const UNPINNED_OFFSET = 1_000_000;
+      const sortKey = (b: Beat) => {
+        if (b.isTitle) return TITLE_KEY;
+        if (b.isSignoff) return SIGNOFF_KEY;
+        if (b.pinned && b.refOrder !== undefined) return b.refOrder;
+        return UNPINNED_OFFSET + b.sourceStartSec;
+      };
       beats.sort((a, b) => sortKey(a) - sortKey(b) || a.sourceStartSec - b.sourceStartSec);
     }
 
@@ -734,12 +874,16 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
       beat.segments = coalesced;
     }
 
-    // A beat that ended up under the format's own minimum isn't a beat —
-    // it's a scene-detect fragment that survived selection (a half-second
-    // of a desk, a single frame of a pan). Dropped rather than rendered
-    // as a blink-and-miss cut with a caption on it.
+    // A beat that ended up under its own minimum isn't a beat — it's a
+    // scene-detect fragment that survived selection (a half-second of a
+    // desk, a single frame of a pan). Dropped rather than rendered as a
+    // blink-and-miss cut with a caption on it. A `pinned` beat is exempt:
+    // it is ALWAYS there in the reference episodes (that's what pinned
+    // means), so a short one is the format's own measured length, not a
+    // fragment — and computeSpan already grew it up to its own minSec
+    // floor besides.
     const tooShort = beats.filter(
-      (b) => b.segments.reduce((sum, s) => sum + (s.srcOutSec - s.srcInSec), 0) / b.speed < discovery.minBeatSec,
+      (b) => !b.pinned && b.segments.reduce((sum, s) => sum + (s.srcOutSec - s.srcInSec), 0) / b.speed < (b.minSec ?? discovery.minBeatSec),
     );
     for (const b of tooShort) {
       const idx = beats.indexOf(b);
@@ -750,12 +894,18 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
      *  playback rate, which is what the format's targetTotalSec budget is
      *  actually denominated in. */
     const beatDurationSec = (b: Beat) => b.segments.reduce((sum, s) => sum + (s.srcOutSec - s.srcInSec), 0) / b.speed;
+    // A `pinned` beat is never the one sacrificed for length or count — it
+    // is part of the fixed opening every episode has, not discretionary
+    // content competing on importance. Skipped when picking the lowest;
+    // if every remaining beat is pinned, stop rather than loop forever.
     const dropLowestImportanceUntil = (done: () => boolean) => {
       while (!done() && beats.length > discovery.minBeats) {
-        let lowestIdx = 0;
-        for (let i = 1; i < beats.length; i++) {
-          if (beats[i].importance < beats[lowestIdx].importance) lowestIdx = i;
+        let lowestIdx = -1;
+        for (let i = 0; i < beats.length; i++) {
+          if (beats[i].pinned) continue;
+          if (lowestIdx === -1 || beats[i].importance < beats[lowestIdx].importance) lowestIdx = i;
         }
+        if (lowestIdx === -1) break;
         beats.splice(lowestIdx, 1);
       }
     };
@@ -774,6 +924,12 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
         beat.clockTime = "";
         continue;
       }
+      // A beat with an explicit fixedClockTime (referenceBeats.ts) — even
+      // "" — already carries its final, intentional value. Left to the
+      // generic rule below, an intentionally blank one (a reaction shot
+      // like おいしー! that shows no clock in the reference episodes)
+      // would get silently overwritten by whatever time preceded it.
+      if (beat.clockIsFixed) continue;
       const parsed = beat.clockTime ? parseClockMinutes(beat.clockTime) : null;
       if (parsed !== null) {
         // Kept verbatim, even when it reads earlier than the beat before
@@ -795,7 +951,7 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
       speed: b.speed,
     }));
 
-    return { pipelineVersion: DISCOVER_PIPELINE_VERSION, words, durationSec, beats: discoverBeats };
+    return { pipelineVersion: DISCOVER_PIPELINE_VERSION, words, durationSec, beats: discoverBeats, usage };
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
