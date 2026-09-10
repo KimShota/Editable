@@ -90,7 +90,15 @@ const FRAME_WIDTH = 480;
  *  SCENE_THRESHOLD above, a spoken line routinely gets split by a stray
  *  boundary, and dropping the fragment (or keeping it as its own shot)
  *  is what turns "おはようございます、今日も一日元気にいきましょう" into a
- *  half-second stub. */
+ *  half-second stub. This is a DEFAULT ceiling, not a floor a format can't
+ *  go under: a format whose own discovery.minBeatSec sits below this (a
+ *  deliberate fast-cut montage format, where a real cut can legitimately
+ *  run well under a second — see that field's own doc comment) uses the
+ *  smaller of the two, so real sub-second cuts survive as their own
+ *  candidate shots instead of being merged away before the model — the
+ *  LLM below and the too-short-beat drop pass afterwards are what decide
+ *  whether a short shot is a real moment or noise; this constant should
+ *  never make that call for them by merging the evidence away first. */
 const MIN_SHOT_SEC = 1.0;
 /** Padding kept around the words the model actually pointed at when
  *  snapping a picked span — same convention as splitTake.ts's own
@@ -217,6 +225,15 @@ const ShotJudgmentSchema = z.object({
    *  for a shot with no speech to anchor on. */
   startLineIndex: z.number().int().min(0).optional(),
   endLineIndex: z.number().int().min(0).optional(),
+  /** True for a shot that is a genuine EXTENDED scene worth keeping in
+   *  full — an unscripted conversation, a closing monologue — rather than
+   *  an ordinary highlight cut. Distinct from a sheet's own per-beat
+   *  `longTake` (referenceBeats.ts), which only covers a KNOWN, named
+   *  beat; this field lets the model mark a long moment it found on its
+   *  own, with no referenceBeatId at all, so computeSpan can skip the
+   *  usual max-length trim for it too. Sets a real editorial bar, not a
+   *  loophole: false for anything that would read as padding. */
+  longTake: z.boolean().default(false),
   clockTime: z.string().optional(),
   caption: z.string().default(""),
   importance: z.number().min(0).max(1).default(0.5),
@@ -327,6 +344,11 @@ const formatBeatSheet = (sheet: ReferenceBeatSheet): string =>
           `  TIMELAPSE beat: this one is played back at ${b.speed}x, so pick a LONG stretch of it (roughly ${b.speed}x what a normal cut would be) — the finished cut is short but the footage inside it is the whole activity, sped up. Its caption/time should read as a RANGE covering how long it actually went on (e.g. "10:30〜11:30"), not a single instant.`,
         );
       }
+      if (b.longTake) {
+        bits.push(
+          `  LONG-TAKE beat: this one is allowed to run long — do not treat it like an ordinary short highlight cut. Set startLineIndex/endLineIndex to cover the WHOLE moment (the whole conversation, the whole closing line), even if that spans several lines and many seconds; nothing trims it back afterwards.`,
+        );
+      }
       for (const ex of b.exemplars) {
         const perCut = ex.durationSec ? ex.durationSec / ex.shotCount : undefined;
         bits.push(
@@ -397,6 +419,7 @@ For EVERY shot from 0 to ${shots.length - 1}, decide:
 - "best": within a retake group, true on the ONE shot to actually use (usually the last, cleanest attempt); false everywhere else, including every shot outside a group.
 - "mergeWithPrevious": true when this window is the SAME continuous moment as the immediately preceding KEPT one — a sentence running across the boundary, or one action (sitting up and then giving the thumbs-up, holding a product up and then showing it) that the windowing split in half. Not merely the same topic or the same location.
 - "startLineIndex"/"endLineIndex": inclusive shot-local indices into that shot's numbered "Lines spoken" list — which complete line(s) to keep. Whenever the shot has ANY speech worth keeping you MUST set these; a greeting like "おはようございます / 今日も一日元気にいきましょう" spread over two lines means startLineIndex 0 and endLineIndex 1, so the whole greeting survives as one cut. Never keep a fragment of a line, and never leave these unset just because the shot is short. Omit both ONLY for a shot with no speech at all (a purely visual beat).
+- "longTake": true ONLY for a genuine extended scene worth keeping in full — an unscripted back-and-forth conversation, a closing monologue that runs on. When true, this shot is exempt from the usual max-length trim, so set startLineIndex/endLineIndex (or mergeWithPrevious across several windows) to cover the WHOLE thing rather than a short excerpt. False for everything else, including a merely-longer-than-usual ordinary moment — this is for the rare beat whose entire point is that it runs long, not a way to avoid trimming.
 - "clockTime": a PLACEHOLDER time-of-day, "H:MM" (24-hour, no leading zero on H — e.g. "9:00", "22:10"). Read it off an on-screen clock/phone/watch/smart-speaker when one is visible, otherwise use the usual time for that beat above. This is a starting value the creator corrects by hand afterwards, so a plausible time is enough — do not spend effort agonising over it, and never let it change which shots you keep or how you caption them.
 - "caption": a short, casual Japanese caption for the moment, in the style described above. Write the caption text ONLY — never put the time in it. The time is rendered as its own separate line on screen from "clockTime", so a caption like "10:00\n起床" would show the time twice; the caption for that shot is just "起床". Leave "caption" empty for a shot on the cold-open/title beat: that beat shows the title card alone, with no caption under it.
 - "importance": 0-1, how essential this moment is if some have to be cut for total length. Beats the format has in every episode outrank one-off colour.
@@ -457,6 +480,9 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
   );
   const minSecById = new Map((sheet?.beats ?? []).flatMap((b) => (b.minSec !== undefined ? [[b.id, b.minSec] as const] : [])));
   const maxSecById = new Map((sheet?.beats ?? []).flatMap((b) => (b.maxSec !== undefined ? [[b.id, b.maxSec] as const] : [])));
+  /** Beats allowed to run long (a conversation, a closing monologue) —
+   *  see referenceBeats.ts's own doc on `longTake`. */
+  const longTakeIds = new Set((sheet?.beats ?? []).filter((b) => b.longTake).map((b) => b.id));
 
   requireWhisperModel();
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-discover-"));
@@ -465,9 +491,12 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
 
     const changeTimes = detectChangeTimes(take.absPath, SCENE_THRESHOLD);
     const rawShots = buildShots(changeTimes, durationSec, CANDIDATE_SHOT_CAP);
+    // See MIN_SHOT_SEC's own doc comment on why this is capped by the
+    // format's own minBeatSec rather than always the module default.
+    const minShotSec = Math.min(MIN_SHOT_SEC, discovery.minBeatSec);
     const merged = rawShots.reduce<Array<{ startSec: number; endSec: number }>>((acc, shot) => {
       const prev = acc[acc.length - 1];
-      if (prev && shot.endSec - shot.startSec < MIN_SHOT_SEC) prev.endSec = shot.endSec;
+      if (prev && shot.endSec - shot.startSec < minShotSec) prev.endSec = shot.endSec;
       else acc.push({ ...shot });
       return acc;
     }, []);
@@ -638,6 +667,9 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
        *  DOES inherit forward — an explicitly empty fixed clock must not
        *  be overwritten by whatever time preceded it. */
       clockIsFixed: boolean;
+      /** See referenceBeats.ts's own doc on `longTake` — computeSpan skips
+       *  the max-length trim entirely for this beat. */
+      longTake: boolean;
     };
     const candidates: Candidate[] = [];
     shots.forEach((shot, i) => {
@@ -697,6 +729,11 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
         minSec: j.referenceBeatId ? minSecById.get(j.referenceBeatId) : undefined,
         maxSec: j.referenceBeatId ? maxSecById.get(j.referenceBeatId) : undefined,
         clockIsFixed: fixedClock !== undefined,
+        // Either source can mark a beat long-take: a known sheet beat
+        // (referenceBeats.ts's own `longTake`) or the model's own
+        // free-form judgment on an unnamed moment (ShotJudgmentSchema's
+        // own `longTake` — see its doc comment).
+        longTake: j.longTake || (j.referenceBeatId ? longTakeIds.has(j.referenceBeatId) : false),
       });
     });
 
@@ -730,7 +767,16 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
       // A beat the creator hand-cut has a measured length of its own;
       // trust that over the format-wide average, with a little headroom
       // so the cut isn't clipped exactly at the exemplar's frame count.
-      const maxTimelineSec = c.exemplarSec ? Math.max(baseMaxSec, c.exemplarSec * 1.2) : baseMaxSec;
+      // A `longTake` beat (referenceBeats.ts) has no ceiling at all — its
+      // whole point is running long (a conversation, a closing monologue),
+      // so it follows the speech (or the shot's own real bounds) to
+      // wherever it actually ends rather than being clipped like an
+      // ordinary highlight cut.
+      const maxTimelineSec = c.longTake
+        ? Infinity
+        : c.exemplarSec
+          ? Math.max(baseMaxSec, c.exemplarSec * 1.2)
+          : baseMaxSec;
       // Every budget in `discovery` is stated in FINISHED (timeline)
       // seconds. A timelapse beat plays `speed`x faster, so it may eat
       // `speed` times as many SOURCE seconds to occupy the same slot —
@@ -746,13 +792,21 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
       const lowSec = c.speed > 1 ? shot.parentStartSec : shot.startSec;
       const highSec = c.speed > 1 ? shot.parentEndSec : shot.endSec;
       if (picked && picked.length > 0) {
-        let start = Math.max(lowSec, picked[0].startSec - PAD_SEC);
+        const start = Math.max(lowSec, picked[0].startSec - PAD_SEC);
         let end = Math.min(highSec, picked[picked.length - 1].endSec + PAD_SEC);
         const dur = end - start;
         if (dur < minSec) {
-          const grow = (minSec - dur) / 2;
-          start = Math.max(lowSec, start - grow);
-          end = Math.min(highSec, end + grow);
+          // TAIL-ONLY growth, mirroring the over-long trim below: a spoken
+          // line's opening words are what make the cut read as a complete
+          // thought, and growing the head risks pulling in whatever came
+          // immediately before the words actually start (on a silent
+          // beat's neighbor, that is routinely camera-setup wobble — see
+          // discovery.prerollSkipSec's own doc comment). If the tail alone
+          // can't reach minSec (the words sit right at the shot's own
+          // end), the span simply stays short rather than reopening the
+          // head — a genuinely too-short beat is caught by the too-short
+          // drop pass below instead of being padded with dead footage.
+          end = Math.min(highSec, start + minSec);
         } else if (dur > maxSec) {
           // Trim the TAIL, never the head: a spoken line's opening words
           // are what make the cut read as a complete thought ("おはよう
@@ -762,13 +816,26 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
         }
         return { srcInSec: start, srcOutSec: Math.max(start + 0.2, end), confidence: 0.7 };
       }
-      // No words to anchor on — a silent/visual beat: center a default
-      // window on the shot's own midpoint, never wider than the shot
-      // itself. Lower confidence: a positional guess, not a real match.
+      // No words to anchor on — a silent/visual beat. Phone footage of a
+      // separately-filmed moment almost always opens with a few seconds
+      // of the camera being placed/aimed (handheld wobble, a half-framed
+      // subject) before the actual moment settles in — a plain midpoint
+      // anchor routinely lands INSIDE that setup instead of on the moment
+      // itself (measured directly against this format's own hand-cut
+      // reference: the creator's cuts start a median ~1.2s after the raw
+      // clip's own boundary). So anchor at the clip's own head plus
+      // discovery.prerollSkipSec, not the midpoint — but ONLY when this
+      // window IS the parent shot's own beginning (shot.startSec ===
+      // shot.parentStartSec): a later sub-window of one long continuous
+      // shot has no setup wobble of its own to skip past, so it keeps the
+      // plain window-relative anchor. Lower confidence throughout: a
+      // positional guess, not a real match.
       const shotDur = highSec - lowSec;
       const targetDur = Math.min(shotDur, (c.exemplarSec ?? (baseMinSec + baseMaxSec) / 2) * c.speed);
-      const mid = (shot.startSec + shot.endSec) / 2;
-      const start = Math.max(lowSec, mid - targetDur / 2);
+      const isShotHead = Math.abs(shot.startSec - shot.parentStartSec) < 0.01;
+      const skipSec = isShotHead ? Math.min(discovery.prerollSkipSec, Math.max(0, shotDur - targetDur)) : 0;
+      const anchor = isShotHead ? lowSec + skipSec : (shot.startSec + shot.endSec) / 2 - targetDur / 2;
+      const start = Math.max(lowSec, Math.min(highSec - targetDur, anchor));
       const end = Math.min(highSec, start + targetDur);
       return { srcInSec: start, srcOutSec: Math.max(start + 0.2, end), confidence: 0.3 };
     };
@@ -845,10 +912,15 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
       // first as a block, in its own fixed order, with everything else
       // following in source order exactly as before.
       const UNPINNED_OFFSET = 1_000_000;
+      // discovery.respectSourceOrder (see its own doc comment) opts a
+      // format out of the pinned reorder below — for a format whose
+      // creator hands over clips already concatenated in a correct,
+      // meaningful sequence, a `pinned` beat sorts by sourceStartSec like
+      // everything else instead of the sheet's own `order`.
       const sortKey = (b: Beat) => {
         if (b.isTitle) return TITLE_KEY;
         if (b.isSignoff) return SIGNOFF_KEY;
-        if (b.pinned && b.refOrder !== undefined) return b.refOrder;
+        if (!discovery.respectSourceOrder && b.pinned && b.refOrder !== undefined) return b.refOrder;
         return UNPINNED_OFFSET + b.sourceStartSec;
       };
       beats.sort((a, b) => sortKey(a) - sortKey(b) || a.sourceStartSec - b.sourceStartSec);
@@ -874,17 +946,42 @@ export const discover = async (format: Format, filled: FilledFormat): Promise<Di
       beat.segments = coalesced;
     }
 
-    // A beat that ended up under its own minimum isn't a beat — it's a
-    // scene-detect fragment that survived selection (a half-second of a
-    // desk, a single frame of a pan). Dropped rather than rendered as a
-    // blink-and-miss cut with a caption on it. A `pinned` beat is exempt:
-    // it is ALWAYS there in the reference episodes (that's what pinned
-    // means), so a short one is the format's own measured length, not a
-    // fragment — and computeSpan already grew it up to its own minSec
-    // floor besides.
-    const tooShort = beats.filter(
-      (b) => !b.pinned && b.segments.reduce((sum, s) => sum + (s.srcOutSec - s.srcInSec), 0) / b.speed < (b.minSec ?? discovery.minBeatSec),
-    );
+    // A beat that ended up under its own minimum isn't ALWAYS a fragment
+    // — a deliberate fast-cut montage (this format's own reference
+    // footage cuts breakfast prep into six shots of well under a second
+    // each) is made of nothing but sub-minSec beats, every one of them
+    // real. The two are told apart by adjacency: a genuine detection
+    // artifact (a flash, a stray extra boundary on one spoken line) sits
+    // ISOLATED in source time, while a montage beat sits tight against
+    // its neighbor on at least one side. Only an isolated short beat is
+    // dropped; a short beat inside a tight run survives. A `pinned` beat
+    // is exempt from either check: it is ALWAYS there in the reference
+    // episodes (that's what pinned means), so a short one is the
+    // format's own measured length, not a fragment — and computeSpan
+    // already grew it up to its own minSec floor besides.
+    /** Two beats whose source gap is under this are considered part of
+     *  the SAME rapid-cut run — see the too-short drop pass below. Wider
+     *  than PAD_SEC (which only protects against float noise at a single
+     *  span's own edges) but tight enough that two beats from genuinely
+     *  different moments of the day don't get treated as one montage. */
+    const MONTAGE_GAP_SEC = 1.0;
+    const beatSourceSpan = (b: Beat) => {
+      const starts = b.segments.map((s) => s.srcInSec);
+      const ends = b.segments.map((s) => s.srcOutSec);
+      return { start: Math.min(...starts), end: Math.max(...ends) };
+    };
+    const nearInSource = (a: { start: number; end: number }, b: { start: number; end: number }) =>
+      Math.abs(b.start - a.end) <= MONTAGE_GAP_SEC || Math.abs(a.start - b.end) <= MONTAGE_GAP_SEC;
+    const tooShort = beats.filter((b, i) => {
+      if (b.pinned) return false;
+      const dur = b.segments.reduce((sum, s) => sum + (s.srcOutSec - s.srcInSec), 0) / b.speed;
+      if (dur >= (b.minSec ?? discovery.minBeatSec)) return false;
+      const span = beatSourceSpan(b);
+      const prev = beats[i - 1];
+      const next = beats[i + 1];
+      const inMontage = (prev && nearInSource(span, beatSourceSpan(prev))) || (next && nearInSource(span, beatSourceSpan(next)));
+      return !inMontage;
+    });
     for (const b of tooShort) {
       const idx = beats.indexOf(b);
       if (idx !== -1 && beats.length > 1) beats.splice(idx, 1);

@@ -863,6 +863,31 @@ export const FormatSchema = z
          *  prompt — what one beat looks/sounds like in THIS niche, and
          *  the tone/length its clockTime+caption text should match. */
         prompt: z.string(),
+        /** Seconds to skip at the head of a scene-detected clip before a
+         *  beat with no speech to anchor on is allowed to start — phone
+         *  footage of separately-filmed moments almost always opens with
+         *  the camera being placed/aimed (handheld wobble, a half-framed
+         *  subject) before the actual moment settles in. Verified against
+         *  this format's own reference footage: the creator's hand-cut
+         *  version starts a median ~1.2s after the raw clip's own cut
+         *  point. Defaults to 0 (no skip) for a format whose clips don't
+         *  have this shape (e.g. a studio take with no setup time). See
+         *  discover.ts's `computeSpan`. */
+        prerollSkipSec: z.number().nonnegative().default(0),
+        /** When true, discover.ts never reorders `pinned` beats to the
+         *  reference sheet's own `order` (see referenceBeats.ts) — the
+         *  running order stays exactly the order the beats occur in the
+         *  source file. For a format whose creator hands over clips
+         *  already concatenated in a correct, meaningful sequence (this
+         *  format's own case — a day's footage filmed and spliced in
+         *  chronological order), trusting that order is more robust than
+         *  a beat sheet's averaged position, which can force a beat into
+         *  the wrong place (or force content that isn't in today's
+         *  footage at all) on a day that doesn't match the sheet's own
+         *  assumptions. Defaults to false (existing pinned-reorder
+         *  behavior unchanged) for a format whose fixed opening really is
+         *  filmed identically every episode. */
+        respectSourceOrder: z.boolean().default(false),
       })
       .optional(),
     blocks: z.array(BlockSchema).min(1),

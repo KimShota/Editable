@@ -87,6 +87,18 @@ export const ReferenceBeatSchema = z.object({
    *  today. */
   minSec: z.number().positive().optional(),
   maxSec: z.number().positive().optional(),
+  /** True for a beat whose whole point is that the moment is allowed to
+   *  run long — a conversation, a closing monologue — rather than being
+   *  clipped to the format's own maxBeatSec/maxSec like an ordinary
+   *  highlight cut. discover.ts's computeSpan skips the max-length trim
+   *  entirely for such a beat and instead follows the speech (or the
+   *  shot's own real bounds) to wherever it actually ends. Verified
+   *  against this format's own hand-cut reference: a coaching
+   *  conversation and the closing monologue both run well past every
+   *  other beat's length (11-20s vs. 1-4s) and are clearly deliberate,
+   *  not an editing miss. Defaults to false — an ordinary beat keeps the
+   *  usual min/max clamp. */
+  longTake: z.boolean().default(false),
   /**
    * Hand-cut EXAMPLES of this beat done right — the creator trimming the
    * moment themselves out of their own raw footage, checked in next to
