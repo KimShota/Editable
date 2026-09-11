@@ -11,7 +11,7 @@ export default async function AccountPage() {
 
   return (
     <Container className="max-w-lg">
-      <PageHeader kicker="Editable" title="Account" />
+      <PageHeader kicker="Katalab" title="Account" />
       <Card className="flex flex-col gap-4 p-6">
         <div>
           <p className="text-sm text-[color:var(--ink-dim)]">Email</p>

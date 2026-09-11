@@ -49,7 +49,7 @@ export async function Nav() {
           href="/"
           className="font-[family-name:var(--font-display)] text-sm font-bold tracking-[0.22em] text-[color:var(--ink)]"
         >
-          EDITABLE
+          KATALAB
         </Link>
         <nav className="flex items-center gap-1">
           {links.map((link) => (

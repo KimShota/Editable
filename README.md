@@ -1,6 +1,6 @@
-# Editable
+# Katalab
 
-**Editable turns proven viral video formats into fill-in-the-blank
+**Katalab turns proven viral video formats into fill-in-the-blank
 templates.** Each template is a real format that already works, broken
 into labeled lego blocks. You pick one for your niche, film the clips it
 asks for, and it assembles a ready-to-post video — no editing skill, and

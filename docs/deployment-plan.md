@@ -1,4 +1,4 @@
-# Editable — Cheap Deployment Plan
+# Katalab — Cheap Deployment Plan
 
 *The concrete, costed version of `deployment-roadmap.md` Phase 1.*
 *Target: ~€9/month, live this week.*

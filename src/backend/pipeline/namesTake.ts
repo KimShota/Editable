@@ -12,7 +12,7 @@ import { FilledFormat, Format } from "./types";
 /**
  * Module: names-take split. See FormatSchema's `namesTakeSlot` doc comment
  * for the feature this exists for — a separate take where the creator says
- * each voice block's own "name" back to back, nothing else, and Editable
+ * each voice block's own "name" back to back, nothing else, and Katalab
  * pulls out just each one's audio to dub over that block's own front
  * silence (assemble.ts's `leadInSec`), timed off the new "nameAudioStart"
  * anchor instead of a spoken-phrase anchor.

@@ -1,4 +1,4 @@
-# Editable — Deployment Roadmap
+# Katalab — Deployment Roadmap
 
 *From "runs on Shota's Mac" to "friends can use it whenever they want."*
 

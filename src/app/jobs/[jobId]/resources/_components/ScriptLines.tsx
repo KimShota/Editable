@@ -33,7 +33,7 @@ const BrollIcon = () => (
  * than a generic fixed word.
  *
  * Editing a line here is a planning aid, not a script that must be read
- * verbatim: Editable's anchors fuzzy-match whatever is actually said when
+ * verbatim: Katalab's anchors fuzzy-match whatever is actually said when
  * filming, and a captured value (like a name) comes straight from the
  * literal anchor's `capture: true` — there's no separate "type your name"
  * step, because the spoken take already supplies it.

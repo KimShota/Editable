@@ -153,7 +153,7 @@ export default function Home() {
       <div className="cursor-glow" ref={glowRef} aria-hidden="true" />
 
       <nav className="nav">
-        <div className="nav__logo">EDITABLE</div>
+        <div className="nav__logo">KATALAB</div>
         <div className="nav__links">
           <a href="#how">How it works</a>
           <a href="#formats">Formats</a>
@@ -173,8 +173,8 @@ export default function Home() {
             <span className="hero__dot" />
             Early access · rolling out format by format
           </p>
-          <h1 className="hero__title" aria-label="EDITABLE">
-            {"EDITABLE".split("").map((ch, i) => (
+          <h1 className="hero__title" aria-label="KATALAB">
+            {"KATALAB".split("").map((ch, i) => (
               <span className="ch" key={i}>{ch}</span>
             ))}
           </h1>
@@ -345,7 +345,7 @@ export default function Home() {
           </p>
         </div>
         <footer className="footer">
-          <span>EDITABLE</span>
+          <span>KATALAB</span>
           <span>You bring the content. We bring the format.</span>
           <span>© 2026</span>
         </footer>

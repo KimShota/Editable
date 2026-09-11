@@ -12,7 +12,7 @@ export default async function PricingPage() {
 
   return (
     <Container className="max-w-3xl">
-      <PageHeader kicker="Editable" title="Pricing" subtitle="Pick the plan that fits how much you're rendering." />
+      <PageHeader kicker="Katalab" title="Pricing" subtitle="Pick the plan that fits how much you're rendering." />
       <div className="grid gap-6 sm:grid-cols-2">
         <Card className="flex flex-col gap-4 p-6">
           <div>

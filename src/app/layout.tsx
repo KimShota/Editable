@@ -4,7 +4,7 @@ import { Nav } from "./_components/Nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Editable",
+  title: "Katalab",
   description: "Proven viral video formats, turned into fill-in-the-blank templates.",
 };
 

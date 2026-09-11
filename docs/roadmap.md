@@ -1,4 +1,4 @@
-# Editable — Comprehensive Product Plan
+# Katalab — Comprehensive Product Plan
 
 *What it takes to go from "a great editor I built" to "the AI viral reel app I truly want."*
 

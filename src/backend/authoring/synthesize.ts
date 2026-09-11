@@ -203,7 +203,7 @@ const buildSynthesisPrompt = (
       ? `EXISTING NICHES — reuse one of these for the format's "niche" field if it genuinely correlates with this reel's subject; only invent a new niche if none of them fit:\n${existingNiches.join(", ")}\nA new niche must still be a SINGLE WORD, simple and generic (e.g. "Gym", "Neuroscience", "Travel", "Work") — not a phrase.`
       : `No existing niches yet — pick a SINGLE WORD, simple and generic niche (e.g. "Gym", "Neuroscience", "Travel", "Work").`;
 
-  return `You are reverse-engineering a short-form vertical video (${analysis.durationSec.toFixed(1)}s, ${analysis.width}x${analysis.height}) into a reusable FORMAT for "Editable", a video-templating engine. A format captures a proven structure — the beats, the timing, the overlay/sfx moments, AND their exact on-screen positions/animations — as data, so a different creator can film their OWN content into the same slots and get a video out that looks EXACTLY like this reference, just with their own footage.
+  return `You are reverse-engineering a short-form vertical video (${analysis.durationSec.toFixed(1)}s, ${analysis.width}x${analysis.height}) into a reusable FORMAT for "Katalab", a video-templating engine. A format captures a proven structure — the beats, the timing, the overlay/sfx moments, AND their exact on-screen positions/animations — as data, so a different creator can film their OWN content into the same slots and get a video out that looks EXACTLY like this reference, just with their own footage.
 
 ${FORMAT_CONTRACT}
 
