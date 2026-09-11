@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Button, Card } from "../../_components/ui";
 
 const inputClass =
@@ -9,10 +9,8 @@ const inputClass =
 
 export function SignupForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [inviteCode, setInviteCode] = useState(searchParams.get("invite") ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +22,7 @@ export function SignupForm() {
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password, inviteCode: inviteCode.trim() }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "signup failed");
@@ -39,16 +37,6 @@ export function SignupForm() {
   return (
     <Card className="p-6">
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <div>
-          <label className="mb-2 block text-sm font-medium text-[color:var(--ink)]">Invite code</label>
-          <input
-            value={inviteCode}
-            onChange={(e) => setInviteCode(e.target.value)}
-            placeholder="the code you were sent"
-            className={inputClass}
-            disabled={busy}
-          />
-        </div>
         <div>
           <label className="mb-2 block text-sm font-medium text-[color:var(--ink)]">Email</label>
           <input
@@ -72,7 +60,7 @@ export function SignupForm() {
           />
         </div>
         {error && <p className="text-sm text-red-400">{error}</p>}
-        <Button type="submit" disabled={busy || !email.trim() || password.length < 8 || !inviteCode.trim()}>
+        <Button type="submit" disabled={busy || !email.trim() || password.length < 8}>
           {busy ? "Creating account…" : "Create account"}
         </Button>
       </form>

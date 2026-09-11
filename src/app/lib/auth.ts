@@ -15,14 +15,14 @@ import {
  * Accounts + password auth for the friends-alpha deploy. Job DATA still
  * lives on disk exactly as before (see jobs.ts) — this is only the
  * identity layer that makes it safe to expose that filesystem store to
- * more than one person: who's allowed in (invite-gated signup) and which
- * jobs are theirs (job_owners, see jobs.ts). Session token verification
- * itself lives in session.ts (also used by middleware.ts, which can't
- * import this file — see that module's docstring for why).
+ * more than one person: who's allowed in (open signup) and which jobs are
+ * theirs (job_owners, see jobs.ts). Session token verification itself
+ * lives in session.ts (also used by middleware.ts, which can't import
+ * this file — see that module's docstring for why).
  *
- * Signup is invite-only, not open registration: an unauthenticated public
- * signup form would be an open door to the Anthropic/Gemini/Higgsfield keys
- * every build spends against. Mint codes with `npm run invites:mint`.
+ * Signup is open registration: anyone with an email can create an account.
+ * Invite codes (see db/migrations/006_reusable_invites.sql) are no longer
+ * required, though the invites table/tooling is left in place.
  */
 
 export { SESSION_COOKIE, SESSION_TTL_MS, getSessionUser };
@@ -84,25 +84,10 @@ export type SignupResult =
   | { ok: false; error: string };
 
 /**
- * Redeems an invite code and creates the account it gates, atomically
- * enough for friends-scale traffic: for a single-use code, the invite is
- * claimed (used_at set) only after the user row exists, and if two signups
- * race the same code, the loser's just-created user row is deleted rather
- * than left as an invite-gate bypass. A `reusable` code (see
- * db/migrations/006_reusable_invites.sql) skips that claim step entirely —
- * it's meant to be handed to many people at once, so used_by/used_at stay
- * null forever for it and it never runs out.
+ * Creates an account for anyone with a not-yet-registered email. Open
+ * registration — no invite code required.
  */
-export const signup = async (email: string, password: string, inviteCode: string): Promise<SignupResult> => {
-  const code = inviteCode.trim();
-  const openInvite = await sql`
-    select code, reusable from invites where code = ${code} and (reusable or used_at is null)
-  `;
-  if (openInvite.length === 0) {
-    return { ok: false, error: "invalid or already-used invite code" };
-  }
-  const reusable = (openInvite[0] as { reusable: boolean }).reusable;
-
+export const signup = async (email: string, password: string): Promise<SignupResult> => {
   const emailNorm = normalizeEmail(email);
   const passwordHash = hashPassword(password);
   let created: { id: string; email: string; is_admin: boolean; plan: "free" | "premium" };
@@ -116,18 +101,6 @@ export const signup = async (email: string, password: string, inviteCode: string
   } catch {
     // unique violation on email_norm
     return { ok: false, error: "an account with that email already exists" };
-  }
-
-  if (!reusable) {
-    const claimed = await sql`
-      update invites set used_by = ${created.id}, used_at = now()
-      where code = ${code} and used_at is null
-      returning code
-    `;
-    if (claimed.length === 0) {
-      await sql`delete from users where id = ${created.id}`;
-      return { ok: false, error: "that invite code was just used by someone else" };
-    }
   }
 
   return { ok: true, user: { id: created.id, email: created.email, isAdmin: created.is_admin, plan: created.plan } };
