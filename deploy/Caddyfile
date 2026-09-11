@@ -1,7 +1,7 @@
-# Replace with your hostname before copying to /etc/caddy/Caddyfile.
-# Caddy provisions and renews the Let's Encrypt certificate automatically —
-# the only requirement is that this name's A record already points here.
-app.example.com {
+# katalab.art is the canonical hostname. Caddy provisions and renews the
+# Let's Encrypt certificate for each site block automatically — the only
+# requirement is that the name's A record already points here.
+katalab.art {
 	reverse_proxy localhost:3100 {
 		# A take upload is minutes long on a slow connection. Caddy's
 		# default proxy read timeout is generous, but the flush interval
@@ -19,7 +19,13 @@ app.example.com {
 	encode zstd gzip
 
 	log {
-		output file /var/log/caddy/editable.log
+		output file /var/log/caddy/katalab.log
 		format console
 	}
+}
+
+# Old hostname from before the katalab.art rebrand — kept as a permanent
+# redirect so existing links/bookmarks still resolve.
+editable.duckdns.org {
+	redir https://katalab.art{uri} permanent
 }

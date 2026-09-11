@@ -81,7 +81,7 @@ journalctl -u editable -f
 ## 5. TLS
 
 ```bash
-sed "s/app.example.com/<your-hostname>/" /opt/editable/deploy/Caddyfile > /etc/caddy/Caddyfile
+cp /opt/editable/deploy/Caddyfile /etc/caddy/Caddyfile
 mkdir -p /var/log/caddy
 caddy validate --config /etc/caddy/Caddyfile
 # AFTER validate, not before: `caddy validate` run as root instantiates the
