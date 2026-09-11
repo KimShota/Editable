@@ -53,8 +53,6 @@ export const runtime = "nodejs";
  *    that userId (or an admin).
  */
 
-const DEMO_JOB_IDS = new Set(["demo", "five-codes", "five-codes-demo"]);
-
 const LEGACY_WAITLIST_ONLY_ALLOWED = new Set(["/", "/api/waitlist"]);
 
 const PUBLIC_EXACT = new Set(["/", "/login", "/signup", "/pricing"]);
@@ -103,8 +101,6 @@ const libraryUserIdFromPath = (pathname: string): string | null => {
   const match = /^\/api\/media\/library\/([^/]+)\//.exec(pathname);
   return match ? match[1] : null;
 };
-
-const isReadOnlyMethod = (method: string): boolean => method === "GET" || method === "HEAD";
 
 /**
  * In-process cache for jobOwnerId, same motivation as session.ts's
@@ -170,15 +166,9 @@ export async function middleware(req: NextRequest) {
   if (!user.isAdmin) {
     const jobId = jobIdFromPath(pathname);
     if (jobId) {
-      if (DEMO_JOB_IDS.has(jobId)) {
-        if (!isReadOnlyMethod(req.method)) {
-          return notFound(req);
-        }
-      } else {
-        const ownerId = await jobOwnerId(jobId);
-        if (ownerId !== user.id) {
-          return notFound(req);
-        }
+      const ownerId = await jobOwnerId(jobId);
+      if (ownerId !== user.id) {
+        return notFound(req);
       }
     }
 

@@ -138,23 +138,15 @@ export const listJobs = (): JobSummary[] => {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 };
 
-/** The only jobs meant to be genuinely public example content — checked
- *  into git as the ".gitignore"'s explicit `!jobs/<id>` allow-list, unlike
- *  the many other unowned jobs sitting in jobs/ (real work predating
- *  accounts, e.g. every job created while building this feature). Kept in
- *  sync with middleware.ts's copy of the same list. */
-const DEMO_JOB_IDS = new Set(["demo", "five-codes", "five-codes-demo"]);
-
 /** listJobs(), scoped to what `user` may see: everything for an admin,
- *  otherwise jobs they own plus the checked-in demo jobs above — mirrors
- *  middleware.ts's per-job access rule exactly, so nothing shows up in a
- *  listing that a direct link to it would then 404 on. An unowned job
- *  that ISN'T one of the demo ids (pre-accounts dev/test data) stays
+ *  otherwise only jobs they own — mirrors middleware.ts's per-job access
+ *  rule exactly, so nothing shows up in a listing that a direct link to it
+ *  would then 404 on. An unowned job (pre-accounts dev/test data) stays
  *  admin-only rather than defaulting to "shared with everyone". */
 export const listJobsForUser = async (user: { id: string; isAdmin: boolean }): Promise<JobSummary[]> => {
   const jobs = listJobs();
   if (user.isAdmin) return jobs;
   const rows = await sql`select job_id, user_id from job_owners`;
   const ownerOf = new Map((rows as { job_id: string; user_id: string }[]).map((r) => [r.job_id, r.user_id]));
-  return jobs.filter((j) => ownerOf.get(j.id) === user.id || DEMO_JOB_IDS.has(j.id));
+  return jobs.filter((j) => ownerOf.get(j.id) === user.id);
 };
