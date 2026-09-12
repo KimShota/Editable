@@ -12,16 +12,7 @@ import { sql } from "./app/lib/db";
 export const runtime = "nodejs";
 
 /**
- * Two independent gates layered here:
- *
- * 1. The pre-existing NEXT_PUBLIC_APP_ENABLED="false" switch — deploying
- *    just the marketing page + waitlist to Vercel before the product
- *    (spawned child processes, local-disk jobs/artifacts, no accounts DB
- *    guaranteed to have the migrations below applied) has real
- *    infrastructure to run on. Takes priority over everything below: on
- *    that deploy nothing past "/" and "/api/waitlist" has anywhere to go.
- *
- * 2. Accounts + job ownership, for the real deploy. Invite-gated signup
+ * Accounts + job ownership. Invite-gated signup
  *    (see app/lib/auth.ts) means every non-public route requires a valid
  *    session; /jobs/<id>, /api/jobs/<id>, and the media routes that serve
  *    a job's own files additionally require OWNING that job (or being
@@ -45,7 +36,7 @@ export const runtime = "nodejs";
  * overwrite or "Delete forever" the one demo every gallery preview and
  * README walkthrough points at.
  *
- * 3. Each user's own asset library (library/<userId>/<category>/, see
+ * Each user's own asset library (library/<userId>/<category>/, see
  *    app/lib/library.ts) is scoped the same way a job is — every route
  *    under api/library/ already resolves to the caller's own userId
  *    server-side, so the only extra thing middleware needs to enforce is
@@ -53,12 +44,10 @@ export const runtime = "nodejs";
  *    that userId (or an admin).
  */
 
-const LEGACY_WAITLIST_ONLY_ALLOWED = new Set(["/", "/api/waitlist"]);
-
 const PUBLIC_EXACT = new Set(["/", "/login", "/signup", "/pricing"]);
 // /api/billing/webhook: Stripe can't send our session cookie — its own
 // signature check (see that route) is the auth boundary, not this gate.
-const PUBLIC_PREFIXES = ["/api/auth/", "/api/waitlist", "/api/billing/webhook"];
+const PUBLIC_PREFIXES = ["/api/auth/", "/api/billing/webhook"];
 
 const ADMIN_PREFIXES = ["/authoring", "/api/authoring", "/reverse-engineer", "/api/media/authoring"];
 
@@ -145,10 +134,6 @@ const notFound = (req: NextRequest): NextResponse =>
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-
-  if (process.env.NEXT_PUBLIC_APP_ENABLED === "false") {
-    return LEGACY_WAITLIST_ONLY_ALLOWED.has(pathname) ? NextResponse.next() : new NextResponse("Not found", { status: 404 });
-  }
 
   if (PUBLIC_EXACT.has(pathname) || PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return NextResponse.next();

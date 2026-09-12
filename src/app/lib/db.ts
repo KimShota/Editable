@@ -1,17 +1,15 @@
 import { neon, NeonQueryFunction } from "@neondatabase/serverless";
 
 /**
- * The one Neon client, shared by waitlist.ts and auth.ts.
+ * The one Neon client, shared by auth.ts and other server modules.
  *
  * Lazy on purpose: constructing the client eagerly would throw at module
  * import when DATABASE_URL is unset, which would 500 every route that
- * imports this file — including code paths (like the waitlist honeypot
- * check) that never touch the DB at all.
+ * imports this file.
  *
  * No `server-only` guard: this is also reached from standalone CLI tools
- * (waitlistExport.ts, mintInvites.ts), and `server-only` throws
- * unconditionally outside Next's bundler. Safe either way — nothing here is
- * imported by a client component.
+ * (mintInvites.ts), and `server-only` throws unconditionally outside Next's
+ * bundler. Safe either way — nothing here is imported by a client component.
  */
 
 let sqlClient: NeonQueryFunction<false, false> | undefined;

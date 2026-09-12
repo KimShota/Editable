@@ -5,7 +5,7 @@ import { sql } from "../../app/lib/db";
  * Grants admin (access to /reverse-engineer + /authoring, see middleware.ts)
  * to an already-signed-up account: `npm run admin:promote -- you@email.com`.
  * No UI for this — with a handful of friends, a one-line CLI is the honest
- * scope, same call as waitlistExport.ts makes for the waitlist.
+ * scope.
  */
 
 const email = process.argv[2];

@@ -1,5 +1,5 @@
+import { createHash } from "node:crypto";
 import { sql } from "./db";
-import { hashIp } from "./waitlist";
 
 /**
  * Throttle for /api/auth/login — without this, an attacker with a valid
@@ -9,14 +9,14 @@ import { hashIp } from "./waitlist";
  * counters, both checked: per-email (catches guessing one account from
  * many IPs) and per-IP (catches guessing many accounts from one source).
  *
- * Reuses waitlist.ts's hashIp/WAITLIST_IP_SALT rather than introducing a
- * second salt env var for the same kind of value — the salt's purpose
- * ("hash IPs stored against abuse") isn't specific to the waitlist table.
- *
- * No `server-only` guard, matching session.ts/waitlist.ts: nothing here is
- * imported by a client component, and `server-only` throws unconditionally
- * outside Next's bundler.
+ * No `server-only` guard, matching session.ts: nothing here is imported by
+ * a client component, and `server-only` throws unconditionally outside
+ * Next's bundler.
  */
+
+/** IP is never stored raw — only a salted hash, and only to throttle abuse. */
+const hashIp = (ip: string): string =>
+  createHash("sha256").update(`${ip}:${process.env.LOGIN_IP_SALT ?? ""}`).digest("hex");
 
 const WINDOW_MINUTES = 15;
 const MAX_ATTEMPTS_PER_EMAIL = 10;

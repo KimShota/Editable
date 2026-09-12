@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
@@ -12,25 +12,9 @@ import "./marketing.css";
  * into the product's own Next.js app so "Launch app" is same-origin,
  * client-side navigation instead of a link out to a separate deploy.
  */
-type WaitlistState = "idle" | "submitting" | "done" | "duplicate" | "error";
-
 export default function Home() {
   const rootRef = useRef<HTMLDivElement>(null);
   const glowRef = useRef<HTMLDivElement>(null);
-  const [waitlistState, setWaitlistState] = useState<WaitlistState>("idle");
-  const attribution = useRef<{ referrer: string; utmSource?: string; utmMedium?: string; utmCampaign?: string }>({
-    referrer: "",
-  });
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    attribution.current = {
-      referrer: document.referrer || "",
-      utmSource: params.get("utm_source") ?? undefined,
-      utmMedium: params.get("utm_medium") ?? undefined,
-      utmCampaign: params.get("utm_campaign") ?? undefined,
-    };
-  }, []);
 
   useEffect(() => {
     const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -106,48 +90,6 @@ export default function Home() {
     return () => ctx.revert();
   }, []);
 
-  const onWaitlistSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const email = (new FormData(form).get("email") as string)?.trim();
-    const company = (new FormData(form).get("company") as string) ?? "";
-    if (!email) return;
-
-    setWaitlistState("submitting");
-    try {
-      const res = await fetch("/api/waitlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          company,
-          referrer: attribution.current.referrer,
-          utmSource: attribution.current.utmSource,
-          utmMedium: attribution.current.utmMedium,
-          utmCampaign: attribution.current.utmCampaign,
-        }),
-      });
-      if (!res.ok) {
-        setWaitlistState("error");
-        return;
-      }
-      const data = await res.json();
-      setWaitlistState(data.status === "duplicate" ? "duplicate" : "done");
-    } catch {
-      setWaitlistState("error");
-    }
-  };
-
-  const waitlistMessage =
-    waitlistState === "done"
-      ? "You're on the list. Talk soon."
-      : waitlistState === "duplicate"
-        ? "You're already on the list."
-        : waitlistState === "error"
-          ? "Something went wrong — try again?"
-          : "";
-  const isSubmitted = waitlistState === "done" || waitlistState === "duplicate";
-
   return (
     <div className="marketing" ref={rootRef}>
       <div className="cursor-glow" ref={glowRef} aria-hidden="true" />
@@ -159,10 +101,8 @@ export default function Home() {
           <a href="#formats">Formats</a>
         </div>
         <div className="nav__actions">
-          {process.env.NEXT_PUBLIC_APP_ENABLED !== "false" && (
-            <Link className="nav__launch" href="/templates">Launch app</Link>
-          )}
-          <a className="nav__cta" href="#waitlist">Get early access</a>
+          <Link className="nav__launch" href="/templates">Launch app</Link>
+          <Link className="nav__cta" href="/signup">Sign up</Link>
         </div>
       </nav>
 
@@ -171,7 +111,7 @@ export default function Home() {
         <div className="hero__content">
           <p className="hero__badge">
             <span className="hero__dot" />
-            Early access · rolling out format by format
+            Rolling out format by format
           </p>
           <h1 className="hero__title" aria-label="KATALAB">
             {"KATALAB".split("").map((ch, i) => (
@@ -187,7 +127,7 @@ export default function Home() {
             Film the clips we tell you to. Drop them in. That&apos;s the edit.
           </p>
           <div className="hero__actions">
-            <a className="btn btn--primary" href="#waitlist">Get early access</a>
+            <Link className="btn btn--primary" href="/signup">Sign up</Link>
             <a className="btn btn--ghost" href="#how">See how it works ↓</a>
           </div>
 
@@ -312,37 +252,11 @@ export default function Home() {
       </section>
 
       {/* 06 · CTA */}
-      <section className="cta" id="waitlist">
+      <section className="cta" id="signup">
         <div className="cta__inner">
           <h2 className="cta__title" data-reveal>Stop staring at the timeline.</h2>
-          <p className="cta__sub" data-reveal>Early access is rolling out format by format.</p>
-          <form className="cta__form" data-reveal onSubmit={onWaitlistSubmit}>
-            <input
-              type="text"
-              name="company"
-              className="cta__hp"
-              tabIndex={-1}
-              autoComplete="off"
-              aria-hidden="true"
-            />
-            <input
-              type="email"
-              name="email"
-              placeholder="you@somewhere.com"
-              required
-              aria-label="Email"
-              disabled={waitlistState === "submitting" || isSubmitted}
-            />
-            <button type="submit" disabled={waitlistState === "submitting" || isSubmitted}>
-              {isSubmitted ? "You're in" : waitlistState === "submitting" ? "Joining…" : "Join the waitlist"}
-            </button>
-          </form>
-          <p
-            className={`cta__done${waitlistMessage ? " is-visible" : ""}${waitlistState === "error" ? " cta__done--error" : ""}`}
-            aria-live="polite"
-          >
-            {waitlistMessage}
-          </p>
+          <p className="cta__sub" data-reveal>Rolling out format by format.</p>
+          <Link className="btn btn--primary" href="/signup" data-reveal>Sign up</Link>
         </div>
         <footer className="footer">
           <span>KATALAB</span>

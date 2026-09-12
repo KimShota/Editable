@@ -16,11 +16,9 @@ const LINKS = [
 
 export async function Nav() {
   // Best-effort: this renders on every page (ConditionalNav only hides it
-  // client-side, after the server has already produced it), including "/"
-  // on the standalone waitlist-only Vercel deploy — see middleware.ts's
-  // NEXT_PUBLIC_APP_ENABLED gate. That deploy's DB may never have had
-  // 002_accounts.sql applied, so a lookup failure here falls back to
-  // "logged out" instead of crashing the whole page.
+  // client-side, after the server has already produced it), so a lookup
+  // failure here falls back to "logged out" instead of crashing the whole
+  // page.
   let user: SessionUser | null = null;
   try {
     const cookieStore = await cookies();
