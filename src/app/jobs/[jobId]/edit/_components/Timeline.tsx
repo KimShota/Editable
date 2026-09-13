@@ -18,11 +18,11 @@ import { clipEdgeTargets, resolveSnap, snapPoint, type SnapResult, type SnapTarg
 const TRACK_COLOR = {
   video: "bg-indigo-500/85",
   transition: "bg-amber-500/75",
-  // Overlay text and captions are both "text" now — one merged row (see
-  // the Text row below) — so they share the violet family; captions get
-  // the darker sibling shade so a caption chip still reads as distinct
-  // from an overlay bar sitting right next to it, same as sfx/music stay
-  // distinguishable within the merged Audio row.
+  // Overlays and captions each get their own row now (Overlays/Captions
+  // below), but keep the violet family so they still read as "both text"
+  // — captions get the darker sibling shade so a caption chip still looks
+  // distinct from an overlay bar, same as sfx/music stay distinguishable
+  // from each other despite both being audio.
   text: "bg-violet-500/80",
   sfx: "bg-purple-400/75",
   captions: "bg-violet-700/85",
@@ -77,11 +77,10 @@ type ClipView = {
   waveformSrc?: string;
   waveformInSec?: number;
   waveformOutSec?: number;
-  /** Which EDL array this clip actually lives in — only set where a row
-   *  mixes clips from more than one track (the merged Audio row: sfx and
-   *  music share one lane; the merged Text row: overlays and captions
-   *  share one lane). Every other row's clips all share the row's own
-   *  fixed `track` prop, so this stays unset there. */
+  /** Which EDL array this clip actually lives in — every row is now a
+   *  single kind (Overlays/Captions/Music/SFX each get their own row), so
+   *  this stays unset; kept only because TrackRow's handlers still read
+   *  `c.track ?? track` and fall back to the row's own fixed `track` prop. */
   track?: "sfx" | "music" | "overlay" | "captions";
 };
 
@@ -360,8 +359,10 @@ const TimelineTracks = memo(function TimelineTracks({
   useFrames,
   fps,
   videoClips,
-  textClips,
-  audioClips,
+  overlayClips,
+  captionClips,
+  musicClips,
+  sfxClips,
   transitionClips,
   selection,
   onSelect,
@@ -384,8 +385,10 @@ const TimelineTracks = memo(function TimelineTracks({
   useFrames: boolean;
   fps: number;
   videoClips: ClipView[];
-  textClips: ClipView[];
-  audioClips: ClipView[];
+  overlayClips: ClipView[];
+  captionClips: ClipView[];
+  musicClips: ClipView[];
+  sfxClips: ClipView[];
   transitionClips: ClipView[];
   selection: Selection;
   onSelect: (s: Selection) => void;
@@ -469,15 +472,16 @@ const TimelineTracks = memo(function TimelineTracks({
           trimEdges={OUT_TRIM_EDGE_ONLY}
         />
       )}
-      {/* Text overlays and auto-generated captions are both just text on
-          screen, so — same merge the Audio row below already does for sfx
-          + music — they share this one lane. Each clip still remembers its
-          own underlying track (tagged in `textClips`) purely so
-          selection/drag/trim/delete keep routing to the right EDL array;
-          nothing about the EDL itself changed, only how it's drawn. */}
+      {/* Overlays (text/image/video) get their own row, independent of
+          captions — each overlay is its own layer with its own start/end
+          and can freely overlap anything on another row; it only ever
+          shares a lane with ANOTHER overlay (assignLanes), never with the
+          dozens of word-level caption chips a transcript produces, which
+          used to crowd out the resize handle on a clip like a title
+          TextOverlay sitting right where captions also play. */}
       <TrackRow
-        label="Text"
-        clips={textClips}
+        label="Overlays"
+        clips={overlayClips}
         colorClass={TRACK_COLOR.text}
         handlers={{
           move: (id, d, track) => commitFloatMove(track as FloatTrack, id, d),
@@ -491,18 +495,51 @@ const TimelineTracks = memo(function TimelineTracks({
         resolveDragSnap={resolveDragSnap}
         onSnapGuide={onSnapGuide}
       />
-      {/* Sound effects and music beds are both just audio clips — CapCut
-          treats them as independent layers on one audio timeline rather
-          than splitting them by file type — so they share this one lane.
-          Each clip still remembers its own underlying track (sfx vs
-          music, tagged in `audioClips` below) purely so drag/trim/delete
-          and the Inspector's per-track panel keep routing correctly; nothing
-          about the EDL itself changed, only how it's drawn. */}
-      {audioClips.length > 0 && (
+      {captionClips.length > 0 && (
         <TrackRow
-          label="Audio"
-          clips={audioClips}
+          label="Captions"
+          clips={captionClips}
+          colorClass={TRACK_COLOR.captions}
+          handlers={{
+            move: (id, d, track) => commitFloatMove(track as FloatTrack, id, d),
+            trim: (id, edge, d, track) => commitFloatTrim(track as FloatTrack, id, edge, d),
+          }}
+          track="captions"
+          selection={selection}
+          onSelect={onSelect}
+          onGroupMove={commitGroupMove}
+          pxPerSec={pxPerSec}
+          resolveDragSnap={resolveDragSnap}
+          onSnapGuide={onSnapGuide}
+        />
+      )}
+      {/* Music and sfx each get their own row for the same reason overlays
+          and captions were split above — a music bed's edges shouldn't
+          have to fight a burst of short sfx clips (or vice versa) for
+          lane space. */}
+      {musicClips.length > 0 && (
+        <TrackRow
+          label="Music"
+          clips={musicClips}
           colorClass={TRACK_COLOR.music}
+          handlers={{
+            move: (id, d, track) => commitFloatMove(track as FloatTrack, id, d),
+            trim: (id, edge, d, track) => commitFloatTrim(track as FloatTrack, id, edge, d),
+          }}
+          track="music"
+          selection={selection}
+          onSelect={onSelect}
+          onGroupMove={commitGroupMove}
+          pxPerSec={pxPerSec}
+          resolveDragSnap={resolveDragSnap}
+          onSnapGuide={onSnapGuide}
+        />
+      )}
+      {sfxClips.length > 0 && (
+        <TrackRow
+          label="SFX"
+          clips={sfxClips}
+          colorClass={TRACK_COLOR.sfx}
           handlers={{
             move: (id, d, track) => commitFloatMove(track as FloatTrack, id, d),
             trim: (id, edge, d, track) => commitFloatTrim(track as FloatTrack, id, edge, d),
@@ -829,28 +866,17 @@ export function Timeline({
     [edl.music, edl.durationSec],
   );
 
-  // Sound effects and music beds drawn as one lane (see TimelineTracks'
-  // own Audio row) — each tagged with its real underlying track so
-  // selection/drag/trim still route to the correct EDL array per clip.
+  // Sound effects and music beds each get their own row now (see
+  // TimelineTracks), but snapping still wants one flat list of every
+  // audio edge to latch onto regardless of which row it's drawn in — each
+  // tagged with its real underlying track so a snap hit still routes back
+  // to the correct EDL array.
   const audioClips: ClipView[] = useMemo(
     () => [
       ...musicClips.map((c) => ({ ...c, track: "music" as const })),
       ...sfxClips.map((c) => ({ ...c, track: "sfx" as const })),
     ],
     [musicClips, sfxClips],
-  );
-
-  // User-placed text overlays and auto-generated captions are both just
-  // text on screen — drawn as one lane (see TimelineTracks' own Text row),
-  // the same merge Audio already does for sfx + music, each tagged with
-  // its real underlying track so selection/drag/trim still route to the
-  // correct EDL array per clip.
-  const textClips: ClipView[] = useMemo(
-    () => [
-      ...overlayClips.map((c) => ({ ...c, track: "overlay" as const })),
-      ...captionClips.map((c) => ({ ...c, track: "captions" as const })),
-    ],
-    [overlayClips, captionClips],
   );
 
   // Read through a ref inside the resolver below rather than closed over:
@@ -1215,8 +1241,10 @@ export function Timeline({
             useFrames={useFrames}
             fps={edl.fps}
             videoClips={videoClips}
-            textClips={textClips}
-            audioClips={audioClips}
+            overlayClips={overlayClips}
+            captionClips={captionClips}
+            musicClips={musicClips}
+            sfxClips={sfxClips}
             transitionClips={transitionClips}
             selection={selection}
             onSelect={onSelect}
