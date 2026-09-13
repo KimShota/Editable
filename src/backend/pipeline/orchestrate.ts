@@ -29,6 +29,7 @@ import { runGates } from "./gates";
 import { artifactsDir } from "./paths";
 import { Edl, FilledFormat, Format, MatteArtifact, Transcript, TrimPoints } from "./types";
 import { EdlSchema, FormatSchema, MatteArtifactSchema } from "./schemas";
+import { normalizeAllTracks } from "./timelineOps";
 import { discover, discoverResultToSplitTake, DISCOVER_PIPELINE_VERSION, DiscoverResult } from "./discover";
 import { expandFormat, hasRepeatBlock } from "./expandFormat";
 
@@ -400,6 +401,18 @@ export const readOrMigrateEdl = async (jobDir: string, jobId: string): Promise<E
   const edlPath = path.join(artifactsDir(jobId), "edl.json");
   const raw = JSON.parse(fs.readFileSync(edlPath, "utf8"));
   const parsed = EdlSchema.safeParse(raw);
-  if (parsed.success) return parsed.data;
-  return reassembleJob(jobDir, jobId);
+  // Every clip/track field normalizeAllTracks backfills is optional/
+  // defaulted in EdlSchema, so this never trips the reassemble fallback
+  // below — a pre-multi-track edl.json parses fine as-is and just needs
+  // its tracks/trackIds filled in before the editor (or an op) ever sees
+  // it. See timelineOps.ts's applyOp for why every WRITE path re-runs this
+  // too, and normalizeAllTracks's own doc comment for why the ids it
+  // invents here are deterministic rather than random.
+  if (parsed.success) {
+    normalizeAllTracks(parsed.data);
+    return parsed.data;
+  }
+  const reassembled = await reassembleJob(jobDir, jobId);
+  normalizeAllTracks(reassembled);
+  return reassembled;
 };

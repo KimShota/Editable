@@ -16,6 +16,7 @@ import {
   EdlOverlaySchema,
   EdlSchema,
   EdlSfxSchema,
+  EdlTrackSchema,
   EdlTransitionSchema,
   EdlVideoSegmentSchema,
   EdlVoiceoverSchema,
@@ -106,6 +107,7 @@ export type EdlCaptionWord = z.infer<typeof EdlCaptionWordSchema>;
 export type EdlCaptionGroup = z.infer<typeof EdlCaptionGroupSchema>;
 export type EdlTransition = z.infer<typeof EdlTransitionSchema>;
 export type EdlMusic = z.infer<typeof EdlMusicSchema>;
+export type EdlTrack = z.infer<typeof EdlTrackSchema>;
 export type Edl = z.infer<typeof EdlSchema>;
 
 export type StyleProfile = z.infer<typeof StyleProfileSchema>;

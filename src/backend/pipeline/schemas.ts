@@ -1477,6 +1477,30 @@ export const EdlVoiceoverSchema = z.object({
   volume: z.number().min(0).max(10).default(1),
 });
 
+/**
+ * A vertical lane on the editor's timeline for one of the free-floating
+ * kinds (overlay/sfx/captions/music) — the CapCut-style "layer" a clip is
+ * explicitly parked on, so its neighbors are a placement the user made,
+ * not a side effect of however lanes.ts's greedy interval-packing happens
+ * to lay things out this render. `video` has no EdlTrack: it stays the
+ * one contiguous main reel (see timelineOps.ts's recomputeVideoTrack doc
+ * comment) — CapCut's own V1 magnetic track, not a limitation here.
+ *
+ * A clip's own `trackId` (see EdlOverlaySchema etc.) points at one of
+ * these; timelineOps.ts's normalizeTracks is what keeps every clip
+ * pointed at a REAL track of the matching kind, backfilling both this
+ * array and any clip's trackId the moment either is missing/stale — the
+ * common case for every edl.json written before this field existed.
+ */
+export const EdlTrackSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["overlay", "sfx", "captions", "music"]),
+  /** User-facing row label — e.g. a second text track a user created by
+   *  dragging a title above a crowded one. Absent = the editor shows a
+   *  generic "Overlay 2"-style label derived from position instead. */
+  label: z.string().optional(),
+});
+
 export const EdlOverlaySchema = z.object({
   /** The originating event id (override/debug handle). */
   id: z.string(),
@@ -1484,6 +1508,12 @@ export const EdlOverlaySchema = z.object({
   params: z.record(z.string(), z.unknown()).default({}),
   tlInSec: z.number().min(0),
   tlOutSec: z.number().positive(),
+  /** Which EdlTrack (kind "overlay") this clip is parked on — see
+   *  EdlTrackSchema's own doc comment. Absent on any document older than
+   *  this field; normalizeTracks backfills it (and creates the track
+   *  itself if needed) the moment the document is next read or edited, so
+   *  nothing else ever has to treat this as truly optional in practice. */
+  trackId: z.string().optional(),
   /**
    * On-canvas box, as a fraction of the composition's width/height —
    * resolution-independent, and every overlay component already renders as
@@ -1534,6 +1564,9 @@ export const EdlSfxSchema = z.object({
   durationSec: z.number().positive().optional(),
   /** Linear gain — see EdlVideoSegmentSchema.volume's doc comment. */
   volume: z.number().min(0).max(10).default(1),
+  /** Which EdlTrack (kind "sfx") this clip is parked on — see
+   *  EdlTrackSchema's own doc comment. */
+  trackId: z.string().optional(),
 });
 
 export const EdlCaptionWordSchema = z.object({
@@ -1592,6 +1625,15 @@ export const EdlCaptionGroupSchema = z.object({
   italic: z.boolean().optional(),
   underline: z.boolean().optional(),
   textCase: z.enum(["upper", "lower", "none"]).optional(),
+  /** Which EdlTrack (kind "captions") this group is parked on — see
+   *  EdlTrackSchema's own doc comment. Two groups on DIFFERENT caption
+   *  tracks may freely overlap in time (that's the whole point of giving
+   *  a user a second caption track); Captions.tsx still only ever shows
+   *  the first match for a given variant within a single frame, so two
+   *  overlapping same-variant groups on two different tracks silently
+   *  isn't a supported combination yet — a real gap, not this field's
+   *  problem to solve. */
+  trackId: z.string().optional(),
 });
 
 export const EdlTransitionSchema = z.object({
@@ -1632,6 +1674,9 @@ export const EdlMusicSchema = z.object({
    *  this bed should duck under — spoken dialogue winning over the bed,
    *  ramped in/out rather than cut. */
   duckWindows: z.array(z.object({ tlInSec: z.number().min(0), tlOutSec: z.number().positive() })).default([]),
+  /** Which EdlTrack (kind "music") this bed is parked on — see
+   *  EdlTrackSchema's own doc comment. */
+  trackId: z.string().optional(),
 });
 
 export const EdlSchema = z.object({
@@ -1667,6 +1712,12 @@ export const EdlSchema = z.object({
    *  movable/trimmable/mixable, addressed by its own id like every other
    *  free-floating track. */
   music: z.array(EdlMusicSchema).default([]),
+  /** Every vertical layer a free-floating clip (overlay/sfx/captions/
+   *  music) can be parked on — see EdlTrackSchema's own doc comment.
+   *  Defaults to empty for any document written before this field
+   *  existed; timelineOps.ts's normalizeTracks backfills it (and every
+   *  clip's own trackId) the moment such a document is next read. */
+  tracks: z.array(EdlTrackSchema).default([]),
   /**
    * Staging map: public/-relative src → absolute source path. The render
    * stage copies these into public/ so staticFile can serve them. Purely

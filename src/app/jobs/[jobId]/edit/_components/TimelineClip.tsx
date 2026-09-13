@@ -74,7 +74,12 @@ export function TimelineClip({
    *  decide whether to toggle this clip in/out of a multi-selection or
    *  replace it with just this one. */
   onSelect: (additive: boolean) => void;
-  onCommitMove?: (deltaSec: number) => void;
+  /** `clientY` is the pointer's final screen position — the parent (which
+   *  is the only thing that can see every OTHER row's own screen bounds)
+   *  uses it to decide whether this was an ordinary same-row reposition or
+   *  a drag onto a different layer entirely. Ignored by trim (edges never
+   *  change layer, only timing). */
+  onCommitMove?: (deltaSec: number, clientY: number) => void;
   onCommitTrim?: (edge: "in" | "out", deltaSec: number) => void;
   /** Magnetic alignment: given the pixels the pointer has actually
    *  traveled, returns the pixels the clip should move — pulled onto a
@@ -87,8 +92,19 @@ export function TimelineClip({
   onSnapGuide?: (sec: number | null) => void;
 }) {
   const [dragPx, setDragPx] = useState(0);
+  // Vertical offset during a live "move" drag only — trim never changes
+  // layer, so an edge-drag never sets this. Purely visual (see the
+  // transform below): the box lifts toward the row the pointer is over so
+  // dragging across a layer boundary reads as "picking this up," not as a
+  // horizontal move that silently also changed track on release.
+  const [dragPy, setDragPy] = useState(0);
   const [trimEdge, setTrimEdge] = useState<"in" | "out" | null>(null);
-  const drag = useRef<{ startX: number; kind: "move" | "in" | "out"; rawPx: number } | null>(null);
+  const drag = useRef<{
+    startX: number;
+    startY: number;
+    kind: "move" | "in" | "out";
+    rawPx: number;
+  } | null>(null);
 
   // A drag that's still live when this clip goes away (an edit elsewhere
   // re-keys the row, the panel closes) would otherwise leave its guide line
@@ -107,9 +123,14 @@ export function TimelineClip({
     onSelect(e.shiftKey || e.metaKey || e.ctrlKey);
     // Move needs onCommitMove; a trim edge needs both onCommitTrim and to be
     // in trimEdges — otherwise this is a plain select-only click.
-    if (kind === "move" ? !onCommitMove : !onCommitTrim || !trimEdges.includes(kind)) return;
+    if (
+      kind === "move"
+        ? !onCommitMove
+        : !onCommitTrim || !trimEdges.includes(kind)
+    )
+      return;
     (e.target as Element).setPointerCapture(e.pointerId);
-    drag.current = { startX: e.clientX, kind, rawPx: 0 };
+    drag.current = { startX: e.clientX, startY: e.clientY, kind, rawPx: 0 };
     if (kind !== "move") setTrimEdge(kind);
   };
 
@@ -122,30 +143,50 @@ export function TimelineClip({
     // the feedback, and the guide line only ever appears over a clip edge
     // that's genuinely sitting on the alignment.
     setDragPx(snapped ? snapped.deltaPx : rawPx);
+    if (drag.current.kind === "move")
+      setDragPy(e.clientY - drag.current.startY);
     onSnapGuide?.(snapped?.guideSec ?? null);
   };
 
-  const endDrag = () => {
+  const endDrag = (e: React.PointerEvent) => {
     if (!drag.current) return;
-    const { kind, rawPx } = drag.current;
+    const { kind, rawPx, startY } = drag.current;
     const movedPx = dragPx;
+    const rawPy = e.clientY - startY;
     drag.current = null;
     setDragPx(0);
+    setDragPy(0);
     setTrimEdge(null);
     onSnapGuide?.(null);
-    // Judged on the RAW travel: a 1px twitch that a nearby boundary pulled
-    // into a 9px offset is still a click, and committing it as a move would
-    // shove the clip on what the user meant as a select.
-    if (Math.abs(rawPx) < CLICK_THRESHOLD_PX) return;
+    // Judged on the RAW travel on EITHER axis: a 1px twitch that a nearby
+    // boundary pulled into a 9px offset is still a click, and committing it
+    // as a move would shove the clip on what the user meant as a select —
+    // and a drag that's purely vertical (retracking straight up/down with
+    // no horizontal component at all) is still a deliberate move, not a
+    // click, so it can't be judged on rawPx alone anymore.
+    if (
+      Math.abs(rawPx) < CLICK_THRESHOLD_PX &&
+      Math.abs(rawPy) < CLICK_THRESHOLD_PX
+    )
+      return;
     const deltaSec = movedPx / pxPerSec;
-    if (kind === "move") onCommitMove?.(deltaSec);
+    if (kind === "move") onCommitMove?.(deltaSec, e.clientY);
     else onCommitTrim?.(kind, deltaSec);
   };
 
   const previewLeft = trimEdge === "in" ? left + dragPx : left;
   const previewWidth =
-    trimEdge === "in" ? width - dragPx : trimEdge === "out" ? width + dragPx : width;
+    trimEdge === "in"
+      ? width - dragPx
+      : trimEdge === "out"
+        ? width + dragPx
+        : width;
   const translateX = trimEdge === null ? dragPx : 0;
+  const translateY = trimEdge === null ? dragPy : 0;
+  // Bumped above every other row while actively being dragged, so a clip
+  // lifted toward another layer visually paints over that row's own clips
+  // instead of disappearing behind them.
+  const dragging = dragPy !== 0 || dragPx !== 0 || trimEdge !== null;
 
   return (
     <div
@@ -161,7 +202,8 @@ export function TimelineClip({
         top: top + 4,
         height: Math.max(height - 8, 4),
         width: Math.max(previewWidth, 4),
-        transform: `translateX(${translateX}px)`,
+        transform: `translate(${translateX}px, ${translateY}px)`,
+        zIndex: dragging ? 50 : undefined,
       }}
       className={`group absolute flex flex-col justify-center overflow-hidden rounded-lg border px-2 text-left transition-shadow duration-150 ${
         onCommitMove ? "cursor-grab active:cursor-grabbing" : "cursor-default"
@@ -173,7 +215,11 @@ export function TimelineClip({
     >
       {thumbnailSrc && (
         <>
-          <img src={thumbnailSrc} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          <img
+            src={thumbnailSrc}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+          />
           <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
         </>
       )}
@@ -202,8 +248,14 @@ export function TimelineClip({
           }}
         />
       )}
-      <p className="relative truncate text-[11px] leading-tight font-medium text-white">{label}</p>
-      {sublabel && <p className="relative truncate text-[10px] leading-tight text-white/70">{sublabel}</p>}
+      <p className="relative truncate text-[11px] leading-tight font-medium text-white">
+        {label}
+      </p>
+      {sublabel && (
+        <p className="relative truncate text-[10px] leading-tight text-white/70">
+          {sublabel}
+        </p>
+      )}
 
       {!locked && onCommitTrim && trimEdges.includes("in") && (
         <div

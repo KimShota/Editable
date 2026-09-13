@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { Edl, EdlCaptionGroup, EdlOverlay, EdlSfx, EdlVideoSegment } from "./types";
+import { Edl, EdlCaptionGroup, EdlOverlay, EdlSfx, EdlTrack, EdlVideoSegment } from "./types";
 import { EdlSchema } from "./schemas";
 import { assertCaptionGroupCoversWords } from "./timing";
 
@@ -49,6 +49,12 @@ export const newClipId = (prefix: string): string => `${prefix}-${randomBytes(4)
 const ClipTrackSchema = z.enum(["video", "overlay", "sfx", "captions"]);
 export type ClipTrack = z.infer<typeof ClipTrackSchema>;
 
+/** The four kinds of vertical layer a free-floating clip can be parked on
+ *  (see schemas.ts's EdlTrackSchema doc comment) — video has no track
+ *  concept of its own, it's the one contiguous main reel. */
+const TrackKindSchema = z.enum(["overlay", "sfx", "captions", "music"]);
+export type TrackKind = z.infer<typeof TrackKindSchema>;
+
 /** Tracks that support delete/deleteMany — the four real clips plus
  *  transition (removed by afterClipId) and music (own id, like sfx). */
 const DeletableTrackSchema = z.enum(["video", "overlay", "sfx", "captions", "transition", "music"]);
@@ -88,6 +94,32 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
     ids: z.array(z.string()).min(1),
     deltaSec: z.number(),
   }),
+  /** Drag a clip vertically onto a different layer — the CapCut gesture of
+   *  dropping a component onto another track (or into empty space, which
+   *  creates one). `trackId` names an existing track of the matching kind
+   *  (validated below); omitted, a fresh track is created instead.
+   *  `tlInSec`, when present, repositions the clip in the SAME atomic edit
+   *  — a real drag is diagonal (both a vertical retrack and a horizontal
+   *  retime happen in one gesture), and splitting that into two ops would
+   *  create a moment where the clip briefly overlaps a neighbor mid-edit. */
+  z.object({
+    type: z.literal("moveToTrack"),
+    kind: TrackKindSchema,
+    id: z.string(),
+    trackId: z.string().optional(),
+    tlInSec: z.number().min(0).optional(),
+  }),
+  /** Explicit "+" affordance for adding an empty layer without dropping
+   *  anything onto it yet. */
+  z.object({
+    type: z.literal("addTrack"),
+    kind: TrackKindSchema,
+    label: z.string().optional(),
+  }),
+  /** Remove an empty layer. Refuses (throws) if any clip still points at
+   *  it — deleting the CLIPS is a separate, explicit action (delete/
+   *  deleteMany); this never silently takes content down with the row. */
+  z.object({ type: z.literal("removeTrack"), trackId: z.string() }),
   /** The CANVAS equivalent of moveMany: multiple overlays' on-screen
    *  boxes (x/y — the spatial position, not when they play) shifted by
    *  the same delta in one atomic edit, for dragging one to move a
@@ -207,6 +239,69 @@ const recomputeVideoTrack = (edl: Edl): void => {
   edl.durationSec = Math.max(...ends, MIN_CLIP_SEC);
 };
 
+/** Greedy interval partitioning, same algorithm the editor's own lanes.ts
+ *  uses for its (purely visual, recomputed-every-render) lane stacking —
+ *  except here the result is PERSISTED as each item's own `trackId` and
+ *  `tracks` gains a real entry per lane, so a placement survives future
+ *  edits instead of being rederived from scratch (and potentially
+ *  reshuffled) every time. An item that already carries a `trackId`
+ *  pointing at a real track of this kind keeps it untouched — this only
+ *  ever assigns items that have none (or whose id points nowhere), which
+ *  in practice means: every clip in a document written before `trackId`
+ *  existed, the first time it's read after this field shipped, and any
+ *  brand-new clip an add* op just pushed with no track opinion of its own.
+ *
+ *  New tracks get a DETERMINISTIC id (`${kind}-autoN`, N = however many
+ *  tracks of this kind exist so far) rather than a random one — this
+ *  function runs on every independent read of a not-yet-persisted
+ *  document (see readOrMigrateEdl), and two such reads have to agree on
+ *  the same ids for the same input or a client's later op would name a
+ *  track the server's own fresh read never produced. */
+const normalizeTracks = <T extends { id: string; tlInSec: number; trackId?: string }>(
+  items: T[],
+  effectiveOutSec: (item: T) => number,
+  tracks: EdlTrack[],
+  kind: TrackKind,
+): void => {
+  const laneEnds = new Map<string, number>();
+  for (const t of tracks) if (t.kind === kind) laneEnds.set(t.id, -Infinity);
+
+  const sorted = [...items].sort((a, b) => a.tlInSec - b.tlInSec);
+  for (const item of sorted) {
+    const outSec = effectiveOutSec(item);
+    if (item.trackId && laneEnds.has(item.trackId)) {
+      laneEnds.set(item.trackId, Math.max(laneEnds.get(item.trackId)!, outSec));
+      continue;
+    }
+    let target: string | undefined;
+    for (const [id, end] of laneEnds) {
+      if (end <= item.tlInSec + 1e-6) {
+        target = id;
+        break;
+      }
+    }
+    if (!target) {
+      target = `${kind}-auto${tracks.filter((t) => t.kind === kind).length}`;
+      tracks.push({ id: target, kind });
+      laneEnds.set(target, -Infinity);
+    }
+    item.trackId = target;
+    laneEnds.set(target, outSec);
+  }
+};
+
+/** Runs normalizeTracks for every free-floating kind — the one call site
+ *  every read/write path (readOrMigrateEdl, applyOp) needs, so nothing
+ *  else has to know there are four separate arrays under one `tracks`
+ *  list. Safe to call on an already-normalized document: every item's
+ *  existing (valid) trackId is a no-op match, not reassigned. */
+export const normalizeAllTracks = (edl: Edl): void => {
+  normalizeTracks(edl.overlays, (o) => o.tlOutSec, edl.tracks, "overlay");
+  normalizeTracks(edl.captions, (c) => c.tlOutSec, edl.tracks, "captions");
+  normalizeTracks(edl.sfx, (s) => s.tlInSec + (s.durationSec ?? edl.durationSec - s.tlInSec), edl.tracks, "sfx");
+  normalizeTracks(edl.music, (m) => m.tlInSec + (m.durationSec ?? edl.durationSec - m.tlInSec), edl.tracks, "music");
+};
+
 const findIndexOrThrow = <T extends { id: string }>(arr: T[], id: string, what: string): number => {
   const i = arr.findIndex((c) => c.id === id);
   if (i === -1) throw new Error(`timeline op: ${what} "${id}" not found`);
@@ -214,15 +309,18 @@ const findIndexOrThrow = <T extends { id: string }>(arr: T[], id: string, what: 
 };
 
 /**
- * Captions render one group at a time in the finished video (Captions.tsx
- * picks whichever group's time window contains the current frame — first
- * array match wins). Unlike sfx/overlays, which can legitimately overlap
- * and play/show simultaneously, two caption groups can NEVER overlap: if
- * they did, one of them would just silently never appear for however long
- * their windows overlapped — which is exactly what "the one being dragged
- * disappears" is. So dragging one into another's time window snaps it to
- * start right after whichever group(s) it now overlaps, keeping its own
- * duration, instead of ever allowing the overlap to exist.
+ * Two caption groups on the SAME track can never overlap: Captions.tsx
+ * picks whichever group's time window contains the current frame within a
+ * given variant — first array match wins — so if two on one track did
+ * overlap, one of them would just silently never appear for however long
+ * their windows overlapped, which is exactly what "the one being dragged
+ * disappears" is. So dragging one into another's time window on the SAME
+ * track snaps it to start right after whichever group(s) it now overlaps,
+ * keeping its own duration, instead of ever allowing the overlap to exist.
+ * Two groups on DIFFERENT caption tracks are exactly what a second track
+ * is for — see schemas.ts's EdlCaptionGroupSchema.trackId doc comment —
+ * so they're excluded here, same as sfx/overlays are already allowed to
+ * overlap freely across the board.
  *
  * One push can land inside a THIRD group sitting right after the one just
  * pushed past (captions often sit back-to-back with little gap) — so this
@@ -233,7 +331,11 @@ const findIndexOrThrow = <T extends { id: string }>(arr: T[], id: string, what: 
 const resolveCaptionOverlap = (edl: Edl, moved: EdlCaptionGroup): void => {
   for (let i = 0; i < edl.captions.length; i++) {
     const overlapping = edl.captions.filter(
-      (g) => g.id !== moved.id && g.tlInSec < moved.tlOutSec && g.tlOutSec > moved.tlInSec,
+      (g) =>
+        g.id !== moved.id &&
+        g.trackId === moved.trackId &&
+        g.tlInSec < moved.tlOutSec &&
+        g.tlOutSec > moved.tlInSec,
     );
     if (overlapping.length === 0) return;
     const pushToSec = Math.max(...overlapping.map((g) => g.tlOutSec));
@@ -301,6 +403,55 @@ const applyMove = (edl: Edl, op: Extract<TimelineOp, { type: "move" }>): void =>
 
 const applyMoveMany = (edl: Edl, op: Extract<TimelineOp, { type: "moveMany" }>): void => {
   for (const id of op.ids) shiftFloatingClip(edl, op.track, id, op.deltaSec);
+};
+
+const applyMoveToTrack = (edl: Edl, op: Extract<TimelineOp, { type: "moveToTrack" }>): void => {
+  const clip =
+    op.kind === "overlay"
+      ? edl.overlays[findIndexOrThrow(edl.overlays, op.id, "overlay")]
+      : op.kind === "sfx"
+        ? edl.sfx[findIndexOrThrow(edl.sfx, op.id, "sfx")]
+        : op.kind === "captions"
+          ? edl.captions[findIndexOrThrow(edl.captions, op.id, "caption group")]
+          : edl.music[findIndexOrThrow(edl.music, op.id, "music bed")];
+
+  if (op.trackId) {
+    const track = edl.tracks.find((t) => t.id === op.trackId);
+    if (!track) throw new Error(`timeline op: track "${op.trackId}" not found`);
+    if (track.kind !== op.kind) {
+      throw new Error(`timeline op: track "${op.trackId}" is a ${track.kind} track, not ${op.kind}`);
+    }
+    clip.trackId = op.trackId;
+  } else {
+    const id = newClipId(`${op.kind}-track`);
+    edl.tracks.push({ id, kind: op.kind });
+    clip.trackId = id;
+  }
+
+  // Retrack first, retime second: a diagonal drag's horizontal component
+  // goes through the SAME path an ordinary move takes (shiftFloatingClip),
+  // so captions get resolveCaptionOverlap's push-apart logic against their
+  // NEW track's own neighbors (already reassigned above), not the old
+  // track's.
+  if (op.tlInSec !== undefined) {
+    shiftFloatingClip(edl, op.kind, op.id, op.tlInSec - clip.tlInSec);
+  }
+};
+
+const applyAddTrack = (edl: Edl, op: Extract<TimelineOp, { type: "addTrack" }>): void => {
+  edl.tracks.push({ id: newClipId(`${op.kind}-track`), kind: op.kind, label: op.label });
+};
+
+const applyRemoveTrack = (edl: Edl, op: Extract<TimelineOp, { type: "removeTrack" }>): void => {
+  const track = edl.tracks.find((t) => t.id === op.trackId);
+  if (!track) throw new Error(`timeline op: track "${op.trackId}" not found`);
+  const inUse =
+    edl.overlays.some((o) => o.trackId === op.trackId) ||
+    edl.sfx.some((s) => s.trackId === op.trackId) ||
+    edl.captions.some((c) => c.trackId === op.trackId) ||
+    edl.music.some((m) => m.trackId === op.trackId);
+  if (inUse) throw new Error("timeline op: cannot remove a track that still has clips on it — move or delete its clips first");
+  edl.tracks = edl.tracks.filter((t) => t.id !== op.trackId);
 };
 
 const applyShiftOverlayBoxMany = (edl: Edl, op: Extract<TimelineOp, { type: "shiftOverlayBoxMany" }>): void => {
@@ -818,7 +969,11 @@ export const applyOp = (edl: Edl, opInput: unknown): Edl => {
   const op = TimelineOpSchema.parse(opInput);
 
   // Restore ignores the current document entirely — it replaces it.
-  if (op.type === "restore") return EdlSchema.parse(op.edl);
+  if (op.type === "restore") {
+    const restored = EdlSchema.parse(op.edl);
+    normalizeAllTracks(restored);
+    return EdlSchema.parse(restored);
+  }
 
   const next = clone(edl);
 
@@ -847,6 +1002,15 @@ export const applyOp = (edl: Edl, opInput: unknown): Edl => {
     case "moveMany":
       applyMoveMany(next, op);
       break;
+    case "moveToTrack":
+      applyMoveToTrack(next, op);
+      break;
+    case "addTrack":
+      applyAddTrack(next, op);
+      break;
+    case "removeTrack":
+      applyRemoveTrack(next, op);
+      break;
     case "shiftOverlayBoxMany":
       applyShiftOverlayBoxMany(next, op);
       break;
@@ -867,5 +1031,11 @@ export const applyOp = (edl: Edl, opInput: unknown): Edl => {
       break;
   }
 
+  // Every op above may have added a clip with no trackId opinion of its
+  // own (a fresh addOverlay/addSfx/addMusic) or left a legacy document's
+  // pre-existing clips untouched — this is the one place that guarantees
+  // every clip and `tracks` entry are consistent before the document is
+  // ever handed back to a client or written to disk.
+  normalizeAllTracks(next);
   return EdlSchema.parse(next);
 };
