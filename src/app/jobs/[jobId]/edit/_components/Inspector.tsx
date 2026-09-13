@@ -789,24 +789,31 @@ export function Inspector({
               which doesn't even support the move/position editing every
               other variant already has. */}
           {group.variant !== "karaokeTitle" && (
-            <TextStyleFields
-              override={group as TextStyleOverride}
-              defaults={effectiveCaptionDefaults(group, edl)}
-              onPatch={patchCaptionStyle}
-              onResetAll={() =>
-                patchCaptionStyle({
-                  fontSize: null,
-                  fontFamily: null,
-                  color: null,
-                  fontWeight: null,
-                  italic: null,
-                  underline: null,
-                  textCase: null,
-                })
-              }
-            />
+            <>
+              <p className="text-xs text-[color:var(--ed-ink-dim)]">
+                Style and position apply to every caption on this track at
+                once (like CapCut&apos;s caption styling) — this is one look
+                for the whole track, not just this moment&apos;s text.
+              </p>
+              <TextStyleFields
+                override={group as TextStyleOverride}
+                defaults={effectiveCaptionDefaults(group, edl)}
+                onPatch={patchCaptionStyle}
+                onResetAll={() =>
+                  patchCaptionStyle({
+                    fontSize: null,
+                    fontFamily: null,
+                    color: null,
+                    fontWeight: null,
+                    italic: null,
+                    underline: null,
+                    textCase: null,
+                  })
+                }
+              />
+            </>
           )}
-          <Field label="Position">
+          <Field label="Position (applies to every caption on this track)">
             <p className="text-xs text-[color:var(--ed-ink-dim)]">
               {isPositioned
                 ? `Moved by hand to ${(group.x! * 100).toFixed(0)}%, ${(group.y! * 100).toFixed(0)}% of the frame. Drag it on the preview to adjust.`

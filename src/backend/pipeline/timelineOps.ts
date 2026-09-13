@@ -754,6 +754,44 @@ const applyDeleteMany = (edl: Edl, op: Extract<TimelineOp, { type: "deleteMany" 
   edl.sfx = edl.sfx.filter((s) => !ids.has(s.id));
 };
 
+/** Applies a caption setProp patch's position/typography fields to ONE
+ *  group — factored out so applySetProp's "captions" branch can run it
+ *  across every group on a track instead of just the one the client
+ *  addressed. This is the CapCut-style "Apply to all" behavior: captions
+ *  read as one continuous track with one consistent look, not a pile of
+ *  independently-styled clips, so restyling any single moment is
+ *  understood as restyling the whole track by default. Content (`words`)
+ *  is the one thing this deliberately never touches — that's each group's
+ *  own, handled separately by the caller.
+ *
+ *  An explicit `null` on x/y or any typography key means "put this back on
+ *  automatic" (checked separately from a MISSING key, since `patch` only
+ *  ever carries the fields the client actually meant to change) — same
+ *  "explicit null deletes the field" contract the overlay branch's own
+ *  params loop uses for "Reset to template style," so a batch reset clears
+ *  every group in the track back to the format's own automatic layout at
+ *  once, exactly as consistently as a batch restyle sets one. */
+const CAPTION_STYLE_KEYS = ["fontSize", "fontFamily", "color", "fontWeight", "italic", "underline", "textCase"] as const;
+const applyCaptionStylePatch = (clip: EdlCaptionGroup, patch: Record<string, unknown>): void => {
+  // Canvas drag: the group's own on-screen position (see
+  // EdlCaptionGroupSchema).
+  if (patch.x === null || patch.y === null) {
+    delete clip.x;
+    delete clip.y;
+  } else if (typeof patch.x === "number" && typeof patch.y === "number") {
+    // Clamped so a caption can never be dragged fully off-frame into a
+    // position it can't be grabbed back from.
+    clip.x = clamp(patch.x, 0, 1);
+    clip.y = clamp(patch.y, 0, 1);
+  }
+  for (const key of CAPTION_STYLE_KEYS) {
+    if (!(key in patch)) continue;
+    const value = patch[key];
+    if (value === null) delete clip[key];
+    else (clip as Record<string, unknown>)[key] = value;
+  }
+};
+
 /** Allow-listed patch fields per track — the only properties setProp may
  *  touch. Timing fields are deliberately absent: they only ever move
  *  through move/trimEdge/reorder/split, so this can't break contiguity. */
@@ -859,35 +897,16 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
     // timing; a different length = the client already redistributed new
     // timing evenly across the group's span) — this just trusts it,
     // re-validated by EdlSchema.parse at the end of applyOp either way.
+    // Content is the one thing that's NEVER batched below — every group
+    // has its own words, only one of them is being corrected here.
     if (Array.isArray(op.patch.words) && op.patch.words.length > 0) {
       clip.words = op.patch.words as typeof clip.words;
     }
-    // Canvas drag: the group's own on-screen position (see
-    // EdlCaptionGroupSchema). An explicit null on either axis means "put
-    // this back on automatic placement" — checked separately from a
-    // MISSING key, since `patch` only ever carries the fields the client
-    // actually meant to change, so absent must keep the current value.
-    if (op.patch.x === null || op.patch.y === null) {
-      delete clip.x;
-      delete clip.y;
-    } else if (typeof op.patch.x === "number" && typeof op.patch.y === "number") {
-      // Clamped so a caption can never be dragged fully off-frame into a
-      // position it can't be grabbed back from.
-      clip.x = clamp(op.patch.x, 0, 1);
-      clip.y = clamp(op.patch.y, 0, 1);
-    }
-    // Typography override (see EdlCaptionGroupSchema doc comment) — same
-    // "explicit null deletes the field, back to the template's own
-    // automatic style" contract as x/y above and as the overlay branch's
-    // params loop, so the Inspector's "Reset to template style" and a
-    // corner-drag's resize-the-font both work the same way here as they
-    // do for a TextOverlay event.
-    const captionStyleKeys = ["fontSize", "fontFamily", "color", "fontWeight", "italic", "underline", "textCase"] as const;
-    for (const key of captionStyleKeys) {
-      if (!(key in op.patch)) continue;
-      const value = op.patch[key];
-      if (value === null) delete clip[key];
-      else (clip as Record<string, unknown>)[key] = value;
+    // Position + typography ARE batched — see applyCaptionStylePatch's own
+    // doc comment for why editing any one caption is understood as
+    // restyling the whole track, CapCut's own "Apply to all" default.
+    for (const g of edl.captions) {
+      if (g.trackId === clip.trackId) applyCaptionStylePatch(g, op.patch);
     }
     return;
   }
