@@ -17,6 +17,7 @@ import { applyInserts, generate } from "./generate";
 import { GeneratorChoice } from "./generation";
 import { transcribe } from "./transcribe";
 import { deriveTranscriptAndTrimWithStandalone, takeIsBound } from "./splitTake";
+import { extractNameAudioClips } from "./namesTake";
 import { readDiscovered, readSplit, runSplit } from "./orchestrate";
 import { discover, discoverResultToSplitTake, DiscoverResult } from "./discover";
 import { expandFormat, hasRepeatBlock } from "./expandFormat";
@@ -257,6 +258,28 @@ const main = async () => {
     }
   }
   if (stop("generate")) return;
+
+  // Splits a bound namesTakeSlot (see FormatSchema's own doc comment) into
+  // one audio-only clip per voice block, registered as a synthetic
+  // "<videoSlot>-nameAudio" binding, plus each block's own nameTextSlot —
+  // a no-op for every format that doesn't declare namesTakeSlot. Mirrors
+  // orchestrate.ts's buildJob/reassembleJob (this CLI doesn't share that
+  // function — see this file's own top-of-file doc comment on why), which
+  // is where this used to live exclusively; the web app's Build button
+  // actually spawns THIS file as a subprocess (see build/route.ts), so
+  // skipping this step here left every namesTakeSlot format (e.g.
+  // category-tier-list-reveal) with no name bindings at assemble time —
+  // assemble.ts's resolveNestedSlots drops a TierBoard reveal's entire
+  // entry (logo included) the moment ANY one of its nested slots (here,
+  // nameTextSlot) comes back unfilled, so the board rendered but never
+  // gained a single logo. Runs unconditionally (not gated by wants/stop,
+  // same as the inserts restore above) so every later stage — including a
+  // `--only transcribe`/`--only trim` rerun — sees the same bindings a
+  // full run would have produced; cheap even then, since extractNameAudioClips
+  // caches its ffmpeg extraction by source+region hash.
+  const namesTake = extractNameAudioClips(format, filled);
+  write("namesTake", namesTake.clips);
+  filled = namesTake.filled;
 
   // Single-take (or mixed) mode: whenever this job actually bound a
   // speakingTakeSlot (takeIsBound), transcript/trim both come from the

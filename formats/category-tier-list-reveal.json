@@ -166,8 +166,7 @@
               "entries": [],
               "reveal": {
                 "logoImageSlot": "logo1",
-                "tierTextSlot": "tier1",
-                "nameTextSlot": "name1"
+                "tierTextSlot": "tier1"
               }
             }
           },
@@ -283,14 +282,12 @@
               "entries": [
                 {
                   "logoImageSlot": "logo1",
-                  "tierTextSlot": "tier1",
-                  "nameTextSlot": "name1"
+                  "tierTextSlot": "tier1"
                 }
               ],
               "reveal": {
                 "logoImageSlot": "logo2",
-                "tierTextSlot": "tier2",
-                "nameTextSlot": "name2"
+                "tierTextSlot": "tier2"
               }
             }
           },
@@ -406,19 +403,16 @@
               "entries": [
                 {
                   "logoImageSlot": "logo1",
-                  "tierTextSlot": "tier1",
-                  "nameTextSlot": "name1"
+                  "tierTextSlot": "tier1"
                 },
                 {
                   "logoImageSlot": "logo2",
-                  "tierTextSlot": "tier2",
-                  "nameTextSlot": "name2"
+                  "tierTextSlot": "tier2"
                 }
               ],
               "reveal": {
                 "logoImageSlot": "logo3",
-                "tierTextSlot": "tier3",
-                "nameTextSlot": "name3"
+                "tierTextSlot": "tier3"
               }
             }
           },
@@ -534,24 +528,20 @@
               "entries": [
                 {
                   "logoImageSlot": "logo1",
-                  "tierTextSlot": "tier1",
-                  "nameTextSlot": "name1"
+                  "tierTextSlot": "tier1"
                 },
                 {
                   "logoImageSlot": "logo2",
-                  "tierTextSlot": "tier2",
-                  "nameTextSlot": "name2"
+                  "tierTextSlot": "tier2"
                 },
                 {
                   "logoImageSlot": "logo3",
-                  "tierTextSlot": "tier3",
-                  "nameTextSlot": "name3"
+                  "tierTextSlot": "tier3"
                 }
               ],
               "reveal": {
                 "logoImageSlot": "logo4",
-                "tierTextSlot": "tier4",
-                "nameTextSlot": "name4"
+                "tierTextSlot": "tier4"
               }
             }
           },
@@ -667,29 +657,24 @@
               "entries": [
                 {
                   "logoImageSlot": "logo1",
-                  "tierTextSlot": "tier1",
-                  "nameTextSlot": "name1"
+                  "tierTextSlot": "tier1"
                 },
                 {
                   "logoImageSlot": "logo2",
-                  "tierTextSlot": "tier2",
-                  "nameTextSlot": "name2"
+                  "tierTextSlot": "tier2"
                 },
                 {
                   "logoImageSlot": "logo3",
-                  "tierTextSlot": "tier3",
-                  "nameTextSlot": "name3"
+                  "tierTextSlot": "tier3"
                 },
                 {
                   "logoImageSlot": "logo4",
-                  "tierTextSlot": "tier4",
-                  "nameTextSlot": "name4"
+                  "tierTextSlot": "tier4"
                 }
               ],
               "reveal": {
                 "logoImageSlot": "logo5",
-                "tierTextSlot": "tier5",
-                "nameTextSlot": "name5"
+                "tierTextSlot": "tier5"
               }
             }
           },
@@ -805,34 +790,28 @@
               "entries": [
                 {
                   "logoImageSlot": "logo1",
-                  "tierTextSlot": "tier1",
-                  "nameTextSlot": "name1"
+                  "tierTextSlot": "tier1"
                 },
                 {
                   "logoImageSlot": "logo2",
-                  "tierTextSlot": "tier2",
-                  "nameTextSlot": "name2"
+                  "tierTextSlot": "tier2"
                 },
                 {
                   "logoImageSlot": "logo3",
-                  "tierTextSlot": "tier3",
-                  "nameTextSlot": "name3"
+                  "tierTextSlot": "tier3"
                 },
                 {
                   "logoImageSlot": "logo4",
-                  "tierTextSlot": "tier4",
-                  "nameTextSlot": "name4"
+                  "tierTextSlot": "tier4"
                 },
                 {
                   "logoImageSlot": "logo5",
-                  "tierTextSlot": "tier5",
-                  "nameTextSlot": "name5"
+                  "tierTextSlot": "tier5"
                 }
               ],
               "reveal": {
                 "logoImageSlot": "logo6",
-                "tierTextSlot": "tier6",
-                "nameTextSlot": "name6"
+                "tierTextSlot": "tier6"
               }
             }
           },
