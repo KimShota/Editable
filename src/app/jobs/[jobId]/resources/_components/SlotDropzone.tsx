@@ -392,7 +392,7 @@ export function SlotDropzone({
         />
         <div className="flex flex-col gap-2">
           {(takeFiles ?? []).map((file, i) => (
-            <div key={file} className="relative overflow-hidden rounded-lg border border-white/10 bg-black/30">
+            <div key={file} className="relative min-h-[80px] overflow-hidden rounded-lg border border-white/10 bg-black/30">
               <div className="absolute top-2 left-2 z-10 rounded-full bg-black/70 px-2 py-0.5 text-[11px] text-white">
                 {slot.mediaType === "image" ? `Photo ${i + 1}` : `Take ${i + 1}`}
               </div>
@@ -447,7 +447,7 @@ export function SlotDropzone({
         onChange={(e) => e.target.files?.[0] && handleFiles([e.target.files[0]])}
       />
       {boundFile ? (
-        <div className="relative overflow-hidden rounded-lg border border-white/10 bg-black/30">
+        <div className="relative min-h-[110px] overflow-hidden rounded-lg border border-white/10 bg-black/30">
           <SlotPreview jobId={jobId} slot={slot} file={boundFile} />
           <div className="absolute top-2 right-2 flex gap-1.5">
             <button
@@ -596,16 +596,36 @@ function SlotShell({
   );
 }
 
+/** A bound file that can't actually be decoded/rendered as its slot's media
+ *  type (wrong format, corrupted upload, a mismatch the intake pipeline
+ *  hasn't caught yet) used to leave the <img>/<video>/<audio> tag broken or
+ *  collapsed to near-zero height — which pushed the Replace/Clear buttons
+ *  (absolutely positioned over this preview) out of view too, so a file
+ *  that couldn't be previewed effectively couldn't be removed either. This
+ *  always renders SOMETHING with real height, so those buttons stay put and
+ *  clickable no matter what the file turns out to be. */
 function SlotPreview({ jobId, slot, file }: { jobId: string; slot: Slot; file: string }) {
+  const [failed, setFailed] = useState(false);
   const src = mediaUrl(jobId, file);
+  const onError = () => setFailed(true);
+
+  if (failed) {
+    return (
+      <div className="flex min-h-[110px] flex-col items-center justify-center gap-1 p-4 text-center">
+        <p className="text-xs text-[color:var(--ink-dim)]">
+          Couldn&apos;t preview this file — use Replace or Clear below.
+        </p>
+      </div>
+    );
+  }
   if (slot.mediaType === "video") {
-    return <video src={src} controls muted className="max-h-[220px] w-full object-contain" />;
+    return <video src={src} controls muted onError={onError} className="max-h-[220px] w-full object-contain" />;
   }
   if (slot.mediaType === "image") {
-    return <img src={src} alt="" className="max-h-[220px] w-full object-contain" />;
+    return <img src={src} alt="" onError={onError} className="max-h-[220px] w-full object-contain" />;
   }
   return (
-    <audio src={src} controls className="w-full p-3">
+    <audio src={src} controls onError={onError} className="w-full p-3">
       Your browser does not support audio playback.
     </audio>
   );

@@ -21,7 +21,7 @@ import { readScriptSuggestions } from "./alignToScript";
  * and reports ALL problems at once instead of one per run.
  */
 
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
 
 type ProbedMedia = {
   mediaType: "video" | "image" | "audio";
