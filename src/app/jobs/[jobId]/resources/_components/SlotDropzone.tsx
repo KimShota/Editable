@@ -361,18 +361,15 @@ export function SlotDropzone({
           rows={3}
           className="w-full resize-none rounded-lg border border-white/12 bg-black/20 p-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
         />
-        {slot.example && (
-          <p className="mt-1 text-[11px] text-[color:var(--ink-dim)]">
-            Example: {slot.example}
+        {/* Saving/Saved/error replace each other in the same line instead of
+            stacking — only one is ever relevant at a time. */}
+        {(busy || (savedFlash && !busy) || error) && (
+          <p
+            className={`mt-1 text-[11px] ${error ? "text-red-400" : busy ? "text-[color:var(--ink-dim)]" : "text-emerald-400"}`}
+          >
+            {error ?? (busy ? "Saving…" : "Saved")}
           </p>
         )}
-        {busy && (
-          <p className="mt-1 text-xs text-[color:var(--ink-dim)]">Saving…</p>
-        )}
-        {savedFlash && !busy && (
-          <p className="mt-1 text-xs text-emerald-400">Saved</p>
-        )}
-        {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
       </SlotShell>
     );
   }
@@ -695,9 +692,14 @@ function SlotShell({
           </span>
         )}
       </div>
-      <p className="text-[12px] leading-snug text-[color:var(--ink-dim)]">
-        {slot.instructions}
-      </p>
+      {/* Instructions are the "what do I do here" hint — once the field is
+          filled the user already knows, so this steps aside instead of
+          permanently taking up a line under every field. */}
+      {!filled && slot.instructions && (
+        <p className="text-[12px] leading-snug text-[color:var(--ink-dim)]">
+          {slot.instructions}
+        </p>
+      )}
       {coveredNote && (
         <p className="rounded-md border border-dashed border-[color:var(--accent)]/30 bg-[color:var(--accent)]/5 px-2 py-1 text-[11px] leading-snug text-[color:var(--accent)]">
           {coveredNote}

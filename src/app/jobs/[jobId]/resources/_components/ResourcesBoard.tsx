@@ -16,7 +16,6 @@ import {
 import { LibraryPanel } from "../../../../_components/library/LibraryPanel";
 import { Binding, mediaUrl, SlotDropzone, bindText } from "./SlotDropzone";
 // import { ScriptPanel } from "./ScriptPanel"; // hidden for now
-import { ScriptLines } from "./ScriptLines";
 import { ScriptingBlockCard } from "./ScriptingBlockCard";
 import { IdentityPhotoGrid } from "./IdentityPhotoGrid";
 import { SplitLines } from "./SplitLines";
@@ -393,25 +392,39 @@ export function ResourcesBoard({
             <>
               {/* Script suggestions — hidden for now */}
               {/* <ScriptPanel jobId={jobId} script={script} onScriptUpdated={setScript} /> */}
-              {hookBlock && (
-                <ScriptLines
-                  jobId={jobId}
-                  format={format}
-                  script={script}
-                  onScriptUpdated={setScript}
-                />
-              )}
               {(() => {
                 let cardIndex = 0;
                 return format.blocks.map((block) => {
-                  // Same reason ScriptLines skips these: one value typed
-                  // against a template that gets cloned per discovered beat
-                  // has no single beat to belong to.
+                  // A `repeat` block is a template discover.ts clones once
+                  // per beat it finds in the footage, deriving that beat's
+                  // line from the footage itself — there is no single line
+                  // to write for it, and a card here would suggest
+                  // otherwise.
                   if (block.repeat) return null;
                   const textSlots = block.slots.filter(
                     (s) => s.mediaType === "text",
                   );
-                  if (textSlots.length === 0) return null;
+                  // An `optional` block is a bonus beat nobody is asked to
+                  // film, and leaving it unfilmed is the normal path —
+                  // assemble.ts skips it cleanly rather than treating it as
+                  // missing, so it gets no spoken-line field either.
+                  const hasSpokenLine = block.kind === "voice" && !block.optional;
+                  if (textSlots.length === 0 && !hasSpokenLine) {
+                    // A silent b-roll beat with nothing to write. Auto-
+                    // generated beats (built from identity photos at build
+                    // time — same condition step 2 uses to hide their
+                    // upload card) aren't even worth a mention here.
+                    if (block.slots.some((s) => s.generation)) return null;
+                    return (
+                      <div
+                        key={block.id}
+                        className="flex items-center gap-2 py-1 pl-1 text-xs text-[color:var(--ink-dim)]"
+                      >
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/20" />
+                        {block.title} — b-roll, nothing to write
+                      </div>
+                    );
+                  }
                   cardIndex += 1;
                   return (
                     <ScriptingBlockCard
@@ -426,6 +439,9 @@ export function ResourcesBoard({
                         suggestionFor(block.id, slotName)
                       }
                       onApplySuggestion={applySuggestion}
+                      hasSpokenLine={hasSpokenLine}
+                      script={script}
+                      onScriptUpdated={setScript}
                     />
                   );
                 });
@@ -435,104 +451,117 @@ export function ResourcesBoard({
 
           {step === 2 && (
             <>
-              {takeSlot && (
-                <Card className="p-6">
-                  <div className="mb-4 flex items-center gap-2">
-                    <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                      Speaking take
-                    </h2>
-                    <Pill>
-                      {takeRequired
-                        ? "one continuous take of all your lines"
-                        : "optional — film it all in one take instead"}
-                    </Pill>
-                  </div>
-                  <div className="max-w-md">
-                    <SlotDropzone
-                      jobId={jobId}
-                      formatId={format.id}
-                      slot={takeSlot}
-                      binding={bindings[takeSlot.name]}
-                      onChange={setBinding}
-                      multi
-                    />
-                  </div>
-                </Card>
-              )}
+              {(() => {
+                // Optional blocks are hidden for the same reason as in step
+                // 1 — a bonus beat nobody's asked to film, whose unfilled
+                // state is the normal path. Generation-marked slots are
+                // never an upload target (see requiredSlots' matching
+                // "don't count it" exclusion), so a block that's 100%
+                // auto-generated has nothing left to show here either.
+                const footageBlocks = format.blocks
+                  .filter((block) => !block.optional)
+                  .map((block) => ({
+                    block,
+                    footageSlots: block.slots.filter(
+                      (s) =>
+                        s.mediaType !== "text" &&
+                        !s.generation &&
+                        !alwaysHiddenSlots.has(s.name),
+                    ),
+                  }))
+                  .filter(({ footageSlots }) => footageSlots.length > 0);
 
-              {format.namesTakeSlot && (
-                <Card className="p-6">
-                  <div className="mb-4 flex items-center gap-2">
-                    <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                      Names take
-                    </h2>
-                    <Pill>one clip, names only</Pill>
-                  </div>
-                  <div className="max-w-md">
-                    <SlotDropzone
-                      jobId={jobId}
-                      formatId={format.id}
-                      slot={format.namesTakeSlot}
-                      binding={bindings[format.namesTakeSlot.name]}
-                      onChange={setBinding}
-                    />
-                  </div>
-                </Card>
-              )}
+                if (!takeSlot && !format.namesTakeSlot && footageBlocks.length === 0)
+                  return null;
 
-              {format.blocks.map((block) => {
-                // Optional blocks are hidden for the same reason as in step 1's
-                // ScriptLines — a bonus beat nobody's asked to film, whose
-                // unfilled state is the normal path. The block stays in the
-                // format; only its upload card is hidden.
-                if (block.optional) return null;
-                // Generation-marked slots are never an upload target and the
-                // user has nothing to do for them (see requiredSlots' matching
-                // "don't count it" exclusion) — filtered out here entirely
-                // rather than shown as an inert badge, so a block that's 100%
-                // auto-generated (e.g. a beat filmed from identity photos)
-                // doesn't render an empty card at all.
-                const footageSlots = block.slots.filter(
-                  (s) =>
-                    s.mediaType !== "text" &&
-                    !s.generation &&
-                    !alwaysHiddenSlots.has(s.name),
-                );
-                if (footageSlots.length === 0) return null;
                 return (
-                  <Card key={block.id} className="p-6">
-                    <div className="mb-4 flex items-center gap-2">
-                      <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                        {block.title}
-                      </h2>
-                      <Pill>
-                        {block.kind === "voice" ? "spoken" : "b-roll"}
-                      </Pill>
-                    </div>
-                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                      {footageSlots.map((slot) => (
-                        <SlotDropzone
-                          key={slot.name}
-                          jobId={jobId}
-                          formatId={format.id}
-                          slot={slot}
-                          binding={bindings[slot.name]}
-                          onChange={setBinding}
-                          multi={
-                            block.kind === "voice" &&
-                            slot.name === block.videoSlot
-                          }
-                          coveredNote={
-                            takeCoveredSlots.has(slot.name)
-                              ? "Covered by your speaking take — drop a clip here to film this line separately instead."
-                              : undefined
-                          }
-                        />
+                  <Card className="p-6">
+                    <h2 className="mb-4 font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
+                      Footage
+                    </h2>
+                    <div className="flex flex-col gap-6 divide-y divide-white/10 [&>*:not(:first-child)]:pt-6">
+                      {takeSlot && (
+                        <div>
+                          <div className="mb-3 flex items-center gap-2">
+                            <p className="text-sm font-medium text-[color:var(--ink)]">
+                              Speaking take
+                            </p>
+                            <Pill>
+                              {takeRequired
+                                ? "one continuous take of all your lines"
+                                : "optional — film it all in one take instead"}
+                            </Pill>
+                          </div>
+                          <div className="max-w-md">
+                            <SlotDropzone
+                              jobId={jobId}
+                              formatId={format.id}
+                              slot={takeSlot}
+                              binding={bindings[takeSlot.name]}
+                              onChange={setBinding}
+                              multi
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {format.namesTakeSlot && (
+                        <div>
+                          <div className="mb-3 flex items-center gap-2">
+                            <p className="text-sm font-medium text-[color:var(--ink)]">
+                              Names take
+                            </p>
+                            <Pill>one clip, names only</Pill>
+                          </div>
+                          <div className="max-w-md">
+                            <SlotDropzone
+                              jobId={jobId}
+                              formatId={format.id}
+                              slot={format.namesTakeSlot}
+                              binding={bindings[format.namesTakeSlot.name]}
+                              onChange={setBinding}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {footageBlocks.map(({ block, footageSlots }) => (
+                        <div key={block.id}>
+                          <div className="mb-3 flex items-center gap-2">
+                            <p className="text-sm font-medium text-[color:var(--ink)]">
+                              {block.title}
+                            </p>
+                            <Pill>
+                              {block.kind === "voice" ? "spoken" : "b-roll"}
+                            </Pill>
+                          </div>
+                          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                            {footageSlots.map((slot) => (
+                              <SlotDropzone
+                                key={slot.name}
+                                jobId={jobId}
+                                formatId={format.id}
+                                slot={slot}
+                                binding={bindings[slot.name]}
+                                onChange={setBinding}
+                                multi={
+                                  block.kind === "voice" &&
+                                  slot.name === block.videoSlot
+                                }
+                                coveredNote={
+                                  takeCoveredSlots.has(slot.name)
+                                    ? "Covered by your speaking take — drop a clip here to film this line separately instead."
+                                    : undefined
+                                }
+                              />
+                            ))}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </Card>
                 );
-              })}
+              })()}
 
               {format.identitySlot && (
                 <IdentityPhotoGrid
@@ -543,62 +572,73 @@ export function ResourcesBoard({
                 />
               )}
 
-              {format.finalClipSlot && (
-                <Card className="p-6">
-                  <div className="mb-4 flex items-center gap-2">
-                    <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                      Final clip
-                    </h2>
-                    <Pill>optional</Pill>
-                  </div>
-                  <div className="max-w-sm">
-                    <SlotDropzone
-                      jobId={jobId}
-                      formatId={format.id}
-                      slot={format.finalClipSlot}
-                      binding={bindings[format.finalClipSlot.name]}
-                      onChange={setBinding}
-                    />
-                  </div>
-                </Card>
-              )}
-
-              {format.sharedSlots.length > 0 && (
-                <Card className="p-6">
-                  <div className="mb-4 flex items-center gap-2">
-                    <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                      Shared sounds
-                    </h2>
-                    <Pill>used across blocks</Pill>
-                  </div>
-                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                    {format.sharedSlots.map((slot) => (
-                      <SlotDropzone
-                        key={slot.name}
-                        jobId={jobId}
-                        formatId={format.id}
-                        slot={slot}
-                        binding={bindings[slot.name]}
-                        onChange={setBinding}
-                      />
-                    ))}
-                  </div>
-                </Card>
-              )}
-
-              {format.musicSlot && (
+              {(format.finalClipSlot ||
+                format.sharedSlots.length > 0 ||
+                format.musicSlot) && (
                 <Card className="p-6">
                   <h2 className="mb-4 font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                    Music
+                    Sounds &amp; extras
                   </h2>
-                  <div className="max-w-sm">
-                    <SlotDropzone
-                      jobId={jobId}
-                      formatId={format.id}
-                      slot={format.musicSlot}
-                      binding={bindings[format.musicSlot.name]}
-                      onChange={setBinding}
-                    />
+                  <div className="flex flex-col gap-6 divide-y divide-white/10 [&>*:not(:first-child)]:pt-6">
+                    {format.finalClipSlot && (
+                      <div>
+                        <div className="mb-3 flex items-center gap-2">
+                          <p className="text-sm font-medium text-[color:var(--ink)]">
+                            Final clip
+                          </p>
+                          <Pill>optional</Pill>
+                        </div>
+                        <div className="max-w-sm">
+                          <SlotDropzone
+                            jobId={jobId}
+                            formatId={format.id}
+                            slot={format.finalClipSlot}
+                            binding={bindings[format.finalClipSlot.name]}
+                            onChange={setBinding}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {format.sharedSlots.length > 0 && (
+                      <div>
+                        <div className="mb-3 flex items-center gap-2">
+                          <p className="text-sm font-medium text-[color:var(--ink)]">
+                            Shared sounds
+                          </p>
+                          <Pill>used across blocks</Pill>
+                        </div>
+                        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                          {format.sharedSlots.map((slot) => (
+                            <SlotDropzone
+                              key={slot.name}
+                              jobId={jobId}
+                              formatId={format.id}
+                              slot={slot}
+                              binding={bindings[slot.name]}
+                              onChange={setBinding}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {format.musicSlot && (
+                      <div>
+                        <p className="mb-3 text-sm font-medium text-[color:var(--ink)]">
+                          Music
+                        </p>
+                        <div className="max-w-sm">
+                          <SlotDropzone
+                            jobId={jobId}
+                            formatId={format.id}
+                            slot={format.musicSlot}
+                            binding={bindings[format.musicSlot.name]}
+                            onChange={setBinding}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </Card>
               )}
