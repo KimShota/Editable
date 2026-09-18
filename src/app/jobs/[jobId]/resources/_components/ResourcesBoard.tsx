@@ -3,12 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Edl, Format, Slot } from "@backend/pipeline/types";
-import type { HookFeedbackResult, ScriptSuggestion } from "@backend/content/types";
+import type {
+  HookFeedbackResult,
+  ScriptSuggestion,
+} from "@backend/content/types";
 import { Button, Card, Pill } from "../../../../_components/ui";
 import { slotLabel } from "../../../../lib/slotLabel";
-import { formatDiscoversItsOwnCuts, formatHasScriptStep } from "../../../../lib/wizardSteps";
+import {
+  formatDiscoversItsOwnCuts,
+  formatHasScriptStep,
+} from "../../../../lib/wizardSteps";
 import { LibraryPanel } from "../../../../_components/library/LibraryPanel";
-import { Binding, SlotDropzone, bindText } from "./SlotDropzone";
+import { Binding, mediaUrl, SlotDropzone, bindText } from "./SlotDropzone";
 // import { ScriptPanel } from "./ScriptPanel"; // hidden for now
 import { ScriptLines } from "./ScriptLines";
 import { ScriptingBlockCard } from "./ScriptingBlockCard";
@@ -16,6 +22,7 @@ import { IdentityPhotoGrid } from "./IdentityPhotoGrid";
 import { SplitLines } from "./SplitLines";
 import { HookFeedbackPanel } from "./HookFeedbackPanel";
 import { WizardFooterNav, WizardHeader, WizardStepInfo } from "./WizardNav";
+import { friendlyStageLabel, ProcessingOverlay } from "./ProcessingOverlay";
 
 /** Every slot the format declares: block, shared, music, identity,
  *  speaking-take, final-clip, and names-take slots — same shape allSlots()
@@ -44,13 +51,15 @@ const STEPS: WizardStepInfo[] = [
     id: 1,
     label: "Write your script",
     kicker: "What's said & shown on screen",
-    description: "Fill in the text below — the preview shows exactly how it'll look in your video.",
+    description:
+      "Fill in the text below — the preview shows exactly how it'll look in your video.",
   },
   {
     id: 2,
     label: "Add your footage",
     kicker: "Clips, photos & sounds",
-    description: "Upload or film the clips each slot asks for, or drag one in from your Library.",
+    description:
+      "Upload or film the clips each slot asks for, or drag one in from your Library.",
   },
   {
     id: 3,
@@ -93,20 +102,28 @@ export function ResourcesBoard({
   const hasScriptStep = useMemo(() => formatHasScriptStep(format), [format]);
   /** See formatDiscoversItsOwnCuts — swaps step 3's hand-splitting panel
    *  for an explanation of what the build will do instead. */
-  const discoversOwnCuts = useMemo(() => formatDiscoversItsOwnCuts(format), [format]);
+  const discoversOwnCuts = useMemo(
+    () => formatDiscoversItsOwnCuts(format),
+    [format],
+  );
   /** The steps this format actually shows, in order. Ids stay 1/2/3 so
    *  every `step === n` branch below keeps meaning the same screen; only
    *  the numbering the user sees, and what Back/Next move between, come
    *  from position in THIS list. */
-  const steps = useMemo(() => (hasScriptStep ? STEPS : STEPS.filter((s) => s.id !== 1)), [hasScriptStep]);
+  const steps = useMemo(
+    () => (hasScriptStep ? STEPS : STEPS.filter((s) => s.id !== 1)),
+    [hasScriptStep],
+  );
 
   const stepParam = Number(searchParams.get("step"));
   const step = steps.some((s) => s.id === stepParam) ? stepParam : steps[0].id;
   const stepIndex = steps.findIndex((s) => s.id === step);
 
-  const goToStep = (next: number) => router.replace(`${pathname}?step=${next}`, { scroll: false });
+  const goToStep = (next: number) =>
+    router.replace(`${pathname}?step=${next}`, { scroll: false });
 
-  const [bindings, setBindings] = useState<Record<string, Binding | undefined>>(initialBindings);
+  const [bindings, setBindings] =
+    useState<Record<string, Binding | undefined>>(initialBindings);
   const [script, setScript] = useState<ScriptSuggestion | null>(initialScript);
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [building, setBuilding] = useState(false);
@@ -142,7 +159,9 @@ export function ResourcesBoard({
     () =>
       new Set(
         takeSlot && takeRequired
-          ? format.blocks.filter((b) => b.kind === "voice" && !b.optional).map((b) => b.videoSlot)
+          ? format.blocks
+              .filter((b) => b.kind === "voice" && !b.optional)
+              .map((b) => b.videoSlot)
           : [],
       ),
     [format, takeSlot, takeRequired],
@@ -160,7 +179,10 @@ export function ResourcesBoard({
       new Set(
         takeSlot && !takeRequired && takeIsBound
           ? format.blocks
-              .filter((b) => b.kind === "voice" && !b.optional && !bindings[b.videoSlot])
+              .filter(
+                (b) =>
+                  b.kind === "voice" && !b.optional && !bindings[b.videoSlot],
+              )
               .map((b) => b.videoSlot)
           : [],
       ),
@@ -170,7 +192,11 @@ export function ResourcesBoard({
   const requiredSlots = useMemo(
     () =>
       allSlots(format).filter(
-        (s) => s.required && !s.generation && !alwaysHiddenSlots.has(s.name) && !takeCoveredSlots.has(s.name),
+        (s) =>
+          s.required &&
+          !s.generation &&
+          !alwaysHiddenSlots.has(s.name) &&
+          !takeCoveredSlots.has(s.name),
       ),
     [format, alwaysHiddenSlots, takeCoveredSlots],
   );
@@ -183,7 +209,10 @@ export function ResourcesBoard({
    *  hidden by the mandatory take (see alwaysHiddenSlots above). Used to
    *  block leaving step 2 without them, rather than only surfacing the gap
    *  once the user's already on step 3's build screen. */
-  const step2RequiredSlots = useMemo(() => requiredSlots.filter((s) => s.mediaType !== "text"), [requiredSlots]);
+  const step2RequiredSlots = useMemo(
+    () => requiredSlots.filter((s) => s.mediaType !== "text"),
+    [requiredSlots],
+  );
   const step2Ready = step2RequiredSlots.every((s) => bindings[s.name]);
 
   useEffect(() => {
@@ -200,7 +229,9 @@ export function ResourcesBoard({
    *  stays unrestricted — this only blocks skipping step 2 unfinished. */
   const attemptGoToStep = (next: number) => {
     if (next >= 3 && !step2Ready) {
-      const missing = step2RequiredSlots.filter((s) => !bindings[s.name]).map((s) => slotLabel(s));
+      const missing = step2RequiredSlots
+        .filter((s) => !bindings[s.name])
+        .map((s) => slotLabel(s));
       setAdvanceError(`Add these before continuing: ${missing.join(", ")}.`);
       return;
     }
@@ -209,9 +240,13 @@ export function ResourcesBoard({
   };
   /** "The hook" = the first voice block, true across every format so far
    *  without hardcoding an id string — see content/virality.ts. */
-  const hookBlock = useMemo(() => format.blocks.find((b) => b.kind === "voice"), [format]);
+  const hookBlock = useMemo(
+    () => format.blocks.find((b) => b.kind === "voice"),
+    [format],
+  );
 
-  const speakingTakeFile = takeBinding && "file" in takeBinding ? takeBinding.file : undefined;
+  const speakingTakeFile =
+    takeBinding && "file" in takeBinding ? takeBinding.file : undefined;
 
   const setBinding = (slotName: string, binding: Binding | undefined) => {
     setBindings((prev) => ({ ...prev, [slotName]: binding }));
@@ -295,7 +330,8 @@ export function ResourcesBoard({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "build failed");
-      if (!buildTimer.current) buildTimer.current = setInterval(pollBuildStatus, BUILD_POLL_MS);
+      if (!buildTimer.current)
+        buildTimer.current = setInterval(pollBuildStatus, BUILD_POLL_MS);
       handleBuildStatus(data);
     } catch (err) {
       setBuilding(false);
@@ -304,121 +340,239 @@ export function ResourcesBoard({
   };
 
   const suggestionFor = (blockId: string, slotName: string) =>
-    script?.suggestions.find((s) => s.blockId === blockId && s.slotName === slotName);
+    script?.suggestions.find(
+      (s) => s.blockId === blockId && s.slotName === slotName,
+    );
+
+  // Every video/image actually bound so far, across every slot — what
+  // ProcessingOverlay shows scrolling by during the build. Audio (music,
+  // sfx) and text slots have nothing to look at, so they're left out; a
+  // multi-take binding (the speaking take, identity photos) contributes
+  // one thumbnail per file. Capped well above what any real format binds,
+  // just so a pathological format can't autoplay dozens of <video> tags
+  // at once.
+  const footageClips = useMemo(() => {
+    const clips: {
+      url: string;
+      mediaType: "video" | "image";
+      label: string;
+    }[] = [];
+    for (const slot of allSlots(format)) {
+      if (slot.mediaType !== "video" && slot.mediaType !== "image") continue;
+      const binding = bindings[slot.name];
+      if (!binding) continue;
+      const files =
+        "file" in binding
+          ? [binding.file]
+          : "files" in binding
+            ? binding.files
+            : [];
+      files.forEach((file, i) => {
+        clips.push({
+          url: mediaUrl(jobId, file),
+          mediaType: slot.mediaType as "video" | "image",
+          label:
+            files.length > 1 ? `${slotLabel(slot)} ${i + 1}` : slotLabel(slot),
+        });
+      });
+    }
+    return clips.slice(0, 16);
+  }, [format, bindings, jobId]);
 
   return (
-    <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1fr_340px]">
-      <div className="flex flex-col gap-6">
-        <WizardHeader steps={steps} current={step} onSelect={attemptGoToStep} />
+    <>
+      <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1fr_340px]">
+        <div className="flex flex-col gap-6">
+          <WizardHeader
+            steps={steps}
+            current={step}
+            onSelect={attemptGoToStep}
+          />
 
-        {step === 1 && (
-          <>
-            {/* Script suggestions — hidden for now */}
-            {/* <ScriptPanel jobId={jobId} script={script} onScriptUpdated={setScript} /> */}
-            {hookBlock && (
-              <ScriptLines jobId={jobId} format={format} script={script} onScriptUpdated={setScript} />
-            )}
-            {(() => {
-              let cardIndex = 0;
-              return format.blocks.map((block) => {
-                // Same reason ScriptLines skips these: one value typed
-                // against a template that gets cloned per discovered beat
-                // has no single beat to belong to.
-                if (block.repeat) return null;
-                const textSlots = block.slots.filter((s) => s.mediaType === "text");
-                if (textSlots.length === 0) return null;
-                cardIndex += 1;
-                return (
-                  <ScriptingBlockCard
-                    key={block.id}
-                    jobId={jobId}
-                    format={format}
-                    block={block}
-                    index={cardIndex}
-                    bindings={bindings}
-                    onChange={setBinding}
-                    suggestionFor={(slotName) => suggestionFor(block.id, slotName)}
-                    onApplySuggestion={applySuggestion}
-                  />
-                );
-              });
-            })()}
-          </>
-        )}
+          {step === 1 && (
+            <>
+              {/* Script suggestions — hidden for now */}
+              {/* <ScriptPanel jobId={jobId} script={script} onScriptUpdated={setScript} /> */}
+              {hookBlock && (
+                <ScriptLines
+                  jobId={jobId}
+                  format={format}
+                  script={script}
+                  onScriptUpdated={setScript}
+                />
+              )}
+              {(() => {
+                let cardIndex = 0;
+                return format.blocks.map((block) => {
+                  // Same reason ScriptLines skips these: one value typed
+                  // against a template that gets cloned per discovered beat
+                  // has no single beat to belong to.
+                  if (block.repeat) return null;
+                  const textSlots = block.slots.filter(
+                    (s) => s.mediaType === "text",
+                  );
+                  if (textSlots.length === 0) return null;
+                  cardIndex += 1;
+                  return (
+                    <ScriptingBlockCard
+                      key={block.id}
+                      jobId={jobId}
+                      format={format}
+                      block={block}
+                      index={cardIndex}
+                      bindings={bindings}
+                      onChange={setBinding}
+                      suggestionFor={(slotName) =>
+                        suggestionFor(block.id, slotName)
+                      }
+                      onApplySuggestion={applySuggestion}
+                    />
+                  );
+                });
+              })()}
+            </>
+          )}
 
-        {step === 2 && (
-          <>
-            {takeSlot && (
-              <Card className="p-6">
-                <div className="mb-4 flex items-center gap-2">
-                  <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                    Speaking take
-                  </h2>
-                  <Pill>
-                    {takeRequired
-                      ? "one continuous take of all your lines"
-                      : "optional — film it all in one take instead"}
-                  </Pill>
-                </div>
-                <div className="max-w-md">
-                  <SlotDropzone
-                    jobId={jobId}
-                    formatId={format.id}
-                    slot={takeSlot}
-                    binding={bindings[takeSlot.name]}
-                    onChange={setBinding}
-                    multi
-                  />
-                </div>
-              </Card>
-            )}
-
-            {format.namesTakeSlot && (
-              <Card className="p-6">
-                <div className="mb-4 flex items-center gap-2">
-                  <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                    Names take
-                  </h2>
-                  <Pill>one clip, names only</Pill>
-                </div>
-                <div className="max-w-md">
-                  <SlotDropzone
-                    jobId={jobId}
-                    formatId={format.id}
-                    slot={format.namesTakeSlot}
-                    binding={bindings[format.namesTakeSlot.name]}
-                    onChange={setBinding}
-                  />
-                </div>
-              </Card>
-            )}
-
-            {format.blocks.map((block) => {
-              // Optional blocks are hidden for the same reason as in step 1's
-              // ScriptLines — a bonus beat nobody's asked to film, whose
-              // unfilled state is the normal path. The block stays in the
-              // format; only its upload card is hidden.
-              if (block.optional) return null;
-              // Generation-marked slots are never an upload target and the
-              // user has nothing to do for them (see requiredSlots' matching
-              // "don't count it" exclusion) — filtered out here entirely
-              // rather than shown as an inert badge, so a block that's 100%
-              // auto-generated (e.g. a beat filmed from identity photos)
-              // doesn't render an empty card at all.
-              const footageSlots = block.slots.filter(
-                (s) => s.mediaType !== "text" && !s.generation && !alwaysHiddenSlots.has(s.name),
-              );
-              if (footageSlots.length === 0) return null;
-              return (
-                <Card key={block.id} className="p-6">
+          {step === 2 && (
+            <>
+              {takeSlot && (
+                <Card className="p-6">
                   <div className="mb-4 flex items-center gap-2">
                     <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                      {block.title}
+                      Speaking take
                     </h2>
-                    <Pill>{block.kind === "voice" ? "spoken" : "b-roll"}</Pill>
+                    <Pill>
+                      {takeRequired
+                        ? "one continuous take of all your lines"
+                        : "optional — film it all in one take instead"}
+                    </Pill>
                   </div>
-                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                    {footageSlots.map((slot) => (
+                  <div className="max-w-md">
+                    <SlotDropzone
+                      jobId={jobId}
+                      formatId={format.id}
+                      slot={takeSlot}
+                      binding={bindings[takeSlot.name]}
+                      onChange={setBinding}
+                      multi
+                    />
+                  </div>
+                </Card>
+              )}
+
+              {format.namesTakeSlot && (
+                <Card className="p-6">
+                  <div className="mb-4 flex items-center gap-2">
+                    <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
+                      Names take
+                    </h2>
+                    <Pill>one clip, names only</Pill>
+                  </div>
+                  <div className="max-w-md">
+                    <SlotDropzone
+                      jobId={jobId}
+                      formatId={format.id}
+                      slot={format.namesTakeSlot}
+                      binding={bindings[format.namesTakeSlot.name]}
+                      onChange={setBinding}
+                    />
+                  </div>
+                </Card>
+              )}
+
+              {format.blocks.map((block) => {
+                // Optional blocks are hidden for the same reason as in step 1's
+                // ScriptLines — a bonus beat nobody's asked to film, whose
+                // unfilled state is the normal path. The block stays in the
+                // format; only its upload card is hidden.
+                if (block.optional) return null;
+                // Generation-marked slots are never an upload target and the
+                // user has nothing to do for them (see requiredSlots' matching
+                // "don't count it" exclusion) — filtered out here entirely
+                // rather than shown as an inert badge, so a block that's 100%
+                // auto-generated (e.g. a beat filmed from identity photos)
+                // doesn't render an empty card at all.
+                const footageSlots = block.slots.filter(
+                  (s) =>
+                    s.mediaType !== "text" &&
+                    !s.generation &&
+                    !alwaysHiddenSlots.has(s.name),
+                );
+                if (footageSlots.length === 0) return null;
+                return (
+                  <Card key={block.id} className="p-6">
+                    <div className="mb-4 flex items-center gap-2">
+                      <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
+                        {block.title}
+                      </h2>
+                      <Pill>
+                        {block.kind === "voice" ? "spoken" : "b-roll"}
+                      </Pill>
+                    </div>
+                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                      {footageSlots.map((slot) => (
+                        <SlotDropzone
+                          key={slot.name}
+                          jobId={jobId}
+                          formatId={format.id}
+                          slot={slot}
+                          binding={bindings[slot.name]}
+                          onChange={setBinding}
+                          multi={
+                            block.kind === "voice" &&
+                            slot.name === block.videoSlot
+                          }
+                          coveredNote={
+                            takeCoveredSlots.has(slot.name)
+                              ? "Covered by your speaking take — drop a clip here to film this line separately instead."
+                              : undefined
+                          }
+                        />
+                      ))}
+                    </div>
+                  </Card>
+                );
+              })}
+
+              {format.identitySlot && (
+                <IdentityPhotoGrid
+                  jobId={jobId}
+                  slot={format.identitySlot}
+                  binding={bindings[format.identitySlot.name]}
+                  onChange={setBinding}
+                />
+              )}
+
+              {format.finalClipSlot && (
+                <Card className="p-6">
+                  <div className="mb-4 flex items-center gap-2">
+                    <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
+                      Final clip
+                    </h2>
+                    <Pill>optional</Pill>
+                  </div>
+                  <div className="max-w-sm">
+                    <SlotDropzone
+                      jobId={jobId}
+                      formatId={format.id}
+                      slot={format.finalClipSlot}
+                      binding={bindings[format.finalClipSlot.name]}
+                      onChange={setBinding}
+                    />
+                  </div>
+                </Card>
+              )}
+
+              {format.sharedSlots.length > 0 && (
+                <Card className="p-6">
+                  <div className="mb-4 flex items-center gap-2">
+                    <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
+                      Shared sounds
+                    </h2>
+                    <Pill>used across blocks</Pill>
+                  </div>
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                    {format.sharedSlots.map((slot) => (
                       <SlotDropzone
                         key={slot.name}
                         jobId={jobId}
@@ -426,93 +580,34 @@ export function ResourcesBoard({
                         slot={slot}
                         binding={bindings[slot.name]}
                         onChange={setBinding}
-                        multi={block.kind === "voice" && slot.name === block.videoSlot}
-                        coveredNote={
-                          takeCoveredSlots.has(slot.name)
-                            ? "Covered by your speaking take — drop a clip here to film this line separately instead."
-                            : undefined
-                        }
                       />
                     ))}
                   </div>
                 </Card>
-              );
-            })}
+              )}
 
-            {format.identitySlot && (
-              <IdentityPhotoGrid
-                jobId={jobId}
-                slot={format.identitySlot}
-                binding={bindings[format.identitySlot.name]}
-                onChange={setBinding}
-              />
-            )}
-
-            {format.finalClipSlot && (
-              <Card className="p-6">
-                <div className="mb-4 flex items-center gap-2">
-                  <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                    Final clip
+              {format.musicSlot && (
+                <Card className="p-6">
+                  <h2 className="mb-4 font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
+                    Music
                   </h2>
-                  <Pill>optional</Pill>
-                </div>
-                <div className="max-w-sm">
-                  <SlotDropzone
-                    jobId={jobId}
-                    formatId={format.id}
-                    slot={format.finalClipSlot}
-                    binding={bindings[format.finalClipSlot.name]}
-                    onChange={setBinding}
-                  />
-                </div>
-              </Card>
-            )}
-
-            {format.sharedSlots.length > 0 && (
-              <Card className="p-6">
-                <div className="mb-4 flex items-center gap-2">
-                  <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                    Shared sounds
-                  </h2>
-                  <Pill>used across blocks</Pill>
-                </div>
-                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                  {format.sharedSlots.map((slot) => (
+                  <div className="max-w-sm">
                     <SlotDropzone
-                      key={slot.name}
                       jobId={jobId}
                       formatId={format.id}
-                      slot={slot}
-                      binding={bindings[slot.name]}
+                      slot={format.musicSlot}
+                      binding={bindings[format.musicSlot.name]}
                       onChange={setBinding}
                     />
-                  ))}
-                </div>
-              </Card>
-            )}
+                  </div>
+                </Card>
+              )}
+            </>
+          )}
 
-            {format.musicSlot && (
-              <Card className="p-6">
-                <h2 className="mb-4 font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                  Music
-                </h2>
-                <div className="max-w-sm">
-                  <SlotDropzone
-                    jobId={jobId}
-                    formatId={format.id}
-                    slot={format.musicSlot}
-                    binding={bindings[format.musicSlot.name]}
-                    onChange={setBinding}
-                  />
-                </div>
-              </Card>
-            )}
-          </>
-        )}
-
-        {step === 3 && (
-          <>
-            {/* A mandatory take (takeRequired) always shows this, even before
+          {step === 3 && (
+            <>
+              {/* A mandatory take (takeRequired) always shows this, even before
                 it's bound, matching cinematic-debut-manifesto's existing
                 "upload it in the previous step first" nudge. An OPTIONAL take
                 only shows once actually bound — no reason to nudge a
@@ -521,140 +616,183 @@ export function ResourcesBoard({
                 user's to make here (see formatDiscoversItsOwnCuts), and
                 mounting the panel would kick off a full transcription of the
                 take to align it against a block list that doesn't exist yet. */}
-            {takeSlot && (takeRequired || takeIsBound) && !discoversOwnCuts && (
-              <SplitLines
-                jobId={jobId}
-                format={format}
-                script={script}
-                takeFile={speakingTakeFile}
-                takeBound={takeRequired || takeIsBound}
-              />
-            )}
+              {takeSlot &&
+                (takeRequired || takeIsBound) &&
+                !discoversOwnCuts && (
+                  <SplitLines
+                    jobId={jobId}
+                    format={format}
+                    script={script}
+                    takeFile={speakingTakeFile}
+                    takeBound={takeRequired || takeIsBound}
+                  />
+                )}
 
-            {discoversOwnCuts && (
-              <Card className="p-6">
-                <div className="mb-3 flex items-center gap-2">
-                  <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
-                    Cuts
-                  </h2>
-                  <Pill>found automatically</Pill>
+              {discoversOwnCuts && (
+                <Card className="p-6">
+                  <div className="mb-3 flex items-center gap-2">
+                    <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
+                      Cuts
+                    </h2>
+                    <Pill>found automatically</Pill>
+                  </div>
+                  <p className="text-sm text-[color:var(--ink-dim)]">
+                    This template finds its own cuts. When you build, it watches
+                    the footage you uploaded, picks the moments worth keeping,
+                    drops the retakes, and writes each cut&apos;s on-screen time
+                    and caption — so there&apos;s nothing to split by hand here.
+                  </p>
+                  <p className="mt-2 text-sm text-[color:var(--ink-dim)]">
+                    You can adjust every cut, and every line of text, in the
+                    editor afterwards.
+                  </p>
+                </Card>
+              )}
+
+              {hookBlock && (
+                <HookFeedbackPanel
+                  jobId={jobId}
+                  initialFeedback={initialHookFeedback}
+                />
+              )}
+
+              {diagnostics && diagnostics.length > 0 && (
+                <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-5 backdrop-blur-md">
+                  <p className="mb-2 text-sm font-medium text-amber-300">
+                    The build skipped {diagnostics.length}{" "}
+                    {diagnostics.length === 1 ? "thing" : "things"} — worth a
+                    look before you edit:
+                  </p>
+                  <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-amber-200/90">
+                    {diagnostics.map((d, i) => (
+                      <li key={i}>{d}</li>
+                    ))}
+                  </ul>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => setDiagnostics(null)}
+                      className="!px-4 !py-2 text-xs"
+                    >
+                      Fix and rebuild
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => continueToEditor({ force: true })}
+                      className="!px-4 !py-2 text-xs"
+                    >
+                      Continue to editor anyway
+                    </Button>
+                  </div>
                 </div>
-                <p className="text-sm text-[color:var(--ink-dim)]">
-                  This template finds its own cuts. When you build, it watches the footage you uploaded,
-                  picks the moments worth keeping, drops the retakes, and writes each cut&apos;s on-screen
-                  time and caption — so there&apos;s nothing to split by hand here.
-                </p>
-                <p className="mt-2 text-sm text-[color:var(--ink-dim)]">
-                  You can adjust every cut, and every line of text, in the editor afterwards.
-                </p>
-              </Card>
-            )}
+              )}
 
-            {hookBlock && <HookFeedbackPanel jobId={jobId} initialFeedback={initialHookFeedback} />}
+              {buildError &&
+                (() => {
+                  // Backend errors come as either a single sentence, or a
+                  // "<heading>\n  - <item>\n  - <item>" list (see intake.ts's
+                  // "Fix these before building:" throw) — split on that marker
+                  // so a multi-item list renders as actual bullets instead of
+                  // one run-on paragraph.
+                  const marker = "\n  - ";
+                  const splitAt = buildError.indexOf(marker);
+                  const heading =
+                    splitAt === -1 ? buildError : buildError.slice(0, splitAt);
+                  const items =
+                    splitAt === -1
+                      ? []
+                      : buildError.slice(splitAt + marker.length).split(marker);
+                  return (
+                    <div className="rounded-2xl border border-red-400/30 bg-red-400/10 p-5 backdrop-blur-md">
+                      <p
+                        className={`text-sm font-medium text-red-300 ${items.length > 0 ? "mb-2" : ""}`}
+                      >
+                        {heading}
+                      </p>
+                      {items.length > 0 && (
+                        <ul className="list-disc space-y-1 pl-5 text-xs text-red-200/90">
+                          {items.map((item, i) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })()}
 
-            {diagnostics && diagnostics.length > 0 && (
-              <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-5 backdrop-blur-md">
-                <p className="mb-2 text-sm font-medium text-amber-300">
-                  The build skipped {diagnostics.length} {diagnostics.length === 1 ? "thing" : "things"} —
-                  worth a look before you edit:
-                </p>
-                <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-amber-200/90">
-                  {diagnostics.map((d, i) => (
-                    <li key={i}>{d}</li>
-                  ))}
-                </ul>
-                <div className="flex gap-2">
-                  <Button variant="secondary" onClick={() => setDiagnostics(null)} className="!px-4 !py-2 text-xs">
-                    Fix and rebuild
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => continueToEditor({ force: true })}
-                    className="!px-4 !py-2 text-xs"
-                  >
-                    Continue to editor anyway
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {buildError && (() => {
-              // Backend errors come as either a single sentence, or a
-              // "<heading>\n  - <item>\n  - <item>" list (see intake.ts's
-              // "Fix these before building:" throw) — split on that marker
-              // so a multi-item list renders as actual bullets instead of
-              // one run-on paragraph.
-              const marker = "\n  - ";
-              const splitAt = buildError.indexOf(marker);
-              const heading = splitAt === -1 ? buildError : buildError.slice(0, splitAt);
-              const items = splitAt === -1 ? [] : buildError.slice(splitAt + marker.length).split(marker);
-              return (
-                <div className="rounded-2xl border border-red-400/30 bg-red-400/10 p-5 backdrop-blur-md">
-                  <p className={`text-sm font-medium text-red-300 ${items.length > 0 ? "mb-2" : ""}`}>{heading}</p>
-                  {items.length > 0 && (
-                    <ul className="list-disc space-y-1 pl-5 text-xs text-red-200/90">
-                      {items.map((item, i) => (
-                        <li key={i}>{item}</li>
-                      ))}
-                    </ul>
+              <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-[color:var(--bg)]/90 p-5 backdrop-blur-md">
+                <div>
+                  <p className="text-sm text-[color:var(--ink)]">
+                    {filledCount} / {requiredSlots.length} required slots filled
+                  </p>
+                  {!ready && (
+                    <p className="text-xs text-[color:var(--ink-dim)]">
+                      Missing something? Go back to Script or Footage & photos
+                      to finish filling slots.
+                    </p>
                   )}
                 </div>
-              );
-            })()}
-
-            <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-[color:var(--bg)]/90 p-5 backdrop-blur-md">
-              <div>
-                <p className="text-sm text-[color:var(--ink)]">
-                  {filledCount} / {requiredSlots.length} required slots filled
-                </p>
-                {!ready && (
-                  <p className="text-xs text-[color:var(--ink-dim)]">
-                    Missing something? Go back to Script or Footage & photos to finish filling slots.
-                  </p>
-                )}
-              </div>
-              {/* Once the diagnostics panel is already on screen the warnings
+                {/* Once the diagnostics panel is already on screen the warnings
                   have been seen, so this proceeds instead of rebuilding into
                   the same early-return — otherwise the primary CTA looks
                   broken: it spins, re-lists the same skips, and never
                   navigates. "Fix and rebuild" clears them to re-arm it. */}
-              <Button
-                onClick={() => continueToEditor({ force: diagnostics !== null })}
-                disabled={!ready || building}
-              >
-                {building ? `Building…${buildStage ? ` (${buildStage})` : ""}` : diagnostics ? "Continue anyway" : "Continue to editor"}
-              </Button>
-            </div>
-          </>
-        )}
+                <Button
+                  onClick={() =>
+                    continueToEditor({ force: diagnostics !== null })
+                  }
+                  disabled={!ready || building}
+                >
+                  {building
+                    ? `Building… (${friendlyStageLabel(buildStage)})`
+                    : diagnostics
+                      ? "Continue anyway"
+                      : "Continue to editor"}
+                </Button>
+              </div>
+            </>
+          )}
 
-        {advanceError && (
-          <p className="rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-300">
-            {advanceError}
-          </p>
-        )}
+          {advanceError && (
+            <p className="rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-300">
+              {advanceError}
+            </p>
+          )}
 
-        <WizardFooterNav
-          current={stepIndex + 1}
-          total={steps.length}
-          onBack={() => attemptGoToStep(steps[stepIndex - 1].id)}
-          onNext={() => attemptGoToStep(steps[stepIndex + 1].id)}
-        />
-      </div>
-
-      <div className={`xl:sticky xl:top-24 xl:h-[calc(100vh-140px)] ${drawerOpen ? "" : "xl:h-auto"}`}>
-        <div className="mb-2 flex items-center justify-between xl:hidden">
-          <p className="font-[family-name:var(--font-display)] text-sm text-[color:var(--ink-dim)]">Library</p>
-          <button onClick={() => setDrawerOpen((v) => !v)} className="text-xs text-[color:var(--accent)]">
-            {drawerOpen ? "Hide" : "Show"}
-          </button>
+          <WizardFooterNav
+            current={stepIndex + 1}
+            total={steps.length}
+            onBack={() => attemptGoToStep(steps[stepIndex - 1].id)}
+            onNext={() => attemptGoToStep(steps[stepIndex + 1].id)}
+          />
         </div>
-        {drawerOpen && (
-          <div className="h-[520px] overflow-hidden rounded-2xl border border-[color:var(--card-border)] bg-[color:var(--card)] xl:h-full">
-            <LibraryPanel variant="drawer" />
+
+        <div
+          className={`xl:sticky xl:top-24 xl:h-[calc(100vh-140px)] ${drawerOpen ? "" : "xl:h-auto"}`}
+        >
+          <div className="mb-2 flex items-center justify-between xl:hidden">
+            <p className="font-[family-name:var(--font-display)] text-sm text-[color:var(--ink-dim)]">
+              Library
+            </p>
+            <button
+              onClick={() => setDrawerOpen((v) => !v)}
+              className="text-xs text-[color:var(--accent)]"
+            >
+              {drawerOpen ? "Hide" : "Show"}
+            </button>
           </div>
-        )}
+          {drawerOpen && (
+            <div className="h-[520px] overflow-hidden rounded-2xl border border-[color:var(--card-border)] bg-[color:var(--card)] xl:h-full">
+              <LibraryPanel variant="drawer" />
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+      <ProcessingOverlay
+        active={building}
+        stage={buildStage}
+        clips={footageClips}
+      />
+    </>
   );
 }

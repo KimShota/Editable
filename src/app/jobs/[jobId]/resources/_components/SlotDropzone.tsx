@@ -3,63 +3,104 @@
 import { useRef, useState } from "react";
 import type { Slot } from "@backend/pipeline/types";
 import { tierColor } from "@backend/remotion/components/tiers";
-import { LIBRARY_DRAG_MIME, type LibraryDragPayload } from "../../../../lib/dnd";
+import {
+  LIBRARY_DRAG_MIME,
+  type LibraryDragPayload,
+} from "../../../../lib/dnd";
 import { LineKind, Pill } from "../../../../_components/ui";
 import { slotLabel } from "../../../../lib/slotLabel";
 
 export type Binding = { file: string } | { files: string[] } | { text: string };
 
-const mediaUrl = (jobId: string, file: string) => `/api/media/jobs/${jobId}/${file}`;
+export const mediaUrl = (jobId: string, file: string) =>
+  `/api/media/jobs/${jobId}/${file}`;
 /** A format's own checked-in default asset (see SlotSchema's defaultAsset)
  *  — served from formats/assets/<formatId>/, not a job's own assets/. */
-const formatAssetUrl = (formatId: string, file: string) => `/api/media/formats/assets/${formatId}/${file}`;
+const formatAssetUrl = (formatId: string, file: string) =>
+  `/api/media/formats/assets/${formatId}/${file}`;
 
 /** Binds one or more files at once — a multi-take slot APPENDS to whatever
  *  is already bound; a single-file slot replaces it (see the API route). */
-async function bindFiles(jobId: string, slotName: string, files: File[]): Promise<Binding> {
+async function bindFiles(
+  jobId: string,
+  slotName: string,
+  files: File[],
+): Promise<Binding> {
   const body = new FormData();
   body.set("slot", slotName);
   for (const file of files) body.append("file", file);
-  const res = await fetch(`/api/jobs/${jobId}/assets`, { method: "POST", body });
+  const res = await fetch(`/api/jobs/${jobId}/assets`, {
+    method: "POST",
+    body,
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "upload failed");
   return data.binding;
 }
 
-async function bindLibraryRef(jobId: string, slotName: string, ref: LibraryDragPayload): Promise<Binding> {
+async function bindLibraryRef(
+  jobId: string,
+  slotName: string,
+  ref: LibraryDragPayload,
+): Promise<Binding> {
   const body = new FormData();
   body.set("slot", slotName);
-  body.set("libraryRef", JSON.stringify({ category: ref.category, filename: ref.filename }));
-  const res = await fetch(`/api/jobs/${jobId}/assets`, { method: "POST", body });
+  body.set(
+    "libraryRef",
+    JSON.stringify({ category: ref.category, filename: ref.filename }),
+  );
+  const res = await fetch(`/api/jobs/${jobId}/assets`, {
+    method: "POST",
+    body,
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "bind failed");
   return data.binding;
 }
 
-async function bindFormatDefault(jobId: string, slotName: string): Promise<Binding> {
+async function bindFormatDefault(
+  jobId: string,
+  slotName: string,
+): Promise<Binding> {
   const body = new FormData();
   body.set("slot", slotName);
   body.set("formatDefault", "1");
-  const res = await fetch(`/api/jobs/${jobId}/assets`, { method: "POST", body });
+  const res = await fetch(`/api/jobs/${jobId}/assets`, {
+    method: "POST",
+    body,
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "bind failed");
   return data.binding;
 }
 
-export async function bindText(jobId: string, slotName: string, text: string): Promise<Binding> {
+export async function bindText(
+  jobId: string,
+  slotName: string,
+  text: string,
+): Promise<Binding> {
   const body = new FormData();
   body.set("slot", slotName);
   body.set("text", text);
-  const res = await fetch(`/api/jobs/${jobId}/assets`, { method: "POST", body });
+  const res = await fetch(`/api/jobs/${jobId}/assets`, {
+    method: "POST",
+    body,
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "save failed");
   return data.binding;
 }
 
 /** Omit `index` to clear the whole slot; pass it to drop just one take. */
-async function clearSlot(jobId: string, slotName: string, index?: number): Promise<Binding | undefined> {
+async function clearSlot(
+  jobId: string,
+  slotName: string,
+  index?: number,
+): Promise<Binding | undefined> {
   const qs = index !== undefined ? `?index=${index}` : "";
-  const res = await fetch(`/api/jobs/${jobId}/assets/${slotName}${qs}`, { method: "DELETE" });
+  const res = await fetch(`/api/jobs/${jobId}/assets/${slotName}${qs}`, {
+    method: "DELETE",
+  });
   const data = await res.json().catch(() => ({}));
   return data.binding;
 }
@@ -146,7 +187,12 @@ export function SlotDropzone({
       setBusy(true);
       setError(null);
       try {
-        onChange(slot.name, nextValue ? await bindText(jobId, slot.name, nextValue) : await clearSlot(jobId, slot.name));
+        onChange(
+          slot.name,
+          nextValue
+            ? await bindText(jobId, slot.name, nextValue)
+            : await clearSlot(jobId, slot.name),
+        );
       } catch (err) {
         setError((err as Error).message);
       } finally {
@@ -181,7 +227,9 @@ export function SlotDropzone({
           </div>
           {options.length === 0 && (
             <p className="text-[12px] text-[color:var(--ink-dim)]">
-              {control.optionsFromSlot ? `Fill in "${control.optionsFromSlot}" first.` : "No options."}
+              {control.optionsFromSlot
+                ? `Fill in "${control.optionsFromSlot}" first.`
+                : "No options."}
             </p>
           )}
           {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
@@ -197,7 +245,9 @@ export function SlotDropzone({
       .map((v) => v.trim())
       .filter(Boolean);
     const toggle = (value: string) => {
-      const next = chosen.includes(value) ? chosen.filter((v) => v !== value) : [...chosen, value];
+      const next = chosen.includes(value)
+        ? chosen.filter((v) => v !== value)
+        : [...chosen, value];
       persist(next.join(", "));
     };
     const move = (index: number, dir: -1 | 1) => {
@@ -240,7 +290,9 @@ export function SlotDropzone({
                     className="h-3 w-3 shrink-0 rounded-full"
                     style={{ backgroundColor: opt?.color ?? tierColor(value) }}
                   />
-                  <span className="flex-1 text-sm text-[color:var(--ink)]">{opt?.label ?? value}</span>
+                  <span className="flex-1 text-sm text-[color:var(--ink)]">
+                    {opt?.label ?? value}
+                  </span>
                   <button
                     type="button"
                     disabled={busy || i === 0}
@@ -268,7 +320,8 @@ export function SlotDropzone({
   }
 
   if (slot.mediaType === "text") {
-    const hasText = !!binding && "text" in binding && binding.text.trim().length > 0;
+    const hasText =
+      !!binding && "text" in binding && binding.text.trim().length > 0;
     return (
       <SlotShell slot={slot} kind="onscreen" filled={hasText}>
         <textarea
@@ -309,10 +362,16 @@ export function SlotDropzone({
           className="w-full resize-none rounded-lg border border-white/12 bg-black/20 p-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
         />
         {slot.example && (
-          <p className="mt-1 text-[11px] text-[color:var(--ink-dim)]">Example: {slot.example}</p>
+          <p className="mt-1 text-[11px] text-[color:var(--ink-dim)]">
+            Example: {slot.example}
+          </p>
         )}
-        {busy && <p className="mt-1 text-xs text-[color:var(--ink-dim)]">Saving…</p>}
-        {savedFlash && !busy && <p className="mt-1 text-xs text-emerald-400">Saved</p>}
+        {busy && (
+          <p className="mt-1 text-xs text-[color:var(--ink-dim)]">Saving…</p>
+        )}
+        {savedFlash && !busy && (
+          <p className="mt-1 text-xs text-emerald-400">Saved</p>
+        )}
         {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
       </SlotShell>
     );
@@ -323,7 +382,10 @@ export function SlotDropzone({
     setBusy(true);
     setError(null);
     try {
-      onChange(slot.name, await bindFiles(jobId, slot.name, multi ? files : [files[0]]));
+      onChange(
+        slot.name,
+        await bindFiles(jobId, slot.name, multi ? files : [files[0]]),
+      );
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -377,11 +439,20 @@ export function SlotDropzone({
   // before it accepted several clips) may still carry an old {file}
   // binding — shown here as a one-item list so it doesn't just vanish from
   // a now-multi dropzone.
-  const takeFiles = binding && "files" in binding ? binding.files : binding && "file" in binding ? [binding.file] : undefined;
+  const takeFiles =
+    binding && "files" in binding
+      ? binding.files
+      : binding && "file" in binding
+        ? [binding.file]
+        : undefined;
 
   if (multi) {
     return (
-      <SlotShell slot={slot} coveredNote={coveredNote} filled={!!takeFiles?.length}>
+      <SlotShell
+        slot={slot}
+        coveredNote={coveredNote}
+        filled={!!takeFiles?.length}
+      >
         <input
           ref={fileInput}
           type="file"
@@ -392,9 +463,14 @@ export function SlotDropzone({
         />
         <div className="flex flex-col gap-2">
           {(takeFiles ?? []).map((file, i) => (
-            <div key={file} className="relative min-h-[80px] overflow-hidden rounded-lg border border-white/10 bg-black/30">
+            <div
+              key={file}
+              className="relative min-h-[80px] overflow-hidden rounded-lg border border-white/10 bg-black/30"
+            >
               <div className="absolute top-2 left-2 z-10 rounded-full bg-black/70 px-2 py-0.5 text-[11px] text-white">
-                {slot.mediaType === "image" ? `Photo ${i + 1}` : `Take ${i + 1}`}
+                {slot.mediaType === "image"
+                  ? `Photo ${i + 1}`
+                  : `Take ${i + 1}`}
               </div>
               <SlotPreview jobId={jobId} slot={slot} file={file} />
               <button
@@ -414,7 +490,9 @@ export function SlotDropzone({
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
             className={`flex min-h-[80px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed p-4 text-center transition-colors ${
-              dragOver ? "border-[color:var(--accent)] bg-[color:var(--accent)]/5" : "border-white/15 hover:border-white/30"
+              dragOver
+                ? "border-[color:var(--accent)] bg-[color:var(--accent)]/5"
+                : "border-white/15 hover:border-white/30"
             }`}
           >
             <p className="text-xs text-[color:var(--ink-dim)]">
@@ -444,7 +522,9 @@ export function SlotDropzone({
         type="file"
         accept={`${slot.mediaType}/*`}
         className="hidden"
-        onChange={(e) => e.target.files?.[0] && handleFiles([e.target.files[0]])}
+        onChange={(e) =>
+          e.target.files?.[0] && handleFiles([e.target.files[0]])
+        }
       />
       {boundFile ? (
         <div className="relative min-h-[110px] overflow-hidden rounded-lg border border-white/10 bg-black/30">
@@ -475,7 +555,9 @@ export function SlotDropzone({
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
             className={`flex min-h-[110px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed p-4 text-center transition-colors ${
-              dragOver ? "border-[color:var(--accent)] bg-[color:var(--accent)]/5" : "border-white/15 hover:border-white/30"
+              dragOver
+                ? "border-[color:var(--accent)] bg-[color:var(--accent)]/5"
+                : "border-white/15 hover:border-white/30"
             }`}
           >
             <p className="text-xs text-[color:var(--ink-dim)]">
@@ -519,7 +601,8 @@ function DefaultAssetOption({
     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-[color:var(--ink-dim)]">
-          Don&apos;t want to film this? {defaultAsset.label ?? "Use our template clip"} instead.
+          Don&apos;t want to film this?{" "}
+          {defaultAsset.label ?? "Use our template clip"} instead.
         </p>
         <div className="flex shrink-0 gap-1.5">
           <button
@@ -540,11 +623,24 @@ function DefaultAssetOption({
       {preview && (
         <div className="mt-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
           {slot.mediaType === "video" ? (
-            <video src={formatAssetUrl(formatId, defaultAsset.file)} controls muted className="max-h-[220px] w-full object-contain" />
+            <video
+              src={formatAssetUrl(formatId, defaultAsset.file)}
+              controls
+              muted
+              className="max-h-[220px] w-full object-contain"
+            />
           ) : slot.mediaType === "image" ? (
-            <img src={formatAssetUrl(formatId, defaultAsset.file)} alt="" className="max-h-[220px] w-full object-contain" />
+            <img
+              src={formatAssetUrl(formatId, defaultAsset.file)}
+              alt=""
+              className="max-h-[220px] w-full object-contain"
+            />
           ) : (
-            <audio src={formatAssetUrl(formatId, defaultAsset.file)} controls className="w-full p-3" />
+            <audio
+              src={formatAssetUrl(formatId, defaultAsset.file)}
+              controls
+              className="w-full p-3"
+            />
           )}
         </div>
       )}
@@ -573,19 +669,35 @@ function SlotShell({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm font-medium text-[color:var(--ink)]">{slotLabel(slot)}</p>
+        <p className="text-sm font-medium text-[color:var(--ink)]">
+          {slotLabel(slot)}
+        </p>
         {!slot.required && <Pill>Optional</Pill>}
         {kind === "onscreen" && <LineKind kind="onscreen" />}
         {filled && (
           <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" className="shrink-0">
-              <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              className="shrink-0"
+            >
+              <path
+                d="M5 13l4 4L19 7"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
             Saved
           </span>
         )}
       </div>
-      <p className="text-[12px] leading-snug text-[color:var(--ink-dim)]">{slot.instructions}</p>
+      <p className="text-[12px] leading-snug text-[color:var(--ink-dim)]">
+        {slot.instructions}
+      </p>
       {coveredNote && (
         <p className="rounded-md border border-dashed border-[color:var(--accent)]/30 bg-[color:var(--accent)]/5 px-2 py-1 text-[11px] leading-snug text-[color:var(--accent)]">
           {coveredNote}
@@ -604,7 +716,15 @@ function SlotShell({
  *  that couldn't be previewed effectively couldn't be removed either. This
  *  always renders SOMETHING with real height, so those buttons stay put and
  *  clickable no matter what the file turns out to be. */
-function SlotPreview({ jobId, slot, file }: { jobId: string; slot: Slot; file: string }) {
+function SlotPreview({
+  jobId,
+  slot,
+  file,
+}: {
+  jobId: string;
+  slot: Slot;
+  file: string;
+}) {
   const [failed, setFailed] = useState(false);
   const src = mediaUrl(jobId, file);
   const onError = () => setFailed(true);
@@ -619,10 +739,25 @@ function SlotPreview({ jobId, slot, file }: { jobId: string; slot: Slot; file: s
     );
   }
   if (slot.mediaType === "video") {
-    return <video src={src} controls muted onError={onError} className="max-h-[220px] w-full object-contain" />;
+    return (
+      <video
+        src={src}
+        controls
+        muted
+        onError={onError}
+        className="max-h-[220px] w-full object-contain"
+      />
+    );
   }
   if (slot.mediaType === "image") {
-    return <img src={src} alt="" onError={onError} className="max-h-[220px] w-full object-contain" />;
+    return (
+      <img
+        src={src}
+        alt=""
+        onError={onError}
+        className="max-h-[220px] w-full object-contain"
+      />
+    );
   }
   return (
     <audio src={src} controls onError={onError} className="w-full p-3">

@@ -16,6 +16,8 @@
   --card: rgba(244, 241, 249, 0.04);
   --card-border: rgba(244, 241, 249, 0.1);
   --card-border-hover: rgba(179, 102, 255, 0.45);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 }
 
 @theme inline {
@@ -61,10 +63,26 @@ body {
   position: absolute;
   inset: -10%;
   background:
-    radial-gradient(38% 42% at 14% 18%, rgba(76, 29, 149, 0.7), transparent 68%),
-    radial-gradient(46% 50% at 82% 14%, rgba(217, 70, 239, 0.4), transparent 70%),
-    radial-gradient(50% 55% at 30% 82%, rgba(124, 58, 237, 0.45), transparent 70%),
-    radial-gradient(60% 60% at 90% 88%, rgba(76, 29, 149, 0.4), transparent 72%),
+    radial-gradient(
+      38% 42% at 14% 18%,
+      rgba(76, 29, 149, 0.7),
+      transparent 68%
+    ),
+    radial-gradient(
+      46% 50% at 82% 14%,
+      rgba(217, 70, 239, 0.4),
+      transparent 70%
+    ),
+    radial-gradient(
+      50% 55% at 30% 82%,
+      rgba(124, 58, 237, 0.45),
+      transparent 70%
+    ),
+    radial-gradient(
+      60% 60% at 90% 88%,
+      rgba(76, 29, 149, 0.4),
+      transparent 72%
+    ),
     var(--bg);
   filter: saturate(1.1);
 }
@@ -133,5 +151,194 @@ body {
     opacity: 1;
     transform: none;
     animation: none;
+  }
+}
+
+/* ---------- processing overlay (ResourcesBoard "continue to editor" build wait) ---------- */
+.processing-ring {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 9999px;
+  padding: 3px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--accent) 70deg,
+    rgba(179, 102, 255, 0.15) 140deg,
+    transparent 220deg
+  );
+  animation: processing-spin 1.15s linear infinite;
+}
+.processing-ring__hub {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--bg-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.processing-ring__pulse {
+  display: flex;
+  animation: processing-pulse 2.2s var(--ease-in-out) infinite;
+}
+@keyframes processing-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes processing-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+.processing-track {
+  position: relative;
+  width: 220px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: rgba(244, 241, 249, 0.08);
+}
+.processing-track__runner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 35%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: processing-sweep 1.3s linear infinite;
+}
+@keyframes processing-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(385%);
+  }
+}
+
+/* Fanned deck of the job's own bound clips — the centerpiece when there's
+   real footage to show (falls back to .processing-ring when there isn't,
+   e.g. an all-text format). One card sits "drawn" at the front (large,
+   crisp, popped up and to the right); the rest fan out behind it like a
+   held hand of photos. ProcessingOverlay cycles which clip is drawn by
+   rotating an index array — each card keeps its own key, so its `slot`
+   changes and this transition carries it smoothly to its new fan position
+   instead of content swapping in place. */
+.processing-deck {
+  position: relative;
+  width: 280px;
+  height: 184px;
+  margin-inline: auto;
+  perspective: 900px;
+}
+.processing-deck__stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 400ms var(--ease-out);
+  will-change: transform;
+}
+.processing-deck__card {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 108px;
+  height: 108px;
+  margin-left: -54px;
+  margin-top: -54px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(244, 241, 249, 0.14);
+  background: rgba(244, 241, 249, 0.04);
+  box-shadow: 0 18px 40px rgba(11, 7, 16, 0.45);
+  transform-origin: 50% 118%;
+  transition:
+    transform 650ms var(--ease-in-out),
+    opacity 650ms var(--ease-in-out),
+    filter 500ms ease;
+  will-change: transform, opacity, filter;
+}
+.processing-deck__card[data-front="true"] {
+  animation: processing-deck-breathe 3.4s var(--ease-in-out) infinite;
+}
+/* The bob lives on this inner wrapper, not .processing-deck__card itself,
+   because that outer element's `transform` is owned by deckCardStyle's
+   inline style (the fan slot) and transitions whenever the deck reorders —
+   a `transform`-animating keyframe on the same element would fight that
+   inline value every frame instead of composing with it. Nesting it one
+   level down lets both apply: the outer transform places the card in the
+   fan, the inner one keeps it gently alive inside that position. Each
+   card's `--i` (set inline, see ProcessingOverlay) gives it its own phase
+   so the fan doesn't bob in unison like a single stiff sheet. */
+.processing-deck__card-inner {
+  width: 100%;
+  height: 100%;
+  animation: processing-card-bob 4.4s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * -0.7s);
+}
+.processing-deck__card[data-front="true"] .processing-deck__card-inner {
+  animation-name: processing-card-bob-front;
+}
+@keyframes processing-card-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-4px) rotate(1.6deg);
+  }
+}
+@keyframes processing-card-bob-front {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+  50% {
+    transform: translateY(-6px) rotate(-1.2deg) scale(1.015);
+  }
+}
+.processing-deck__card video,
+.processing-deck__card img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+@keyframes processing-deck-breathe {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .processing-ring,
+  .processing-ring__pulse,
+  .processing-track__runner,
+  .processing-deck__stage,
+  .processing-deck__card,
+  .processing-deck__card[data-front="true"],
+  .processing-deck__card-inner,
+  .processing-deck__card[data-front="true"] .processing-deck__card-inner {
+    animation: none;
+    transition: none;
+  }
+  .processing-ring {
+    background: var(--accent);
+    opacity: 0.3;
   }
 }
