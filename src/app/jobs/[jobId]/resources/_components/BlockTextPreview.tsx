@@ -59,6 +59,9 @@ export function BlockTextPreview({
 
   return (
     <div
+      // Deliberately a black video canvas (simulating the actual video
+      // frame the text overlays render on), not the page's card surface —
+      // its border stays white-tinted regardless of the app's light theme.
       className="relative shrink-0 overflow-hidden rounded-xl border border-white/10 bg-black"
       style={{ width: PREVIEW_WIDTH, height: previewHeight }}
     >

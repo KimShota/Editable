@@ -9,7 +9,7 @@ import "./marketing.css";
 
 /**
  * Marketing landing page. Ported from the standalone website/ static site
- * into the product's own Next.js app so "Launch app" is same-origin,
+ * into the product's own Next.js app so the nav's app links are same-origin,
  * client-side navigation instead of a link out to a separate deploy.
  */
 export default function Home() {
@@ -101,7 +101,7 @@ export default function Home() {
           <a href="#formats">Formats</a>
         </div>
         <div className="nav__actions">
-          <Link className="nav__launch" href="/templates">Launch app</Link>
+          <Link className="nav__launch" href="/login">Log in</Link>
           <Link className="nav__cta" href="/signup">Sign up</Link>
         </div>
       </nav>

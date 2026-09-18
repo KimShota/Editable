@@ -79,7 +79,7 @@ export function LibraryPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex flex-wrap gap-1.5 border-b border-white/10 p-3">
+      <div className="flex flex-wrap gap-1.5 border-b border-[color:var(--card-border)] p-3">
         {LIBRARY_CATEGORIES.map((c) => (
           <button
             key={c.id}
@@ -87,7 +87,7 @@ export function LibraryPanel({
             className={`rounded-full px-3 py-1 font-[family-name:var(--font-display)] text-[11px] tracking-wide transition-colors ${
               category === c.id
                 ? "bg-[color:var(--accent)] text-[color:var(--accent-ink)]"
-                : "border border-white/10 text-[color:var(--ink-dim)] hover:text-[color:var(--ink)]"
+                : "border border-[color:var(--card-border)] text-[color:var(--ink-dim)] hover:text-[color:var(--ink)]"
             }`}
           >
             {c.label}
@@ -95,7 +95,7 @@ export function LibraryPanel({
         ))}
       </div>
 
-      <div className="border-b border-white/10 p-3">
+      <div className="border-b border-[color:var(--card-border)] p-3">
         <input
           ref={fileInput}
           type="file"
@@ -106,7 +106,7 @@ export function LibraryPanel({
         <button
           onClick={() => fileInput.current?.click()}
           disabled={uploading}
-          className="w-full rounded-lg border border-dashed border-white/20 py-2 text-xs text-[color:var(--ink-dim)] transition-colors hover:border-[color:var(--accent)]/50 hover:text-[color:var(--ink)] disabled:opacity-50"
+          className="w-full rounded-lg border border-dashed border-black/15 py-2 text-xs text-[color:var(--ink-dim)] transition-colors hover:border-[color:var(--accent)]/50 hover:text-[color:var(--ink)] disabled:opacity-50"
         >
           {uploading ? "Uploading…" : `+ Add to ${LIBRARY_CATEGORIES.find((c) => c.id === category)?.label}`}
         </button>
@@ -158,7 +158,7 @@ function LibraryAssetCard({
     <div
       draggable
       onDragStart={handleDragStart}
-      className={`group relative cursor-grab overflow-hidden rounded-lg border border-white/10 bg-white/[0.02] transition-colors hover:border-[color:var(--accent)]/50 active:cursor-grabbing ${
+      className={`group relative cursor-grab overflow-hidden rounded-lg border border-[color:var(--card-border)] bg-black/[0.02] transition-colors hover:border-[color:var(--accent)]/50 active:cursor-grabbing ${
         compact ? "flex items-center gap-2 p-2" : "p-2"
       }`}
       title={asset.filename}

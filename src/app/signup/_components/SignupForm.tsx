@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button, Card } from "../../_components/ui";
 
 const inputClass =
-  "w-full rounded-lg border border-white/12 bg-black/20 px-4 py-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]";
+  "w-full rounded-lg border border-[color:var(--card-border)] bg-[color:var(--bg-2)] px-4 py-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]";
 
 export function SignupForm() {
   const router = useRouter();
@@ -59,7 +59,7 @@ export function SignupForm() {
             disabled={busy}
           />
         </div>
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
         <Button type="submit" disabled={busy || !email.trim() || password.length < 8}>
           {busy ? "Creating account…" : "Create account"}
         </Button>

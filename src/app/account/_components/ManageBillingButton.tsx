@@ -26,7 +26,7 @@ export function ManageBillingButton() {
       <Button variant="secondary" onClick={onClick} disabled={busy}>
         {busy ? "Redirecting…" : "Manage billing"}
       </Button>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
     </div>
   );
 }

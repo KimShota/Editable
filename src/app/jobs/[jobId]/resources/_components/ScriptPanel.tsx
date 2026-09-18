@@ -68,14 +68,14 @@ export function ScriptPanel({
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
             placeholder="e.g. Claude coding tips for beginners"
-            className="min-w-[240px] flex-1 rounded-lg border border-white/12 bg-black/20 px-3 py-2 text-sm text-[color:var(--ink)] outline-none focus:border-[color:var(--accent)]"
+            className="min-w-[240px] flex-1 rounded-lg border border-[color:var(--card-border)] bg-[color:var(--bg-2)] px-3 py-2 text-sm text-[color:var(--ink)] outline-none focus:border-[color:var(--accent)]"
           />
           <Button onClick={generate} disabled={busy || !topic.trim()} className="!px-4 !py-2 text-sm">
             {busy ? "Writing…" : "Generate"}
           </Button>
         </div>
       )}
-      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
     </Card>
   );
 }

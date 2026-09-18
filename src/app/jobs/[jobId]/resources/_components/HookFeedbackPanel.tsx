@@ -34,16 +34,16 @@ export function HookFeedbackPanel({
   };
 
   return (
-    <div className="mt-4 border-t border-white/10 pt-4">
+    <div className="mt-4 border-t border-[color:var(--card-border)] pt-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm font-medium text-[color:var(--ink)]">Hook feedback</p>
         <Button variant="secondary" onClick={getFeedback} disabled={busy} className="!px-3 !py-1.5 text-xs">
           {busy ? "Scoring…" : feedback ? "Re-check" : "Get hook feedback"}
         </Button>
       </div>
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
       {feedback && (
-        <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/20 p-4">
+        <div className="flex flex-col gap-2 rounded-lg border border-[color:var(--card-border)] bg-black/20 p-4">
           <div className="flex items-center gap-2">
             <Pill tone="accent">{feedback.score}/10</Pill>
             <Pill>{feedback.source === "filmed" ? "from your filmed clip" : "from suggested script"}</Pill>

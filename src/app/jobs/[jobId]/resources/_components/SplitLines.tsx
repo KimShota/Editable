@@ -245,7 +245,7 @@ function ClipPanel({
   };
 
   return (
-    <div className="grid grid-cols-1 gap-6 border-t border-white/10 pt-6 first:border-t-0 first:pt-0 lg:grid-cols-[220px_1fr]">
+    <div className="grid grid-cols-1 gap-6 border-t border-[color:var(--card-border)] pt-6 first:border-t-0 first:pt-0 lg:grid-cols-[220px_1fr]">
       <div className="lg:sticky lg:top-24 lg:self-start">
         <video
           ref={videoRef}
@@ -253,7 +253,7 @@ function ClipPanel({
           onTimeUpdate={onVideoTimeUpdate}
           onPause={() => setPlayingBlockId(null)}
           controls
-          className="w-full rounded-lg border border-white/10 bg-black"
+          className="w-full rounded-lg border border-[color:var(--card-border)] bg-black"
         />
         <p className="mt-2 truncate text-xs text-[color:var(--ink-dim)]" title={clipPath}>
           {clipPath.split("/").pop()}
@@ -273,7 +273,7 @@ function ClipPanel({
                 >
                   {playingBlockId === seg.block.id ? "❚❚" : "▶"}
                 </button>
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/15 text-xs font-bold text-[color:var(--ink-dim)]">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-black/15 text-xs font-bold text-[color:var(--ink-dim)]">
                   {seg.globalIndex + 1}
                 </span>
                 <div className="flex min-w-0 flex-col">
@@ -301,7 +301,7 @@ function ClipPanel({
                         <div
                           key={idx}
                           className={`w-full flex-1 rounded-sm ${
-                            active ? "bg-[color:var(--accent)]" : owner ? "bg-white/25" : "bg-white/10"
+                            active ? "bg-[color:var(--accent)]" : owner ? "bg-white/25" : "bg-black/[0.06]"
                           }`}
                           style={{ height: `${Math.max(amp * 100, 6)}%` }}
                         />
@@ -318,7 +318,7 @@ function ClipPanel({
                       <div
                         key={s.block.id}
                         className={`absolute top-0 h-full rounded-md ${
-                          active ? "bg-[color:var(--accent)]/70" : "bg-white/10"
+                          active ? "bg-[color:var(--accent)]/70" : "bg-black/[0.06]"
                         }`}
                         style={{ left: `${left}%`, width: `${width}%` }}
                       />
@@ -510,7 +510,7 @@ export function SplitLines({
           ? "You filmed this in more than one clip — each clip gets its own check below, showing only the lines it covers. Play a line to check it, then drag its handles to fix where it starts and ends."
           : "Each line you spoke is now its own clip. Play one to check it, then drag its handles to fix where it starts and ends."}
       </p>
-      {error && <p className="mb-4 text-xs text-red-400">{error}</p>}
+      {error && <p className="mb-4 text-xs text-red-600">{error}</p>}
       <div className="flex flex-col gap-8">
         {panels.map(({ window: w, segments }) => (
           <ClipPanel

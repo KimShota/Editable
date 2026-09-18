@@ -91,9 +91,9 @@ function CreateProjectBanner() {
   return (
     <Link
       href="/templates"
-      className="mb-10 flex h-28 items-center justify-center gap-3 rounded-2xl bg-[linear-gradient(120deg,var(--accent),var(--magenta))] font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--accent-ink)] transition-transform hover:scale-[1.01]"
+      className="mb-10 flex h-28 items-center justify-center gap-3 rounded-2xl bg-[color:var(--ink)] font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--bg)] transition-transform hover:scale-[1.01]"
     >
-      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-black/15 text-2xl leading-none">+</span>
+      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/15 text-2xl leading-none">+</span>
       Create project
     </Link>
   );
@@ -151,20 +151,20 @@ function TileMenu({
   useCloseOnOutsideClick(ref, onClose);
 
   const itemClass =
-    "block w-full px-3.5 py-2 text-left text-[13px] text-[color:var(--ink)] transition-colors hover:bg-white/8";
+    "block w-full px-3.5 py-2 text-left text-[13px] text-[color:var(--ink)] transition-colors hover:bg-black/[0.05]";
 
   return (
     <div
       ref={ref}
       onClick={(e) => e.stopPropagation()}
-      className="absolute top-9 right-2 z-10 w-40 overflow-hidden rounded-xl border border-[color:var(--card-border)] bg-[#1a1224] shadow-xl"
+      className="absolute top-9 right-2 z-10 w-40 overflow-hidden rounded-xl border border-[color:var(--card-border)] bg-[color:var(--card)] shadow-xl"
     >
       {trashed ? (
         <>
           <button className={itemClass} onClick={onRestore}>
             Restore
           </button>
-          <button className={`${itemClass} text-red-400`} onClick={onDeleteForever}>
+          <button className={`${itemClass} text-red-600`} onClick={onDeleteForever}>
             Delete forever
           </button>
         </>
@@ -173,7 +173,7 @@ function TileMenu({
           <button className={itemClass} onClick={onRename}>
             Rename
           </button>
-          <button className={`${itemClass} text-red-400`} onClick={onTrash}>
+          <button className={`${itemClass} text-red-600`} onClick={onTrash}>
             Delete
           </button>
         </>
@@ -259,7 +259,7 @@ function ProjectTile({
             className={`absolute top-2 left-2 z-[1] flex h-6 w-6 items-center justify-center rounded-md border backdrop-blur-md transition-colors ${
               selected
                 ? "border-[color:var(--accent)] bg-[color:var(--accent)] text-[color:var(--accent-ink)]"
-                : "border-white/30 bg-black/40 text-transparent hover:border-white/60"
+                : "border-black/20 bg-black/40 text-transparent hover:border-white/60"
             }`}
           >
             <CheckIcon />
@@ -287,7 +287,7 @@ function ProjectTile({
               setMenuOpen((v) => !v);
             }}
             aria-label="Project options"
-            className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-black/40 text-white opacity-0 backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 hover:bg-black/60"
+            className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full border border-black/15 bg-black/40 text-white opacity-0 backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 hover:bg-black/60"
           >
             <DotsIcon />
           </button>
@@ -408,18 +408,18 @@ export function ProjectGrid({ projects }: { projects: ProjectSummary[] }) {
   };
 
   const bulkButtonClass =
-    "rounded-full border border-white/15 px-3.5 py-1.5 text-[13px] font-medium text-[color:var(--ink)] transition-colors hover:bg-white/8 disabled:pointer-events-none disabled:opacity-40";
+    "rounded-full border border-black/15 px-3.5 py-1.5 text-[13px] font-medium text-[color:var(--ink)] transition-colors hover:bg-black/[0.05] disabled:pointer-events-none disabled:opacity-40";
 
   return (
     <div>
       <CreateProjectBanner />
 
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-[color:var(--card-border)] pb-5">
         <div className="flex items-center gap-4">
           <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold text-[color:var(--ink)]">
             Projects
           </h1>
-          <div className="flex gap-1 rounded-full border border-white/10 p-1">
+          <div className="flex gap-1 rounded-full border border-[color:var(--card-border)] p-1">
             <TabButton active={tab === "projects"} onClick={() => switchTab("projects")}>
               All ({active.length})
             </TabButton>
@@ -437,7 +437,7 @@ export function ProjectGrid({ projects }: { projects: ProjectSummary[] }) {
             className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
               selectMode
                 ? "border-[color:var(--accent)] text-[color:var(--accent)]"
-                : "border-white/12 text-[color:var(--ink-dim)] hover:text-[color:var(--ink)]"
+                : "border-[color:var(--card-border)] text-[color:var(--ink-dim)] hover:text-[color:var(--ink)]"
             }`}
           >
             {selectMode ? "Cancel" : "Select"}
@@ -451,14 +451,14 @@ export function ProjectGrid({ projects }: { projects: ProjectSummary[] }) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search projects…"
-              className="w-56 rounded-full border border-white/12 bg-transparent py-2 pr-4 pl-9 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
+              className="w-56 rounded-full border border-[color:var(--card-border)] bg-transparent py-2 pr-4 pl-9 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
             />
           </div>
         </div>
       </div>
 
       {selectMode && (
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--card-border)] bg-[color:var(--bg-2)] px-4 py-2.5">
           <label className="flex items-center gap-2 text-sm text-[color:var(--ink-dim)]">
             <input
               type="checkbox"
@@ -486,7 +486,7 @@ export function ProjectGrid({ projects }: { projects: ProjectSummary[] }) {
                       bulkAction("delete");
                     }
                   }}
-                  className={`${bulkButtonClass} border-red-400/30 text-red-400 hover:bg-red-400/10`}
+                  className={`${bulkButtonClass} border-red-400/30 text-red-600 hover:bg-red-400/10`}
                 >
                   Delete forever
                 </button>
@@ -499,7 +499,7 @@ export function ProjectGrid({ projects }: { projects: ProjectSummary[] }) {
                     bulkAction("trash");
                   }
                 }}
-                className={`${bulkButtonClass} border-red-400/30 text-red-400 hover:bg-red-400/10`}
+                className={`${bulkButtonClass} border-red-400/30 text-red-600 hover:bg-red-400/10`}
               >
                 Delete
               </button>

@@ -138,8 +138,8 @@ export function IdentityPhotoGrid({
                 onClick={() => fileInputs.current[index]?.click()}
                 className={`relative flex aspect-[3/4] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border transition-colors ${
                   file
-                    ? "border-white/10 bg-black/30"
-                    : "border-dashed border-white/15 hover:border-[color:var(--accent)]/50"
+                    ? "border-[color:var(--card-border)] bg-black/30"
+                    : "border-dashed border-black/15 hover:border-[color:var(--accent)]/50"
                 }`}
               >
                 {file ? (
@@ -156,14 +156,14 @@ export function IdentityPhotoGrid({
                     </button>
                   </>
                 ) : busyIndex === index ? (
-                  <span className="text-2xl text-white/20">…</span>
+                  <span className="text-2xl text-black/20">…</span>
                 ) : (
                   <>
                     {(() => {
                       const Silhouette = POSITION_SILHOUETTES[index] ?? POSITION_SILHOUETTES[POSITION_SILHOUETTES.length - 1];
-                      return <Silhouette className="h-[55%] w-[55%] text-white/15" />;
+                      return <Silhouette className="h-[55%] w-[55%] text-black/15" />;
                     })()}
-                    <span className="absolute bottom-2 right-2 flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-sm text-white/40">
+                    <span className="absolute bottom-2 right-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/[0.06] text-sm text-black/40">
                       +
                     </span>
                   </>
@@ -176,7 +176,7 @@ export function IdentityPhotoGrid({
           );
         })}
       </div>
-      {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
+      {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
     </Card>
   );
 }

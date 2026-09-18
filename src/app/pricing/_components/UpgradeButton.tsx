@@ -26,7 +26,7 @@ export function UpgradeButton() {
       <Button onClick={onClick} disabled={busy}>
         {busy ? "Redirecting…" : "Upgrade to Premium"}
       </Button>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
     </div>
   );
 }

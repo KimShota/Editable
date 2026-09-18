@@ -39,11 +39,11 @@ export function NewDraftForm() {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://www.instagram.com/reel/..."
-            className="w-full rounded-lg border border-white/12 bg-black/20 px-4 py-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
+            className="w-full rounded-lg border border-[color:var(--card-border)] bg-[color:var(--bg-2)] px-4 py-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
             disabled={busy}
           />
         </div>
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
         <Button type="submit" disabled={busy || !url.trim()}>
           {busy ? "Starting…" : "Reverse-engineer this reel"}
         </Button>

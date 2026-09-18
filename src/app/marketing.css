@@ -8,7 +8,7 @@
 .cursor-glow {
   position: fixed; top: 0; left: 0; z-index: 0; pointer-events: none;
   width: 640px; height: 640px; margin-left: -320px; margin-top: -320px;
-  background: radial-gradient(circle, rgba(179, 102, 255, 0.16), transparent 68%);
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.16), transparent 68%);
   filter: blur(8px);
   will-change: transform;
 }
@@ -26,7 +26,14 @@
   position: fixed; top: 0; left: 0; right: 0; z-index: 50;
   display: flex; justify-content: space-between; align-items: center;
   padding: 22px 4vw;
-  mix-blend-mode: difference;
+  /* The old dark theme used mix-blend-mode: difference so nav text stayed
+     legible crossing the moody purple mesh. On this flat light page that
+     trick inverts near-black ink against a near-white background to
+     near-white-on-white — invisible — so a plain blurred backdrop replaces
+     it instead. */
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.06);
 }
 .marketing .nav__logo { font-family: var(--display); font-weight: 700; letter-spacing: 0.22em; font-size: 14px; }
 .marketing .nav__links { display: flex; align-items: center; gap: 32px; }
@@ -39,15 +46,15 @@
 .marketing .nav__cta {
   font-family: var(--display); font-size: 13px; letter-spacing: 0.08em;
   color: var(--ink); text-decoration: none;
-  border: 1px solid rgba(242, 242, 239, 0.4); border-radius: 999px;
+  border: 1px solid rgba(var(--ink-rgb), 0.4); border-radius: 999px;
   padding: 9px 18px;
   transition: border-color 0.3s;
 }
 .marketing .nav__cta:hover { border-color: var(--ink); }
 .marketing .nav__launch {
   font-family: var(--display); font-size: 13px; letter-spacing: 0.08em;
-  color: var(--accent-ink); text-decoration: none;
-  background: var(--accent); border-radius: 999px;
+  color: var(--bg); text-decoration: none;
+  background: var(--ink); border-radius: 999px;
   padding: 9px 18px;
   transition: transform 0.25s ease;
 }
@@ -60,10 +67,10 @@
   display: inline-flex; align-items: center; gap: 8px;
   transition: transform 0.25s ease, background 0.25s ease, border-color 0.25s ease;
 }
-.marketing .btn--primary { background: var(--accent); color: var(--accent-ink); }
+.marketing .btn--primary { background: var(--ink); color: var(--bg); }
 .marketing .btn--primary:hover { transform: scale(1.04); }
-.marketing .btn--ghost { color: var(--ink); border: 1px solid rgba(242, 242, 239, 0.22); }
-.marketing .btn--ghost:hover { border-color: var(--ink); background: rgba(242, 242, 239, 0.05); }
+.marketing .btn--ghost { color: var(--ink); border: 1px solid rgba(var(--ink-rgb), 0.22); }
+.marketing .btn--ghost:hover { border-color: var(--ink); background: rgba(var(--ink-rgb), 0.05); }
 
 /* ---------- hero ---------- */
 .marketing .hero {
@@ -79,9 +86,9 @@
 .marketing .hero__badge {
   display: inline-flex; align-items: center; gap: 9px;
   font-family: var(--display); font-size: 13px; color: var(--ink-dim);
-  border: 1px solid rgba(242, 242, 239, 0.14); border-radius: 999px;
+  border: 1px solid rgba(var(--ink-rgb), 0.14); border-radius: 999px;
   padding: 8px 16px 8px 13px;
-  background: rgba(179, 102, 255, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   margin-bottom: 30px;
 }
 .marketing .hero__dot {
@@ -93,7 +100,6 @@
   font-size: clamp(56px, 11vw, 168px);
   letter-spacing: 0.02em; line-height: 0.95;
   display: flex; justify-content: center; overflow: hidden;
-  text-shadow: 0 4px 60px rgba(0, 0, 0, 0.5);
 }
 .marketing .hero__title .ch { display: inline-block; transform: translateY(115%); }
 .marketing .hero__tag {
@@ -118,16 +124,15 @@
 .marketing .mockup { margin-top: 76px; width: min(560px, 92vw); }
 .marketing .mockup__frame {
   text-align: left; border-radius: 20px; overflow: hidden;
-  border: 1px solid rgba(242, 242, 239, 0.12);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
-  backdrop-filter: blur(20px);
-  box-shadow: 0 30px 90px -24px rgba(76, 29, 149, 0.55);
+  border: 1px solid rgba(var(--ink-rgb), 0.1);
+  background: var(--bg-2);
+  box-shadow: 0 30px 70px -30px rgba(var(--ink-rgb), 0.35);
 }
 .marketing .mockup__bar {
   display: flex; align-items: center; gap: 7px;
-  padding: 14px 18px; border-bottom: 1px solid rgba(242, 242, 239, 0.08);
+  padding: 14px 18px; border-bottom: 1px solid rgba(var(--ink-rgb), 0.08);
 }
-.marketing .mockup__dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(242, 242, 239, 0.16); }
+.marketing .mockup__dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(var(--ink-rgb), 0.16); }
 .marketing .mockup__barlabel {
   margin-left: 8px; font-family: var(--display); font-size: 12px;
   letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim);
@@ -136,13 +141,13 @@
 .marketing .mockup__slot {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 15px 18px; border-radius: 12px;
-  border: 1px solid rgba(242, 242, 239, 0.1);
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(var(--ink-rgb), 0.1);
+  background: var(--bg);
 }
-.marketing .mockup__slot--done { border-color: rgba(179, 102, 255, 0.35); background: rgba(179, 102, 255, 0.07); }
+.marketing .mockup__slot--done { border-color: rgba(var(--accent-rgb), 0.35); background: rgba(var(--accent-rgb), 0.07); }
 .marketing .mockup__slot--active {
-  border-color: var(--accent); background: rgba(179, 102, 255, 0.1);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 26px rgba(179, 102, 255, 0.25);
+  border-color: var(--accent); background: rgba(var(--accent-rgb), 0.1);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 26px rgba(var(--accent-rgb), 0.25);
 }
 .marketing .mockup__slotlabel { font-family: var(--display); font-size: 12px; letter-spacing: 0.1em; color: var(--accent); }
 .marketing .mockup__slotfile { font-size: 13px; color: var(--ink-dim); }
@@ -175,14 +180,14 @@
   margin-top: 60px;
   display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px;
   border-radius: 20px; overflow: hidden;
-  background: rgba(242, 242, 239, 0.08);
+  background: rgba(var(--ink-rgb), 0.08);
 }
 .marketing .how__step {
   background: var(--bg-2); padding: 40px 36px;
   display: flex; flex-direction: column; gap: 14px;
   transition: background 0.3s ease;
 }
-.marketing .how__step:hover { background: rgba(179, 102, 255, 0.05); }
+.marketing .how__step:hover { background: rgba(var(--accent-rgb), 0.05); }
 .marketing .how__num { font-family: var(--display); color: var(--accent); font-size: 14px; letter-spacing: 0.1em; }
 .marketing .how__step h3 { font-family: var(--display); font-weight: 700; font-size: clamp(21px, 2vw, 27px); line-height: 1.15; }
 .marketing .how__step p { color: var(--ink-dim); font-size: 15px; max-width: 300px; }
@@ -195,16 +200,16 @@
 .marketing .pitch__formats { margin-top: 90px; display: grid; gap: 14px; }
 .marketing .format {
   display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;
-  border: 1px solid rgba(242, 242, 239, 0.12); border-radius: 14px;
+  border: 1px solid rgba(var(--ink-rgb), 0.12); border-radius: 14px;
   padding: 26px 30px;
   transition: border-color 0.35s ease, background 0.35s ease;
 }
-.marketing .format:hover { border-color: var(--accent); background: rgba(179, 102, 255, 0.08); }
+.marketing .format:hover { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
 .marketing .format__name { font-family: var(--display); font-weight: 700; font-size: clamp(19px, 2vw, 26px); }
 .marketing .format__slots { display: flex; gap: 8px; flex-wrap: wrap; }
 .marketing .format__slots i {
   font-style: normal; font-family: var(--display); font-size: 11px; letter-spacing: 0.12em;
-  color: var(--accent); border: 1px solid rgba(179, 102, 255, 0.4); border-radius: 999px;
+  color: var(--accent); border: 1px solid rgba(var(--accent-rgb), 0.4); border-radius: 999px;
   padding: 6px 12px;
 }
 
@@ -227,7 +232,7 @@
   position: relative; z-index: 1;
   margin-top: 18vh; padding: 30px 4vw;
   display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-  border-top: 1px solid rgba(242, 242, 239, 0.1);
+  border-top: 1px solid rgba(var(--ink-rgb), 0.1);
   font-size: 12px; letter-spacing: 0.14em; color: var(--ink-dim);
   font-family: var(--display);
 }

@@ -420,8 +420,8 @@ export function ResourcesBoard({
                         key={block.id}
                         className="flex items-center gap-2 py-1 pl-1 text-xs text-[color:var(--ink-dim)]"
                       >
-                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/20" />
-                        {block.title} — b-roll, nothing to write
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-black/20" />
+                        {block.title} - b-roll, nothing to write
                       </div>
                     );
                   }
@@ -479,7 +479,7 @@ export function ResourcesBoard({
                     <h2 className="mb-4 font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
                       Footage
                     </h2>
-                    <div className="flex flex-col gap-6 divide-y divide-white/10 [&>*:not(:first-child)]:pt-6">
+                    <div className="flex flex-col gap-6 divide-y divide-[color:var(--card-border)] [&>*:not(:first-child)]:pt-6">
                       {takeSlot && (
                         <div>
                           <div className="mb-3 flex items-center gap-2">
@@ -579,7 +579,7 @@ export function ResourcesBoard({
                   <h2 className="mb-4 font-[family-name:var(--font-display)] text-lg font-bold text-[color:var(--ink)]">
                     Sounds &amp; extras
                   </h2>
-                  <div className="flex flex-col gap-6 divide-y divide-white/10 [&>*:not(:first-child)]:pt-6">
+                  <div className="flex flex-col gap-6 divide-y divide-[color:var(--card-border)] [&>*:not(:first-child)]:pt-6">
                     {format.finalClipSlot && (
                       <div>
                         <div className="mb-3 flex items-center gap-2">
@@ -698,12 +698,12 @@ export function ResourcesBoard({
 
               {diagnostics && diagnostics.length > 0 && (
                 <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-5 backdrop-blur-md">
-                  <p className="mb-2 text-sm font-medium text-amber-300">
+                  <p className="mb-2 text-sm font-medium text-amber-700">
                     The build skipped {diagnostics.length}{" "}
                     {diagnostics.length === 1 ? "thing" : "things"} — worth a
                     look before you edit:
                   </p>
-                  <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-amber-200/90">
+                  <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-amber-800/90">
                     {diagnostics.map((d, i) => (
                       <li key={i}>{d}</li>
                     ))}
@@ -745,12 +745,12 @@ export function ResourcesBoard({
                   return (
                     <div className="rounded-2xl border border-red-400/30 bg-red-400/10 p-5 backdrop-blur-md">
                       <p
-                        className={`text-sm font-medium text-red-300 ${items.length > 0 ? "mb-2" : ""}`}
+                        className={`text-sm font-medium text-red-700 ${items.length > 0 ? "mb-2" : ""}`}
                       >
                         {heading}
                       </p>
                       {items.length > 0 && (
-                        <ul className="list-disc space-y-1 pl-5 text-xs text-red-200/90">
+                        <ul className="list-disc space-y-1 pl-5 text-xs text-red-800/90">
                           {items.map((item, i) => (
                             <li key={i}>{item}</li>
                           ))}
@@ -760,7 +760,7 @@ export function ResourcesBoard({
                   );
                 })()}
 
-              <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-[color:var(--bg)]/90 p-5 backdrop-blur-md">
+              <div className="flex items-center justify-between gap-4 rounded-2xl border border-[color:var(--card-border)] bg-[color:var(--bg)]/90 p-5 backdrop-blur-md">
                 <div>
                   <p className="text-sm text-[color:var(--ink)]">
                     {filledCount} / {requiredSlots.length} required slots filled
@@ -794,7 +794,7 @@ export function ResourcesBoard({
           )}
 
           {advanceError && (
-            <p className="rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-300">
+            <p className="rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-700">
               {advanceError}
             </p>
           )}

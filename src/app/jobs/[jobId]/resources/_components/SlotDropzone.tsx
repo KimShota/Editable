@@ -232,7 +232,7 @@ export function SlotDropzone({
                 : "No options."}
             </p>
           )}
-          {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+          {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
         </SlotShell>
       );
     }
@@ -284,7 +284,7 @@ export function SlotDropzone({
               return (
                 <div
                   key={value}
-                  className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2 py-1"
+                  className="flex items-center gap-2 rounded-lg border border-[color:var(--card-border)] bg-black/20 px-2 py-1"
                 >
                   <span
                     className="h-3 w-3 shrink-0 rounded-full"
@@ -314,7 +314,7 @@ export function SlotDropzone({
             })}
           </div>
         )}
-        {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+        {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
       </SlotShell>
     );
   }
@@ -359,13 +359,13 @@ export function SlotDropzone({
             }
           }}
           rows={3}
-          className="w-full resize-none rounded-lg border border-white/12 bg-black/20 p-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
+          className="w-full resize-none rounded-lg border border-[color:var(--card-border)] bg-[color:var(--bg-2)] p-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
         />
         {/* Saving/Saved/error replace each other in the same line instead of
             stacking — only one is ever relevant at a time. */}
         {(busy || (savedFlash && !busy) || error) && (
           <p
-            className={`mt-1 text-[11px] ${error ? "text-red-400" : busy ? "text-[color:var(--ink-dim)]" : "text-emerald-400"}`}
+            className={`mt-1 text-[11px] ${error ? "text-red-600" : busy ? "text-[color:var(--ink-dim)]" : "text-emerald-600"}`}
           >
             {error ?? (busy ? "Saving…" : "Saved")}
           </p>
@@ -462,7 +462,7 @@ export function SlotDropzone({
           {(takeFiles ?? []).map((file, i) => (
             <div
               key={file}
-              className="relative min-h-[80px] overflow-hidden rounded-lg border border-white/10 bg-black/30"
+              className="relative min-h-[80px] overflow-hidden rounded-lg border border-[color:var(--card-border)] bg-black/30"
             >
               <div className="absolute top-2 left-2 z-10 rounded-full bg-black/70 px-2 py-0.5 text-[11px] text-white">
                 {slot.mediaType === "image"
@@ -489,7 +489,7 @@ export function SlotDropzone({
             className={`flex min-h-[80px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed p-4 text-center transition-colors ${
               dragOver
                 ? "border-[color:var(--accent)] bg-[color:var(--accent)]/5"
-                : "border-white/15 hover:border-white/30"
+                : "border-black/15 hover:border-black/20"
             }`}
           >
             <p className="text-xs text-[color:var(--ink-dim)]">
@@ -505,7 +505,7 @@ export function SlotDropzone({
             </p>
           </div>
         </div>
-        {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+        {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
       </SlotShell>
     );
   }
@@ -524,7 +524,7 @@ export function SlotDropzone({
         }
       />
       {boundFile ? (
-        <div className="relative min-h-[110px] overflow-hidden rounded-lg border border-white/10 bg-black/30">
+        <div className="relative min-h-[110px] overflow-hidden rounded-lg border border-[color:var(--card-border)] bg-black/30">
           <SlotPreview jobId={jobId} slot={slot} file={boundFile} />
           <div className="absolute top-2 right-2 flex gap-1.5">
             <button
@@ -554,7 +554,7 @@ export function SlotDropzone({
             className={`flex min-h-[110px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed p-4 text-center transition-colors ${
               dragOver
                 ? "border-[color:var(--accent)] bg-[color:var(--accent)]/5"
-                : "border-white/15 hover:border-white/30"
+                : "border-black/15 hover:border-black/20"
             }`}
           >
             <p className="text-xs text-[color:var(--ink-dim)]">
@@ -572,7 +572,7 @@ export function SlotDropzone({
           )}
         </div>
       )}
-      {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </SlotShell>
   );
 }
@@ -595,7 +595,7 @@ function DefaultAssetOption({
 }) {
   const [preview, setPreview] = useState(false);
   return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+    <div className="rounded-lg border border-[color:var(--card-border)] bg-black/20 p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-[color:var(--ink-dim)]">
           Don&apos;t want to film this?{" "}
@@ -604,7 +604,7 @@ function DefaultAssetOption({
         <div className="flex shrink-0 gap-1.5">
           <button
             onClick={() => setPreview((p) => !p)}
-            className="rounded-full border border-white/15 px-2.5 py-1 text-[11px] text-[color:var(--ink)] hover:border-white/30"
+            className="rounded-full border border-black/15 px-2.5 py-1 text-[11px] text-[color:var(--ink)] hover:border-black/20"
           >
             {preview ? "Hide" : "Preview"}
           </button>
@@ -618,7 +618,7 @@ function DefaultAssetOption({
         </div>
       </div>
       {preview && (
-        <div className="mt-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+        <div className="mt-2 overflow-hidden rounded-lg border border-[color:var(--card-border)] bg-black/30">
           {slot.mediaType === "video" ? (
             <video
               src={formatAssetUrl(formatId, defaultAsset.file)}
@@ -672,7 +672,7 @@ function SlotShell({
         {!slot.required && <Pill>Optional</Pill>}
         {kind === "onscreen" && <LineKind kind="onscreen" />}
         {filled && (
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
             <svg
               width="11"
               height="11"

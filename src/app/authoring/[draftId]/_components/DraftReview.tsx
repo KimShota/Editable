@@ -80,7 +80,7 @@ export function DraftReview({ draftId }: { draftId: string }) {
     if (resp.status === "error") {
       return (
         <Card className="p-6">
-          <p className="mb-2 text-sm font-medium text-red-400">Authoring failed</p>
+          <p className="mb-2 text-sm font-medium text-red-600">Authoring failed</p>
           <pre className="mb-4 max-h-64 overflow-auto rounded-lg bg-black/30 p-3 text-xs whitespace-pre-wrap text-[color:var(--ink-dim)]">
             {resp.error}
           </pre>
@@ -213,7 +213,7 @@ function ReviewForm({
             value={format.description}
             onChange={(e) => patchField("description", e.target.value)}
             rows={2}
-            className="w-full resize-none rounded-lg border border-white/12 bg-black/20 px-3 py-2 text-sm text-[color:var(--ink)] outline-none focus:border-[color:var(--accent)]"
+            className="w-full resize-none rounded-lg border border-[color:var(--card-border)] bg-[color:var(--bg-2)] px-3 py-2 text-sm text-[color:var(--ink)] outline-none focus:border-[color:var(--accent)]"
           />
         </div>
       </Card>
@@ -243,14 +243,14 @@ function ReviewForm({
                     value={slot.instructions}
                     onChange={(e) => patchSlotInstructions(block.id, slot.name, e.target.value)}
                     rows={2}
-                    className="w-full resize-none rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-[color:var(--ink-dim)] outline-none focus:border-[color:var(--accent)]"
+                    className="w-full resize-none rounded-lg border border-[color:var(--card-border)] bg-black/20 px-3 py-2 text-xs text-[color:var(--ink-dim)] outline-none focus:border-[color:var(--accent)]"
                   />
                 </div>
               ))}
             </div>
 
             {block.anchors.length > 0 && (
-              <div className="mt-4 border-t border-white/10 pt-3">
+              <div className="mt-4 border-t border-[color:var(--card-border)] pt-3">
                 <p className="mb-2 text-[11px] tracking-wide text-[color:var(--ink-faint)] uppercase">
                   Anchors (edit via raw JSON below)
                 </p>
@@ -300,19 +300,19 @@ function ReviewForm({
               onBlur={applyRawText}
               rows={16}
               spellCheck={false}
-              className="w-full resize-y rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-xs text-[color:var(--ink-dim)] outline-none focus:border-[color:var(--accent)]"
+              className="w-full resize-y rounded-lg border border-[color:var(--card-border)] bg-black/30 p-3 font-mono text-xs text-[color:var(--ink-dim)] outline-none focus:border-[color:var(--accent)]"
             />
-            {rawError && <p className="mt-2 text-xs text-red-400">Invalid JSON: {rawError}</p>}
+            {rawError && <p className="mt-2 text-xs text-red-600">Invalid JSON: {rawError}</p>}
           </div>
         )}
       </Card>
 
-      <div className="sticky bottom-6 z-10 flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-[color:var(--bg)]/90 p-5 backdrop-blur-md">
+      <div className="sticky bottom-6 z-10 flex items-center justify-between gap-4 rounded-2xl border border-[color:var(--card-border)] bg-[color:var(--bg)]/90 p-5 backdrop-blur-md">
         <div>
           <p className="text-sm text-[color:var(--ink)]">
             {format.blocks.length} blocks · saves as <span className="font-mono">formats/{format.id}.json</span>
           </p>
-          {saveError && <p className="text-xs text-red-400">{saveError}</p>}
+          {saveError && <p className="text-xs text-red-600">{saveError}</p>}
         </div>
         <Button onClick={save} disabled={saving}>
           {saving ? "Saving…" : "Save to library"}
@@ -375,15 +375,15 @@ function VerifyCard({
       </p>
 
       {running && (
-        <div className="mb-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-3">
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-[color:var(--card-border)] bg-black/20 p-3">
           <span className="h-2 w-2 animate-pulse rounded-full bg-[color:var(--accent)]" />
           <p className="text-xs text-[color:var(--ink)]">Rendering + comparing — this takes a few minutes.</p>
         </div>
       )}
       {!running && error && (
         <div className="mb-3 rounded-lg border border-red-400/30 bg-red-400/10 p-3">
-          <p className="text-xs font-medium text-red-400">Last verify run failed</p>
-          <pre className="mt-1 max-h-40 overflow-auto text-[11px] whitespace-pre-wrap text-red-300/80">{error}</pre>
+          <p className="text-xs font-medium text-red-600">Last verify run failed</p>
+          <pre className="mt-1 max-h-40 overflow-auto text-[11px] whitespace-pre-wrap text-red-700/80">{error}</pre>
         </div>
       )}
 
@@ -394,7 +394,7 @@ function VerifyCard({
             {verifyMedia.sourceUrl ? (
               <video controls playsInline className="w-full rounded-lg bg-black" src={verifyMedia.sourceUrl} />
             ) : (
-              <div className="flex aspect-9/16 items-center justify-center rounded-lg border border-white/10 bg-black/20 p-3 text-center text-xs text-[color:var(--ink-faint)]">
+              <div className="flex aspect-9/16 items-center justify-center rounded-lg border border-[color:var(--card-border)] bg-black/20 p-3 text-center text-xs text-[color:var(--ink-faint)]">
                 Reference reel not found on disk
               </div>
             )}
@@ -404,7 +404,7 @@ function VerifyCard({
             {verifyMedia.renderUrl ? (
               <video controls playsInline className="w-full rounded-lg bg-black" src={verifyMedia.renderUrl} />
             ) : (
-              <div className="flex aspect-9/16 items-center justify-center rounded-lg border border-white/10 bg-black/20 p-3 text-center text-xs text-[color:var(--ink-faint)]">
+              <div className="flex aspect-9/16 items-center justify-center rounded-lg border border-[color:var(--card-border)] bg-black/20 p-3 text-center text-xs text-[color:var(--ink-faint)]">
                 Not yet rendered — run verify above
               </div>
             )}
@@ -455,7 +455,7 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border border-white/12 bg-black/20 px-3 py-2 text-sm text-[color:var(--ink)] outline-none focus:border-[color:var(--accent)]"
+        className="w-full rounded-lg border border-[color:var(--card-border)] bg-[color:var(--bg-2)] px-3 py-2 text-sm text-[color:var(--ink)] outline-none focus:border-[color:var(--accent)]"
       />
     </div>
   );

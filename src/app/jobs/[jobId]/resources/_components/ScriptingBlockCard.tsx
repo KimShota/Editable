@@ -85,7 +85,7 @@ function SpokenLineField({
         </p>
         <LineKind kind="spoken" />
         {filled && (
-          <span className="text-[11px] font-medium text-emerald-400">
+          <span className="text-[11px] font-medium text-emerald-600">
             {saving ? "Saving…" : "Saved"}
           </span>
         )}
@@ -104,9 +104,9 @@ function SpokenLineField({
           if (value !== text) save(value);
         }}
         rows={2}
-        className="w-full resize-none rounded-lg border border-white/12 bg-black/20 p-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
+        className="w-full resize-none rounded-lg border border-[color:var(--card-border)] bg-[color:var(--bg-2)] p-3 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
       />
-      {error && <p className="text-[11px] text-red-400">{error}</p>}
+      {error && <p className="text-[11px] text-red-600">{error}</p>}
     </div>
   );
 }
@@ -189,7 +189,7 @@ export function ScriptingBlockCard({
         {block.brollDurationSec && <Pill>~{block.brollDurationSec.toFixed(1)}s on screen</Pill>}
         {totalRequired > 0 && (
           <span
-            className={`ml-auto text-[11px] font-medium ${allDone ? "text-emerald-400" : "text-[color:var(--ink-dim)]"}`}
+            className={`ml-auto text-[11px] font-medium ${allDone ? "text-emerald-600" : "text-[color:var(--ink-dim)]"}`}
           >
             {allDone ? "✓ Done" : `${filledCount} of ${totalRequired} filled`}
           </span>

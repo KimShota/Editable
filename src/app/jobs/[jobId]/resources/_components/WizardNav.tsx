@@ -59,7 +59,7 @@ export function WizardHeader({
             title={s.label}
             aria-label={`Go to step ${s.id}: ${s.label}`}
             className={`h-1.5 flex-1 rounded-full transition-colors ${
-              s.id <= current ? "bg-[color:var(--accent)]" : "bg-white/10 hover:bg-white/20"
+              s.id <= current ? "bg-[color:var(--accent)]" : "bg-black/[0.08] hover:bg-black/15"
             }`}
           />
         ))}
@@ -80,7 +80,7 @@ export function WizardFooterNav({
   onNext: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between border-t border-white/10 pt-6">
+    <div className="flex items-center justify-between border-t border-[color:var(--card-border)] pt-6">
       <Button variant="secondary" onClick={onBack} disabled={current === 1}>
         Back
       </Button>

@@ -1,21 +1,27 @@
 @import "tailwindcss";
 
-/* ---------- design tokens (shared with website/) ---------- */
+/* ---------- design tokens (shared with website/) ----------
+   Light, black/white "professional" palette (Vyra-inspired): a white/near-
+   white surface system, near-black ink, and ONE restrained blue accent
+   reserved for interactive/selected state (buttons stay ink-on-bg, not
+   accent-colored — see ui.tsx's Button). --accent-rgb/--ink-rgb exist
+   purely so callers that need a translucent tint (rgba(var(--accent-rgb),
+   0.1)) don't have to hand-maintain a second hex value in sync with
+   --accent/--ink. */
 :root {
-  --bg: #0b0710;
-  --bg-2: #120a1e;
-  --ink: #f4f1f9;
-  --ink-dim: #a294b8;
-  --accent: #b366ff;
-  --accent-ink: #0b0710;
-  --violet: #7c3aed;
-  --indigo: #4c1d95;
-  --magenta: #d946ef;
+  --bg: #ffffff;
+  --bg-2: #f5f5f7;
+  --ink: #0a0a0c;
+  --ink-dim: #6b6b76;
+  --ink-rgb: 10, 10, 12;
+  --accent: #2563eb;
+  --accent-ink: #ffffff;
+  --accent-rgb: 37, 99, 235;
   --display: "Space Grotesk", ui-sans-serif, sans-serif;
   --body: "Inter", ui-sans-serif, sans-serif;
-  --card: rgba(244, 241, 249, 0.04);
-  --card-border: rgba(244, 241, 249, 0.1);
-  --card-border-hover: rgba(179, 102, 255, 0.45);
+  --card: #ffffff;
+  --card-border: rgba(10, 10, 12, 0.1);
+  --card-border-hover: rgba(37, 99, 235, 0.4);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 }
@@ -27,9 +33,6 @@
   --color-ink-dim: var(--ink-dim);
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
-  --color-violet: var(--violet);
-  --color-indigo: var(--indigo);
-  --color-magenta: var(--magenta);
   --font-display: var(--display);
   --font-body: var(--body);
 }
@@ -64,37 +67,25 @@ body {
   inset: -10%;
   background:
     radial-gradient(
-      38% 42% at 14% 18%,
-      rgba(76, 29, 149, 0.7),
-      transparent 68%
-    ),
-    radial-gradient(
-      46% 50% at 82% 14%,
-      rgba(217, 70, 239, 0.4),
+      40% 40% at 18% 10%,
+      rgba(var(--accent-rgb), 0.06),
       transparent 70%
     ),
     radial-gradient(
-      50% 55% at 30% 82%,
-      rgba(124, 58, 237, 0.45),
-      transparent 70%
-    ),
-    radial-gradient(
-      60% 60% at 90% 88%,
-      rgba(76, 29, 149, 0.4),
+      50% 50% at 85% 0%,
+      rgba(var(--ink-rgb), 0.035),
       transparent 72%
     ),
     var(--bg);
-  filter: saturate(1.1);
 }
+/* A faint dot grid reads as "designed" without the moody dark-mode mesh —
+   kept extremely low-contrast so it never competes with content. */
 .ambient__grain {
   position: absolute;
-  inset: -50%;
-  width: 200%;
-  height: 200%;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-  background-size: 180px 180px;
-  opacity: 0.15;
-  mix-blend-mode: overlay;
+  inset: 0;
+  background-image: radial-gradient(rgba(var(--ink-rgb), 0.12) 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: 0.5;
 }
 
 .app-shell {
@@ -103,30 +94,34 @@ body {
 }
 
 /* ---------- editor theme (scoped — the timeline/NLE workspace only) ----------
-   A separate neutral-charcoal surface system from the marketing --bg/--card
-   tokens above: the editor is a workbench, not a landing page, so violet is
-   spent only on interactive/selected states instead of washing every surface. */
+   Same light black/white/blue system as the rest of the app now (see :root
+   above) — kept as its own --ed-* token namespace rather than folded into
+   the shared tokens because the editor still needs surface LAYERING
+   (canvas / panel / raised / raised-hover) that the flatter app pages
+   don't, and a couple of editor-only semantic colors (snap-guide green,
+   danger red) that don't belong on --root. */
 .editor-theme {
-  --ed-canvas: #0c0c0f;
-  --ed-panel: #141418;
-  --ed-raised: #1c1c22;
-  --ed-raised-hover: #24242b;
-  --ed-border: rgba(255, 255, 255, 0.07);
-  --ed-border-strong: rgba(255, 255, 255, 0.14);
-  --ed-ink: #f4f4f6;
-  --ed-ink-dim: #8b8b93;
-  --ed-ink-faint: #5a5a61;
-  --ed-accent: #b366ff;
-  --ed-accent-ink: #0c0c0f;
-  --ed-accent-dim: rgba(179, 102, 255, 0.16);
-  --ed-focus: rgba(179, 102, 255, 0.55);
+  --ed-canvas: #ffffff;
+  --ed-panel: #f5f5f7;
+  --ed-raised: #ffffff;
+  --ed-raised-hover: #ececef;
+  --ed-border: rgba(10, 10, 12, 0.08);
+  --ed-border-strong: rgba(10, 10, 12, 0.16);
+  --ed-ink: #0a0a0c;
+  --ed-ink-dim: #6b6b76;
+  --ed-ink-faint: #9a9aa4;
+  --ed-accent: #2563eb;
+  --ed-accent-ink: #ffffff;
+  --ed-accent-dim: rgba(37, 99, 235, 0.12);
+  --ed-focus: rgba(37, 99, 235, 0.5);
   /* Alignment guide: the one green in the editor, reserved for "these two
-     edges are on the exact same frame". Deliberately NOT the violet accent —
+     edges are on the exact same frame". Deliberately NOT the accent blue —
      it appears right next to the playhead, and the whole signal is that it's
-     a different kind of statement. */
-  --ed-snap: #3ddc84;
-  --ed-snap-glow: rgba(61, 220, 132, 0.45);
-  --ed-danger: #f87171;
+     a different kind of statement. Darkened from the old dark-theme mint so
+     it still reads at AA contrast on white. */
+  --ed-snap: #16a34a;
+  --ed-snap-glow: rgba(22, 163, 74, 0.35);
+  --ed-danger: #dc2626;
   --ed-font-display: "Space Grotesk", ui-sans-serif, sans-serif;
   --ed-font-body: "Inter", ui-sans-serif, sans-serif;
   background: var(--ed-canvas);
@@ -165,7 +160,7 @@ body {
     from 0deg,
     transparent 0deg,
     var(--accent) 70deg,
-    rgba(179, 102, 255, 0.15) 140deg,
+    rgba(var(--accent-rgb), 0.15) 140deg,
     transparent 220deg
   );
   animation: processing-spin 1.15s linear infinite;
@@ -205,7 +200,7 @@ body {
   height: 3px;
   overflow: hidden;
   border-radius: 9999px;
-  background: rgba(244, 241, 249, 0.08);
+  background: rgba(var(--ink-rgb), 0.08);
 }
 .processing-track__runner {
   position: absolute;
@@ -259,9 +254,9 @@ body {
   margin-top: -54px;
   border-radius: 14px;
   overflow: hidden;
-  border: 1px solid rgba(244, 241, 249, 0.14);
-  background: rgba(244, 241, 249, 0.04);
-  box-shadow: 0 18px 40px rgba(11, 7, 16, 0.45);
+  border: 1px solid rgba(var(--ink-rgb), 0.12);
+  background: var(--bg-2);
+  box-shadow: 0 18px 40px rgba(var(--ink-rgb), 0.16);
   transform-origin: 50% 118%;
   transition:
     transform 650ms var(--ease-in-out),

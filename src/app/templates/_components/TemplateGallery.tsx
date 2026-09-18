@@ -34,7 +34,7 @@ function NicheButton({
       className={`rounded-full border px-5 py-2.5 font-[family-name:var(--font-display)] text-sm font-semibold tracking-wide capitalize transition-colors ${
         active
           ? "border-[color:var(--accent)] bg-[color:var(--accent)] text-[color:var(--accent-ink)]"
-          : "border-white/15 text-[color:var(--ink-dim)] hover:border-white/30 hover:text-[color:var(--ink)]"
+          : "border-black/15 text-[color:var(--ink-dim)] hover:border-black/20 hover:text-[color:var(--ink)]"
       }`}
     >
       {children} <span className="opacity-60">{count}</span>
@@ -57,12 +57,12 @@ export function TemplateGallery({ formats }: { formats: FormatSummary[] }) {
 
   return (
     <div>
-      <div className="mb-8 flex flex-col gap-5 border-b border-white/10 pb-6">
+      <div className="mb-8 flex flex-col gap-5 border-b border-[color:var(--card-border)] pb-6">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search niche or format…"
-          className="min-w-[220px] rounded-full border border-white/12 bg-transparent px-4 py-2 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
+          className="min-w-[220px] rounded-full border border-[color:var(--card-border)] bg-transparent px-4 py-2 text-sm text-[color:var(--ink)] outline-none placeholder:text-[color:var(--ink-dim)] focus:border-[color:var(--accent)]"
         />
 
         {/* Niche filter gets its own labeled row, in real buttons (not
@@ -227,7 +227,7 @@ function ReelPreview({ formatId }: { formatId: string }) {
             setExpanded(true);
           }}
           aria-label="Preview reel"
-          className="absolute top-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-black/40 text-white opacity-0 backdrop-blur-md transition-all duration-150 group-hover:opacity-100 hover:scale-105 hover:bg-black/60"
+          className="absolute top-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-black/15 bg-black/40 text-white opacity-0 backdrop-blur-md transition-all duration-150 group-hover:opacity-100 hover:scale-105 hover:bg-black/60"
         >
           <ExpandIcon />
         </button>
@@ -313,7 +313,7 @@ function FormatCard({ format }: { format: FormatSummary }) {
       )}
 
       {starting && <p className="text-xs text-[color:var(--ink-dim)]">Starting…</p>}
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
     </Card>
   );
 }

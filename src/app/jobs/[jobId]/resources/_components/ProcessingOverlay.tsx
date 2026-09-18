@@ -282,7 +282,7 @@ export function ProcessingOverlay({
     >
       <div
         ref={modalRef}
-        className="flex w-[min(92vw,560px)] flex-col items-center gap-7 rounded-3xl border border-white/10 bg-[color:var(--bg-2)]/95 px-8 py-12 text-center shadow-[0_40px_120px_rgba(76,29,149,0.35)] transition-[transform,opacity] ease-[var(--ease-out)] sm:px-12"
+        className="flex w-[min(92vw,560px)] flex-col items-center gap-7 rounded-3xl border border-[color:var(--card-border)] bg-[color:var(--bg-2)]/95 px-8 py-12 text-center shadow-[0_40px_120px_rgba(76,29,149,0.35)] transition-[transform,opacity] ease-[var(--ease-out)] sm:px-12"
         style={{
           opacity: shown ? 1 : 0,
           transform: shown ? "scale(1)" : "scale(0.95)",
