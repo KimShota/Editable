@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { Edl, EdlCaptionGroup, EdlOverlay, EdlSfx, EdlTrack, EdlVideoSegment } from "./types";
+import { Edl, EdlCaptionGroup, EdlMusic, EdlOverlay, EdlSfx, EdlTrack, EdlVideoSegment } from "./types";
 import { EdlSchema } from "./schemas";
 import { assertCaptionGroupCoversWords } from "./timing";
 
@@ -49,11 +49,39 @@ export const newClipId = (prefix: string): string => `${prefix}-${randomBytes(4)
 const ClipTrackSchema = z.enum(["video", "overlay", "sfx", "captions"]);
 export type ClipTrack = z.infer<typeof ClipTrackSchema>;
 
-/** The four kinds of vertical layer a free-floating clip can be parked on
+/** The five kinds of vertical layer a free-floating clip can be parked on
  *  (see schemas.ts's EdlTrackSchema doc comment) — video has no track
  *  concept of its own, it's the one contiguous main reel. */
-const TrackKindSchema = z.enum(["overlay", "sfx", "captions", "music"]);
+export const TrackKindSchema = z.enum(["overlay", "text", "sfx", "captions", "music"]);
 export type TrackKind = z.infer<typeof TrackKindSchema>;
+
+/** Which EDL array a free-floating clip lives in — what every op that
+ *  addresses one by id needs to know to find it. Coarser than TrackKind:
+ *  both `overlay` (PiP) and `text` tracks hold clips from `edl.overlays`. */
+const FloatKindSchema = z.enum(["overlay", "sfx", "captions", "music"]);
+export type FloatKind = z.infer<typeof FloatKindSchema>;
+
+/** Which kind of track an overlay clip belongs on, from its component —
+ *  the one rule behind the video-vs-text split (see EdlTrackSchema). */
+export const overlayTrackKind = (component: string): "overlay" | "text" =>
+  component === "TextOverlay" ? "text" : "overlay";
+
+/** Optional placement for an op that puts a clip on a free-floating
+ *  track: an existing track of the right kind by id, or `newTrack` to
+ *  force a fresh one (a drop into blank space, or one that would overlap
+ *  a neighbor). Neither = normalizeTracks packs it into the first track
+ *  of its kind with room, creating one if none has. */
+const PlacementFields = {
+  trackId: z.string().optional(),
+  newTrack: z.boolean().optional(),
+};
+
+/** Where a video overlay sits on the frame when it's first made a
+ *  picture-in-picture layer (dragging a main-track clip up, or dropping
+ *  footage into blank space above the main track) — inset a little from
+ *  full-frame so it visibly reads as a layer over the main reel rather
+ *  than replacing it, and the user scales/moves it from there. */
+export const PIP_DEFAULT_BOX = { x: 0.1, y: 0.1, width: 0.8, height: 0.8 } as const;
 
 /** Tracks that support delete/deleteMany — the four real clips plus
  *  transition (removed by afterClipId) and music (own id, like sfx). */
@@ -96,30 +124,44 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
   }),
   /** Drag a clip vertically onto a different layer — the CapCut gesture of
    *  dropping a component onto another track (or into empty space, which
-   *  creates one). `trackId` names an existing track of the matching kind
-   *  (validated below); omitted, a fresh track is created instead.
-   *  `tlInSec`, when present, repositions the clip in the SAME atomic edit
-   *  — a real drag is diagonal (both a vertical retrack and a horizontal
-   *  retime happen in one gesture), and splitting that into two ops would
-   *  create a moment where the clip briefly overlaps a neighbor mid-edit. */
+   *  creates one). `kind` is the ARRAY the clip lives in; the track it may
+   *  land on is derived from the clip itself (a TextOverlay only ever goes
+   *  on a `text` track, an Image/VideoOverlay only on an `overlay` one).
+   *  `trackId` names an existing track of that kind (validated below);
+   *  omitted, a fresh track is created instead. `tlInSec`, when present,
+   *  repositions the clip in the SAME atomic edit — a real drag is
+   *  diagonal (both a vertical retrack and a horizontal retime happen in
+   *  one gesture), and splitting that into two ops would create a moment
+   *  where the clip briefly overlaps a neighbor mid-edit. */
   z.object({
     type: z.literal("moveToTrack"),
-    kind: TrackKindSchema,
+    kind: FloatKindSchema,
     id: z.string(),
     trackId: z.string().optional(),
     tlInSec: z.number().min(0).optional(),
   }),
-  /** Explicit "+" affordance for adding an empty layer without dropping
-   *  anything onto it yet. */
+  /** Lift a clip OFF the magnetic main track onto a picture-in-picture
+   *  layer — dragging it vertically above the main reel. The segment
+   *  becomes a VideoOverlay at `tlInSec` (its source in-point and duration
+   *  preserved via the overlay's own params), the main track ripples
+   *  closed behind it, and any transition attached to it is dropped.
+   *  Refuses to lift the last remaining main-track clip. */
   z.object({
-    type: z.literal("addTrack"),
-    kind: TrackKindSchema,
-    label: z.string().optional(),
+    type: z.literal("videoToOverlay"),
+    id: z.string(),
+    tlInSec: z.number().min(0),
+    ...PlacementFields,
   }),
-  /** Remove an empty layer. Refuses (throws) if any clip still points at
-   *  it — deleting the CLIPS is a separate, explicit action (delete/
-   *  deleteMany); this never silently takes content down with the row. */
-  z.object({ type: z.literal("removeTrack"), trackId: z.string() }),
+  /** The reverse: drop a VideoOverlay onto the main track, where it's
+   *  INSERTED at `atIndex` (the cut nearest the drop — the editor
+   *  computes it) and the reel re-flows contiguously around it. Only a
+   *  VideoOverlay has footage to contribute; an image or text overlay
+   *  never converts. */
+  z.object({
+    type: z.literal("overlayToVideo"),
+    id: z.string(),
+    atIndex: z.number().int().min(0),
+  }),
   /** The CANVAS equivalent of moveMany: multiple overlays' on-screen
    *  boxes (x/y — the spatial position, not when they play) shifted by
    *  the same delta in one atomic edit, for dragging one to move a
@@ -171,6 +213,7 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
     src: z.string(),
     tlInSec: z.number().min(0).default(0),
     durationSec: z.number().positive().optional(),
+    ...PlacementFields,
   }),
   /** Wire a newly-uploaded file into the timeline as a one-shot sound
    *  effect at the given time. */
@@ -179,6 +222,7 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
     src: z.string(),
     tlInSec: z.number().min(0),
     durationSec: z.number().positive().optional(),
+    ...PlacementFields,
   }),
   /** Wire a newly-uploaded image/video file — or a brand-new TextOverlay,
    *  which has no file at all — into the timeline as an overlay. Box
@@ -186,7 +230,10 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
    *  aspect ratio for Image/VideoOverlay (same as assemble.ts's own
    *  defaultOverlayBox), or from wherever the editor dropped it for a
    *  TextOverlay. `src` is absent for TextOverlay; `text` is ignored for
-   *  the other two. */
+   *  the other two. `srcInSec`/`srcDurationSec` only mean anything for a
+   *  VideoOverlay (where its footage starts, and how long the whole
+   *  source is — carried so a later overlayToVideo can restore the trim
+   *  range exactly). */
   z.object({
     type: z.literal("addOverlay"),
     src: z.string().optional(),
@@ -198,13 +245,23 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
     y: z.number().default(0),
     width: z.number().positive().default(1),
     height: z.number().positive().default(1),
+    srcInSec: z.number().min(0).optional(),
+    srcDurationSec: z.number().positive().optional(),
+    ...PlacementFields,
   }),
-  /** Wire a newly-uploaded video file into the timeline as a new clip
-   *  appended to the end of the (contiguous) video track. */
+  /** Wire a video file into the (contiguous) main track as a new clip —
+   *  inserted at `atIndex` (the cut nearest where it was dropped), or
+   *  appended when omitted. `srcInSec` + `durationSec` pick the source
+   *  range (so dragging an already-trimmed clip out of the library as a
+   *  second copy keeps its trim); `srcDurationSec` is the whole file's
+   *  length, the ceiling a later out-point trim can extend to. */
   z.object({
     type: z.literal("addVideo"),
     src: z.string(),
     durationSec: z.number().positive(),
+    srcInSec: z.number().min(0).optional(),
+    srcDurationSec: z.number().positive().optional(),
+    atIndex: z.number().int().min(0).optional(),
   }),
 ]);
 export type TimelineOp = z.infer<typeof TimelineOpSchema>;
@@ -294,12 +351,72 @@ const normalizeTracks = <T extends { id: string; tlInSec: number; trackId?: stri
  *  every read/write path (readOrMigrateEdl, applyOp) needs, so nothing
  *  else has to know there are four separate arrays under one `tracks`
  *  list. Safe to call on an already-normalized document: every item's
- *  existing (valid) trackId is a no-op match, not reassigned. */
+ *  existing (valid) trackId is a no-op match, not reassigned.
+ *
+ *  `edl.overlays` is split by component into two strictly-typed track
+ *  kinds (see overlayTrackKind): a TextOverlay whose trackId points at a
+ *  video-layer (`overlay`) track — every text clip in a document written
+ *  before `text` tracks existed — doesn't match any track of ITS kind, so
+ *  it's reassigned onto a text track here exactly like a clip with no
+ *  trackId at all. That's the whole migration.
+ *
+ *  Finally, every track nothing sits on any more is dropped: a track only
+ *  ever exists because a clip was placed on it (CapCut's own behavior —
+ *  drag the last clip off a layer and the layer is gone), never as an
+ *  empty row waiting for content. Doing it here, on every normalize,
+ *  means no op has to remember to clean up the layer it just emptied. */
 export const normalizeAllTracks = (edl: Edl): void => {
-  normalizeTracks(edl.overlays, (o) => o.tlOutSec, edl.tracks, "overlay");
+  normalizeTracks(
+    edl.overlays.filter((o) => overlayTrackKind(o.component) === "overlay"),
+    (o) => o.tlOutSec,
+    edl.tracks,
+    "overlay",
+  );
+  normalizeTracks(
+    edl.overlays.filter((o) => overlayTrackKind(o.component) === "text"),
+    (o) => o.tlOutSec,
+    edl.tracks,
+    "text",
+  );
   normalizeTracks(edl.captions, (c) => c.tlOutSec, edl.tracks, "captions");
   normalizeTracks(edl.sfx, (s) => s.tlInSec + (s.durationSec ?? edl.durationSec - s.tlInSec), edl.tracks, "sfx");
   normalizeTracks(edl.music, (m) => m.tlInSec + (m.durationSec ?? edl.durationSec - m.tlInSec), edl.tracks, "music");
+
+  const inUse = new Set<string | undefined>([
+    ...edl.overlays.map((o) => o.trackId),
+    ...edl.captions.map((c) => c.trackId),
+    ...edl.sfx.map((s) => s.trackId),
+    ...edl.music.map((m) => m.trackId),
+  ]);
+  edl.tracks = edl.tracks.filter((t) => inUse.has(t.id));
+};
+
+/** Parks a clip on the track its op asked for — an existing one by id
+ *  (which must be of the clip's own kind), or a brand-new one. Neither
+ *  given leaves trackId unset for normalizeAllTracks to pack. Shared by
+ *  every op that carries PlacementFields. */
+const placeOnTrack = (
+  edl: Edl,
+  clip: { trackId?: string },
+  kind: TrackKind,
+  placement: { trackId?: string; newTrack?: boolean },
+): void => {
+  if (placement.trackId) {
+    const track = edl.tracks.find((t) => t.id === placement.trackId);
+    if (!track) throw new Error(`timeline op: track "${placement.trackId}" not found`);
+    if (track.kind !== kind) {
+      throw new Error(`timeline op: track "${placement.trackId}" is a ${track.kind} track, not ${kind}`);
+    }
+    clip.trackId = placement.trackId;
+    return;
+  }
+  if (placement.newTrack) {
+    const id = newClipId(`${kind}-track`);
+    edl.tracks.push({ id, kind });
+    clip.trackId = id;
+    return;
+  }
+  clip.trackId = undefined;
 };
 
 const findIndexOrThrow = <T extends { id: string }>(arr: T[], id: string, what: string): number => {
@@ -415,18 +532,10 @@ const applyMoveToTrack = (edl: Edl, op: Extract<TimelineOp, { type: "moveToTrack
           ? edl.captions[findIndexOrThrow(edl.captions, op.id, "caption group")]
           : edl.music[findIndexOrThrow(edl.music, op.id, "music bed")];
 
-  if (op.trackId) {
-    const track = edl.tracks.find((t) => t.id === op.trackId);
-    if (!track) throw new Error(`timeline op: track "${op.trackId}" not found`);
-    if (track.kind !== op.kind) {
-      throw new Error(`timeline op: track "${op.trackId}" is a ${track.kind} track, not ${op.kind}`);
-    }
-    clip.trackId = op.trackId;
-  } else {
-    const id = newClipId(`${op.kind}-track`);
-    edl.tracks.push({ id, kind: op.kind });
-    clip.trackId = id;
-  }
+  // The track kind a clip may land on is the clip's own, not the caller's
+  // word for it — an overlay clip's kind follows its component.
+  const kind: TrackKind = op.kind === "overlay" ? overlayTrackKind((clip as EdlOverlay).component) : op.kind;
+  placeOnTrack(edl, clip, kind, { trackId: op.trackId, newTrack: !op.trackId });
 
   // Retrack first, retime second: a diagonal drag's horizontal component
   // goes through the SAME path an ordinary move takes (shiftFloatingClip),
@@ -438,20 +547,57 @@ const applyMoveToTrack = (edl: Edl, op: Extract<TimelineOp, { type: "moveToTrack
   }
 };
 
-const applyAddTrack = (edl: Edl, op: Extract<TimelineOp, { type: "addTrack" }>): void => {
-  edl.tracks.push({ id: newClipId(`${op.kind}-track`), kind: op.kind, label: op.label });
+const applyVideoToOverlay = (edl: Edl, op: Extract<TimelineOp, { type: "videoToOverlay" }>): void => {
+  if (edl.video.length <= 1) throw new Error("timeline op: cannot lift the last main-track clip off the track");
+  const i = findIndexOrThrow(edl.video, op.id, "video clip");
+  const [seg] = edl.video.splice(i, 1);
+  edl.transitions = edl.transitions.filter((t) => t.afterClipId !== seg.id);
+  const overlay: EdlOverlay = {
+    id: seg.id,
+    component: "VideoOverlay",
+    params: {
+      src: seg.src,
+      srcInSec: seg.srcInSec,
+      ...(seg.srcDurationSec !== undefined ? { srcDurationSec: seg.srcDurationSec } : {}),
+    },
+    tlInSec: op.tlInSec,
+    tlOutSec: op.tlInSec + (seg.tlOutSec - seg.tlInSec),
+    ...PIP_DEFAULT_BOX,
+    states: [],
+    layoutLocked: false,
+  };
+  placeOnTrack(edl, overlay, "overlay", op);
+  edl.overlays.push(overlay);
+  recomputeVideoTrack(edl);
 };
 
-const applyRemoveTrack = (edl: Edl, op: Extract<TimelineOp, { type: "removeTrack" }>): void => {
-  const track = edl.tracks.find((t) => t.id === op.trackId);
-  if (!track) throw new Error(`timeline op: track "${op.trackId}" not found`);
-  const inUse =
-    edl.overlays.some((o) => o.trackId === op.trackId) ||
-    edl.sfx.some((s) => s.trackId === op.trackId) ||
-    edl.captions.some((c) => c.trackId === op.trackId) ||
-    edl.music.some((m) => m.trackId === op.trackId);
-  if (inUse) throw new Error("timeline op: cannot remove a track that still has clips on it — move or delete its clips first");
-  edl.tracks = edl.tracks.filter((t) => t.id !== op.trackId);
+const applyOverlayToVideo = (edl: Edl, op: Extract<TimelineOp, { type: "overlayToVideo" }>): void => {
+  const i = findIndexOrThrow(edl.overlays, op.id, "overlay");
+  const overlay = edl.overlays[i];
+  const src = overlay.params.src;
+  if (overlay.component !== "VideoOverlay" || typeof src !== "string") {
+    throw new Error("timeline op: only a video overlay can be moved onto the main track");
+  }
+  edl.overlays.splice(i, 1);
+  const srcInSec = typeof overlay.params.srcInSec === "number" ? overlay.params.srcInSec : 0;
+  const srcDurationSec =
+    typeof overlay.params.srcDurationSec === "number" ? overlay.params.srcDurationSec : undefined;
+  const duration = Math.max(overlay.tlOutSec - overlay.tlInSec, MIN_CLIP_SEC);
+  const seg: EdlVideoSegment = {
+    id: overlay.id,
+    blockId: overlay.id,
+    src,
+    srcInSec,
+    srcOutSec: srcInSec + duration,
+    speed: 1,
+    srcDurationSec,
+    tlInSec: 0,
+    tlOutSec: 0,
+    muted: false,
+    volume: 1,
+  };
+  edl.video.splice(clamp(op.atIndex, 0, edl.video.length), 0, seg);
+  recomputeVideoTrack(edl);
 };
 
 const applyShiftOverlayBoxMany = (edl: Edl, op: Extract<TimelineOp, { type: "shiftOverlayBoxMany" }>): void => {
@@ -916,7 +1062,7 @@ const applySetProp = (edl: Edl, op: Extract<TimelineOp, { type: "setProp" }>): v
 };
 
 const applyAddMusic = (edl: Edl, op: Extract<TimelineOp, { type: "addMusic" }>): void => {
-  edl.music.push({
+  const m: EdlMusic = {
     id: newClipId("music"),
     src: op.src,
     volume: 0.5,
@@ -927,27 +1073,41 @@ const applyAddMusic = (edl: Edl, op: Extract<TimelineOp, { type: "addMusic" }>):
     fadeOutSec: 0,
     duckVolume: 1,
     duckWindows: [],
-  });
+  };
+  placeOnTrack(edl, m, "music", op);
+  edl.music.push(m);
   recomputeVideoTrack(edl);
 };
 
 const applyAddSfx = (edl: Edl, op: Extract<TimelineOp, { type: "addSfx" }>): void => {
-  edl.sfx.push({
+  const s: EdlSfx = {
     id: newClipId("sfx"),
     src: op.src,
     tlInSec: op.tlInSec,
     srcInSec: 0,
     durationSec: op.durationSec,
     volume: 1,
-  });
+  };
+  placeOnTrack(edl, s, "sfx", op);
+  edl.sfx.push(s);
   recomputeVideoTrack(edl);
 };
 
 const applyAddOverlay = (edl: Edl, op: Extract<TimelineOp, { type: "addOverlay" }>): void => {
-  edl.overlays.push({
+  const params: Record<string, unknown> =
+    op.component === "TextOverlay"
+      ? { text: op.text ?? "Text" }
+      : op.component === "VideoOverlay"
+        ? {
+            src: op.src,
+            srcInSec: op.srcInSec ?? 0,
+            ...(op.srcDurationSec !== undefined ? { srcDurationSec: op.srcDurationSec } : {}),
+          }
+        : { src: op.src };
+  const overlay: EdlOverlay = {
     id: newClipId("overlay"),
     component: op.component,
-    params: op.component === "TextOverlay" ? { text: op.text ?? "Text" } : { src: op.src },
+    params,
     tlInSec: op.tlInSec,
     tlOutSec: op.tlOutSec,
     x: op.x,
@@ -956,27 +1116,34 @@ const applyAddOverlay = (edl: Edl, op: Extract<TimelineOp, { type: "addOverlay" 
     height: op.height,
     states: [],
     layoutLocked: false,
-  });
+  };
+  placeOnTrack(edl, overlay, overlayTrackKind(op.component), op);
+  edl.overlays.push(overlay);
   recomputeVideoTrack(edl);
 };
 
 const applyAddVideo = (edl: Edl, op: Extract<TimelineOp, { type: "addVideo" }>): void => {
   const id = newClipId("video");
-  edl.video.push({
+  const srcInSec = op.srcInSec ?? 0;
+  const seg: EdlVideoSegment = {
     id,
     blockId: id,
     src: op.src,
-    srcInSec: 0,
-    srcOutSec: op.durationSec,
+    srcInSec,
+    srcOutSec: srcInSec + op.durationSec,
     // Media dropped onto the timeline by hand always lands at real time;
     // the speed field exists for format-authored timelapse beats.
     speed: 1,
-    srcDurationSec: op.durationSec,
+    srcDurationSec: op.srcDurationSec ?? srcInSec + op.durationSec,
     tlInSec: 0,
     tlOutSec: 0,
     muted: false,
     volume: 1,
-  });
+  };
+  // Magnetic main track: the new clip is spliced into the sequence at the
+  // cut nearest the drop and everything after it slides right — never
+  // stacked on or overlapping a neighbor.
+  edl.video.splice(clamp(op.atIndex ?? edl.video.length, 0, edl.video.length), 0, seg);
   recomputeVideoTrack(edl);
 };
 
@@ -1024,11 +1191,11 @@ export const applyOp = (edl: Edl, opInput: unknown): Edl => {
     case "moveToTrack":
       applyMoveToTrack(next, op);
       break;
-    case "addTrack":
-      applyAddTrack(next, op);
+    case "videoToOverlay":
+      applyVideoToOverlay(next, op);
       break;
-    case "removeTrack":
-      applyRemoveTrack(next, op);
+    case "overlayToVideo":
+      applyOverlayToVideo(next, op);
       break;
     case "shiftOverlayBoxMany":
       applyShiftOverlayBoxMany(next, op);

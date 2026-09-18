@@ -14,10 +14,14 @@ const DEFAULT_DURATION_SEC = 3;
 /** Builds the "addOverlay" op for a brand-new TextOverlay, sized around a
  *  center point — the drop position on the preview, or the frame's own
  *  center for a plain click or a timeline drop (which has a time but no
- *  x/y) — and clamped so the box never hangs off the edge. */
+ *  x/y) — and clamped so the box never hangs off the edge. `placement`
+ *  is which text layer it lands on when dropped on the timeline (see the
+ *  timeline's dropTarget.ts); a click or a preview drop leaves it unset
+ *  and the first text layer with room takes it. */
 export const buildAddTextOverlayOp = (
   tlInSec: number,
   center: { x: number; y: number } = { x: 0.5, y: 0.5 },
+  placement: { trackId?: string; newTrack?: boolean } = {},
 ): TimelineOp => {
   const width = DEFAULT_WIDTH;
   const height = DEFAULT_HEIGHT;
@@ -34,5 +38,6 @@ export const buildAddTextOverlayOp = (
     y,
     width,
     height,
+    ...placement,
   };
 };

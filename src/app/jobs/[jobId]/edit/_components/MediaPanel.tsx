@@ -6,6 +6,11 @@ import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import { Selection, MediaKind } from "./selection";
 import { MusicNoteIcon, VolumeIcon, PlusIcon } from "./Icons";
 import { TEXT_OVERLAY_DRAG_TYPE, buildAddTextOverlayOp } from "./textOverlay";
+import { setAssetDragData, type AssetDragPayload } from "./assetDrag";
+
+/** How long a dragged-out image runs by default — same as the media
+ *  route's IMAGE_OVERLAY_DEFAULT_SEC for a freshly imported one. */
+const IMAGE_DEFAULT_SEC = 3;
 
 type Tab = "media" | "audio" | "text";
 
@@ -135,7 +140,10 @@ const AddTextButton = ({
  *  own files — via click-to-browse or drag-and-drop, each wired straight
  *  into the timeline at the current playhead (see
  *  /api/jobs/[jobId]/timeline/media). Clicking an existing item jumps the
- *  timeline/player to it.
+ *  timeline/player to it; DRAGGING one onto the timeline adds a second
+ *  instance of that asset wherever it's dropped (the timeline decides the
+ *  layer — see its dropTarget.ts), exactly like dragging a clip out of
+ *  CapCut's media pool a second time.
  *
  *  One tab per kind of thing, one Import apiece: Media holds all visual
  *  media (footage and the images/videos overlaid on it — an overlay is
@@ -178,7 +186,15 @@ export const MediaPanel = memo(function MediaPanel({
    *  their own section with component-name labels. Layering is a timeline
    *  concern, and the timeline is where it's already visible. Text
    *  overlays are excluded: they aren't files, and the Text tab owns them. */
-  const mediaItems = [
+  const mediaItems: {
+    key: string;
+    selection: Selection;
+    tlInSec: number;
+    label: string;
+    sublabel: string;
+    thumbSrc: string;
+    drag: AssetDragPayload;
+  }[] = [
     ...edl.video.map((v) => ({
       key: v.id,
       selection: { track: "video" as const, ids: [v.id] },
@@ -186,11 +202,21 @@ export const MediaPanel = memo(function MediaPanel({
       label: v.blockId,
       sublabel: `${(v.tlOutSec - v.tlInSec).toFixed(1)}s`,
       thumbSrc: thumbnailUrl(edl.jobId, v.src, v.srcInSec + (v.srcOutSec - v.srcInSec) / 2),
+      // A second copy keeps this clip's own trim, not the whole file.
+      drag: {
+        kind: "video" as const,
+        src: v.src,
+        srcInSec: v.srcInSec,
+        durationSec: v.srcOutSec - v.srcInSec,
+        srcDurationSec: v.srcDurationSec,
+      },
     })),
     ...edl.overlays
       .filter((o) => o.component !== "TextOverlay")
       .map((o) => {
         const src = typeof o.params.src === "string" ? o.params.src : "";
+        const srcInSec = typeof o.params.srcInSec === "number" ? o.params.srcInSec : 0;
+        const srcDurationSec = typeof o.params.srcDurationSec === "number" ? o.params.srcDurationSec : undefined;
         return {
           key: o.id,
           selection: { track: "overlay" as const, ids: [o.id] },
@@ -199,7 +225,22 @@ export const MediaPanel = memo(function MediaPanel({
           sublabel: `at ${o.tlInSec.toFixed(1)}s`,
           // An image is its own thumbnail; a video needs a poster frame
           // rendered off it, same as the footage cards above.
-          thumbSrc: o.component === "ImageOverlay" ? `/${src}` : thumbnailUrl(edl.jobId, src, 0),
+          thumbSrc: o.component === "ImageOverlay" ? `/${src}` : thumbnailUrl(edl.jobId, src, srcInSec),
+          drag:
+            o.component === "ImageOverlay"
+              ? {
+                  kind: "image" as const,
+                  src,
+                  durationSec: IMAGE_DEFAULT_SEC,
+                  box: { x: o.x, y: o.y, width: o.width, height: o.height },
+                }
+              : {
+                  kind: "video" as const,
+                  src,
+                  srcInSec,
+                  durationSec: o.tlOutSec - o.tlInSec,
+                  srcDurationSec,
+                },
         };
       }),
   ];
@@ -231,7 +272,13 @@ export const MediaPanel = memo(function MediaPanel({
               />
             </div>
             {mediaItems.map((m) => (
-              <button key={m.key} onClick={() => onJumpTo(m.selection, m.tlInSec)} className={cardClass}>
+              <button
+                key={m.key}
+                draggable={!pending}
+                onDragStart={(e) => setAssetDragData(e.dataTransfer, m.drag)}
+                onClick={() => onJumpTo(m.selection, m.tlInSec)}
+                className={`${cardClass} cursor-grab active:cursor-grabbing`}
+              >
                 <div className="aspect-9/16 overflow-hidden rounded-t-lg bg-black/40">
                   {/* A static poster frame, not a live <video> — 16+ of
                       those mounted at once competed with the Player for
@@ -253,8 +300,12 @@ export const MediaPanel = memo(function MediaPanel({
             {edl.music.map((m) => (
               <button
                 key={m.id}
+                draggable={!pending}
+                onDragStart={(e) =>
+                  setAssetDragData(e.dataTransfer, { kind: "music", src: m.src, durationSec: m.durationSec })
+                }
                 onClick={() => onJumpTo({ track: "music", ids: [m.id] }, m.tlInSec)}
-                className={`flex items-center gap-2.5 p-2 ${cardClass}`}
+                className={`flex cursor-grab items-center gap-2.5 p-2 active:cursor-grabbing ${cardClass}`}
               >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[color:var(--ed-accent-dim)] text-[color:var(--ed-accent)]">
                   <MusicNoteIcon className="h-3.5 w-3.5" />
@@ -268,8 +319,12 @@ export const MediaPanel = memo(function MediaPanel({
             {edl.sfx.map((s) => (
               <button
                 key={s.id}
+                draggable={!pending}
+                onDragStart={(e) =>
+                  setAssetDragData(e.dataTransfer, { kind: "sfx", src: s.src, durationSec: s.durationSec })
+                }
                 onClick={() => onJumpTo({ track: "sfx", ids: [s.id] }, s.tlInSec)}
-                className={`flex items-center gap-2.5 p-2 ${cardClass}`}
+                className={`flex cursor-grab items-center gap-2.5 p-2 active:cursor-grabbing ${cardClass}`}
               >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[color:var(--ed-accent-dim)] text-[color:var(--ed-accent)]">
                   <VolumeIcon className="h-3.5 w-3.5" />

@@ -38,6 +38,8 @@ export function TimelineClip({
   trimEdges = ["in", "out"],
   pxPerSec,
   onSelect,
+  onDragMove,
+  onDragEnd,
   onCommitMove,
   onCommitTrim,
   snap,
@@ -80,6 +82,15 @@ export function TimelineClip({
    *  a drag onto a different layer entirely. Ignored by trim (edges never
    *  change layer, only timing). */
   onCommitMove?: (deltaSec: number, clientY: number) => void;
+  /** Same arguments as onCommitMove, fired on every pointer move of a live
+   *  "move" drag — so the timeline can show WHERE the clip is about to
+   *  land (which row lights up, or the new layer it's about to create)
+   *  before the pointer is released. Never fired for a trim. */
+  onDragMove?: (deltaSec: number, clientY: number) => void;
+  /** Fired when a "move" drag ends for ANY reason — a commit, a
+   *  sub-threshold click, or a pointer cancel — so whatever onDragMove
+   *  put on screen always comes down, even when no edit follows. */
+  onDragEnd?: () => void;
   onCommitTrim?: (edge: "in" | "out", deltaSec: number) => void;
   /** Magnetic alignment: given the pixels the pointer has actually
    *  traveled, returns the pixels the clip should move — pulled onto a
@@ -142,9 +153,12 @@ export function TimelineClip({
     // The box is drawn at the SNAPPED offset, not the raw one — the pull is
     // the feedback, and the guide line only ever appears over a clip edge
     // that's genuinely sitting on the alignment.
-    setDragPx(snapped ? snapped.deltaPx : rawPx);
-    if (drag.current.kind === "move")
+    const movedPx = snapped ? snapped.deltaPx : rawPx;
+    setDragPx(movedPx);
+    if (drag.current.kind === "move") {
       setDragPy(e.clientY - drag.current.startY);
+      onDragMove?.(movedPx / pxPerSec, e.clientY);
+    }
     onSnapGuide?.(snapped?.guideSec ?? null);
   };
 
@@ -158,6 +172,7 @@ export function TimelineClip({
     setDragPy(0);
     setTrimEdge(null);
     onSnapGuide?.(null);
+    if (kind === "move") onDragEnd?.();
     // Judged on the RAW travel on EITHER axis: a 1px twitch that a nearby
     // boundary pulled into a 9px offset is still a click, and committing it
     // as a move would shove the clip on what the user meant as a select —

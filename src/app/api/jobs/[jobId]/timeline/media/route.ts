@@ -75,6 +75,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     return NextResponse.json({ error: `kind must be one of ${KINDS.join(", ")}` }, { status: 400 });
   }
   const atSec = Math.max(0, Number(atSecRaw) || 0);
+  // Where the editor's drop resolver decided this lands (see the
+  // timeline's dropTarget.ts): an existing track by id, a fresh track, or
+  // — for the main reel — the index of the cut nearest the drop. All
+  // optional; a plain click-to-import leaves them unset and the op's own
+  // defaults apply (first track with room / appended to the reel).
+  const trackIdRaw = formData.get("trackId");
+  const trackId = typeof trackIdRaw === "string" && trackIdRaw !== "" ? trackIdRaw : undefined;
+  const newTrack = formData.get("newTrack") === "true";
+  const atIndexRaw = formData.get("atIndex");
+  const atIndex =
+    typeof atIndexRaw === "string" && atIndexRaw !== "" && Number.isInteger(Number(atIndexRaw))
+      ? Math.max(0, Number(atIndexRaw))
+      : undefined;
+  const placement = { trackId, newTrack };
 
   // Save the raw upload under the job's own dir first — probing and
   // staging both need bytes on disk.
@@ -117,10 +131,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
   let op: TimelineOp;
   switch (kind as Kind) {
     case "music":
-      op = { type: "addMusic", src, tlInSec: atSec, durationSec: probed.durationSec };
+      op = { type: "addMusic", src, tlInSec: atSec, durationSec: probed.durationSec, ...placement };
       break;
     case "sfx":
-      op = { type: "addSfx", src, tlInSec: atSec, durationSec: probed.durationSec };
+      op = { type: "addSfx", src, tlInSec: atSec, durationSec: probed.durationSec, ...placement };
       break;
     case "overlayImage": {
       const box = defaultOverlayBox("ImageOverlay", probed.width, probed.height, edl.width, edl.height);
@@ -131,6 +145,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
         tlInSec: atSec,
         tlOutSec: atSec + IMAGE_OVERLAY_DEFAULT_SEC,
         ...box,
+        ...placement,
       };
       break;
     }
@@ -142,7 +157,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
         component: "VideoOverlay",
         tlInSec: atSec,
         tlOutSec: atSec + (probed.durationSec ?? IMAGE_OVERLAY_DEFAULT_SEC),
+        srcInSec: 0,
+        srcDurationSec: probed.durationSec,
         ...box,
+        ...placement,
       };
       break;
     }
@@ -151,7 +169,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
         fs.unlinkSync(absPath);
         return NextResponse.json({ error: "couldn't determine video duration" }, { status: 400 });
       }
-      op = { type: "addVideo", src, durationSec: probed.durationSec };
+      op = { type: "addVideo", src, durationSec: probed.durationSec, atIndex };
       break;
   }
 

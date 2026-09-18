@@ -1486,15 +1486,26 @@ export const EdlVoiceoverSchema = z.object({
  * one contiguous main reel (see timelineOps.ts's recomputeVideoTrack doc
  * comment) — CapCut's own V1 magnetic track, not a limitation here.
  *
+ * Tracks are strictly typed, CapCut-style: `overlay` is a secondary VIDEO
+ * layer (ImageOverlay/VideoOverlay — the picture-in-picture layers stacked
+ * above the main reel), `text` holds TextOverlay clips only. Both kinds'
+ * clips still live in `edl.overlays` (they're the same component-in-a-box
+ * shape to the renderer); only which ROW they can be parked on differs.
+ * Dropping a text clip onto a video layer, or footage onto a text layer,
+ * always lands on a fresh track of the right kind instead (see the
+ * editor's dropTarget.ts).
+ *
  * A clip's own `trackId` (see EdlOverlaySchema etc.) points at one of
  * these; timelineOps.ts's normalizeTracks is what keeps every clip
  * pointed at a REAL track of the matching kind, backfilling both this
  * array and any clip's trackId the moment either is missing/stale — the
- * common case for every edl.json written before this field existed.
+ * common case for every edl.json written before this field existed. An
+ * empty track is pruned on every normalize: tracks only ever exist
+ * because a clip sits on them, never as a standalone "add layer" affordance.
  */
 export const EdlTrackSchema = z.object({
   id: z.string(),
-  kind: z.enum(["overlay", "sfx", "captions", "music"]),
+  kind: z.enum(["overlay", "text", "sfx", "captions", "music"]),
   /** User-facing row label — e.g. a second text track a user created by
    *  dragging a title above a crowded one. Absent = the editor shows a
    *  generic "Overlay 2"-style label derived from position instead. */

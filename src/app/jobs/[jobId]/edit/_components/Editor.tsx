@@ -7,7 +7,7 @@ import { EdlVideo } from "@backend/remotion/EdlVideo";
 import type { Edl } from "@backend/pipeline/types";
 import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import type { QuotaStatus } from "../../../../lib/quota";
-import { Timeline } from "./Timeline";
+import { Timeline, type UploadPlacement } from "./Timeline";
 import { Inspector } from "./Inspector";
 import { MediaPanel } from "./MediaPanel";
 import { OverlayCanvas } from "./OverlayCanvas";
@@ -316,8 +316,11 @@ export function Editor({
   // Uploads a user-supplied file and wires it into the timeline in one
   // round trip (see /api/jobs/[jobId]/timeline/media) — same undo/redo
   // bookkeeping as submitOp, since "add music" is just another edit.
+  // `placement` is where a file dropped straight onto the timeline lands
+  // (the Timeline's own drop resolver decided it); the media panel's
+  // Import leaves it empty and the route's defaults apply.
   const uploadMedia = useCallback(
-    async (file: File, kind: MediaKind, atSec: number): Promise<boolean> => {
+    async (file: File, kind: MediaKind, atSec: number, placement: UploadPlacement = {}): Promise<boolean> => {
       setPending(true);
       setError(null);
       try {
@@ -325,6 +328,9 @@ export function Editor({
         body.append("file", file);
         body.append("kind", kind);
         body.append("atSec", String(atSec));
+        if (placement.trackId) body.append("trackId", placement.trackId);
+        if (placement.newTrack) body.append("newTrack", "true");
+        if (placement.atIndex !== undefined) body.append("atIndex", String(placement.atIndex));
         const res = await fetch(`/api/jobs/${jobId}/timeline/media`, { method: "POST", body });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "upload failed");
@@ -612,6 +618,7 @@ export function Editor({
             currentTimeSec={currentTimeSec}
             onSeek={seekToSec}
             onOp={submitOp}
+            onUpload={uploadMedia}
           />
         </div>
       </div>

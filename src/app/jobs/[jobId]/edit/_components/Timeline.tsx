@@ -10,12 +10,18 @@ import {
   useState,
 } from "react";
 import type { Edl, EdlTrack } from "@backend/pipeline/types";
-import type { TimelineOp } from "@backend/pipeline/timelineOps";
+import {
+  overlayTrackKind,
+  PIP_DEFAULT_BOX,
+  type TimelineOp,
+  type TrackKind,
+} from "@backend/pipeline/timelineOps";
 import { previewProxySrc } from "@backend/remotion/previewSrc";
 import { TimelineClip } from "./TimelineClip";
 import { assignLanes, laneCount } from "./lanes";
 import {
   isSelected,
+  MediaKind,
   Selection,
   SelectionTrack,
   toggleSelect,
@@ -37,23 +43,51 @@ import {
   type SnapResult,
   type SnapTarget,
 } from "./snapping";
+import {
+  dropTargetKey,
+  mainCuts,
+  resolveDropTarget,
+  type DragFamily,
+  type DragPayload,
+  type DropTarget,
+  type Interval,
+  type RowHit,
+} from "./dropTarget";
+import {
+  dragFamilyFromTransfer,
+  fileFamily,
+  readAssetDragData,
+  type AssetDragPayload,
+} from "./assetDrag";
 
 /** One hue family (indigo → violet → purple) so tracks read as a system;
  *  transitions get the one intentional exception (amber) since they're a
  *  different kind of thing — an effect marker, not a content clip. */
 const TRACK_COLOR = {
   video: "bg-indigo-500/85",
+  // Picture-in-picture layers: same indigo as the main reel (it's still
+  // footage) a step lighter, so a lifted clip visibly reads as "above"
+  // the main track rather than as a different kind of thing entirely.
+  pip: "bg-indigo-400/80",
   transition: "bg-amber-500/75",
-  // Overlays and captions each get their own row now (Overlays/Captions
-  // below), but keep the violet family so they still read as "both text"
-  // — captions get the darker sibling shade so a caption chip still looks
-  // distinct from an overlay bar, same as sfx/music stay distinguishable
-  // from each other despite both being audio.
+  // Text and captions each get their own rows, but keep the violet family
+  // so they still read as "both text" — captions get the darker sibling
+  // shade so a caption chip still looks distinct from a title bar, same
+  // as sfx/music stay distinguishable from each other despite both being
+  // audio.
   text: "bg-violet-500/80",
   sfx: "bg-purple-400/75",
   captions: "bg-violet-700/85",
   music: "bg-indigo-900/85",
 } as const;
+
+/** How long a dropped image or text card runs by default — mirrors the
+ *  media route's IMAGE_OVERLAY_DEFAULT_SEC and textOverlay.ts's own. */
+const DEFAULT_STILL_SEC = 3;
+/** Height of the dashed "new layer" placeholder shown while a drag is
+ *  about to create one — shorter than a real row so it reads as a
+ *  promise, not a track that already exists. */
+const GHOST_ROW_HEIGHT = 34;
 
 const TRACK_LABEL_WIDTH = 96;
 /** Frame-level precision: enough px/frame that individual frames are
@@ -65,11 +99,6 @@ const LANE_HEIGHT = 56;
 /** Below this drag distance, a marquee gesture is just a click (deselect),
  *  not an intentional rubber-band selection. */
 const MARQUEE_THRESHOLD_PX = 4;
-/** Free-move video reordering: fraction of the dragged clip's own width
- *  that's credited toward crossing a neighbor before the cursor gets
- *  there, so a modest drag reorders instead of snapping back to the same
- *  slot. See commitVideoMove. */
-const FREE_MOVE_BIAS = 0.65;
 /** How long a discrete zoom step (the toolbar's buttons) takes to play
  *  out. Long enough to read as the timeline expanding around a fixed
  *  point rather than cutting to a new scale, short enough not to feel
@@ -114,8 +143,17 @@ type ClipView = {
    *  EdlTrackSchema doc comment. Absent for video/transition clips, which
    *  have no track concept. */
   trackId?: string;
+  /** Which family of track this clip may be dropped on when dragged — see
+   *  dropTarget.ts. Footage (a main-track segment or a VideoOverlay) is
+   *  the one thing that can land on the main reel; every other clip only
+   *  ever moves between layers of its own kind. */
+  family: DragFamily;
 };
 
+/** The four EDL arrays a free-floating clip can live in — what ops and
+ *  the selection address a clip by. Coarser than TrackKind: `overlay`
+ *  clips are split across `overlay` (picture-in-picture) and `text`
+ *  tracks by component. */
 type FloatTrack = "overlay" | "sfx" | "captions" | "music";
 
 /** One row's worth of clips, already filtered to one specific EdlTrack —
@@ -124,16 +162,17 @@ type FloatTrack = "overlay" | "sfx" | "captions" | "music";
 type TrackGroup = { track: EdlTrack; clips: ClipView[] };
 
 /** Splits one kind's flat clip list into one group per EdlTrack, in the
- *  SAME order `edl.tracks` lists them (so a track a user just created via
- *  "+" appears where they'd expect, and reordering `edl.tracks` — not
- *  wired up yet, but the data already supports it — would reorder rows
- *  for free). A clip whose trackId doesn't match any given track (should
- *  only happen for one render frame between an edit and the server's
- *  normalized response) is silently dropped rather than crashing — the
- *  authoritative response replaces it immediately after. */
+ *  SAME order `edl.tracks` lists them (so a layer a drop just created
+ *  appears where they'd expect — at the bottom of its kind's section —
+ *  and reordering `edl.tracks` — not wired up yet, but the data already
+ *  supports it — would reorder rows for free). A clip whose trackId
+ *  doesn't match any given track (should only happen for one render frame
+ *  between an edit and the server's normalized response) is silently
+ *  dropped rather than crashing — the authoritative response replaces it
+ *  immediately after. */
 const groupByTrack = (
   tracks: EdlTrack[],
-  kind: FloatTrack,
+  kind: TrackKind,
   clips: ClipView[],
 ): TrackGroup[] =>
   tracks
@@ -142,6 +181,11 @@ const groupByTrack = (
       track,
       clips: clips.filter((c) => c.trackId === track.id),
     }));
+
+/** Row registry key for a free-floating layer — the same string the drop
+ *  hit-test parses back into a RowHit. The main reel registers as "main". */
+const rowKeyFor = (kind: TrackKind, trackId: string) => `${kind}:${trackId}`;
+const MAIN_ROW_KEY = "main";
 
 /** Resolves one drag against every other clip's boundaries — see snapping.ts.
  *  Built once by Timeline (which is the only thing that can see all the
@@ -175,7 +219,8 @@ function TrackRow({
   snapMove = true,
   registerRow,
   rowKey,
-  onRemove,
+  highlighted = false,
+  insertMarkerSec = null,
 }: {
   label: string;
   clips: ClipView[];
@@ -185,15 +230,25 @@ function TrackRow({
     // from more than one EDL array (the merged Audio row) — it's each
     // clip's own resolved track (c.track ?? the row's fixed `track` prop),
     // so a single-track row's handlers can just ignore the third arg,
-    // same as they always have. `clientY` is the drag's final screen
-    // position, passed straight through from TimelineClip — only "move"
-    // needs it (a candidate cross-layer retrack), never "trim".
+    // same as they always have. `clientY` is the drag's screen position,
+    // passed straight through from TimelineClip — only "move"/"dragMove"
+    // need it (a candidate cross-layer retrack), never "trim".
     move?: (
       id: string,
       deltaSec: number,
       track: SelectionTrack,
       clientY: number,
     ) => void;
+    /** Live counterpart of `move` — fired throughout the drag so the
+     *  timeline can preview where the clip will land; `dragEnd` takes
+     *  that preview down again however the drag finishes. */
+    dragMove?: (
+      id: string,
+      deltaSec: number,
+      track: SelectionTrack,
+      clientY: number,
+    ) => void;
+    dragEnd?: () => void;
     trim?: (
       id: string,
       edge: "in" | "out",
@@ -215,38 +270,39 @@ function TrackRow({
   onSnapGuide?: (sec: number | null) => void;
   /** Whether a whole-clip drag snaps, as opposed to only its trim edges.
    *  Off for the video row: a video drag doesn't move a clip to a time, it
-   *  reorders it among its neighbours (see commitVideoMove), so latching its
+   *  reorders it among its neighbours (see commitClipDrag), so latching its
    *  edge onto a boundary would promise a landing spot the commit doesn't
    *  honour. Trimming a video clip DOES set a real time, so that still
    *  snaps. */
   snapMove?: boolean;
   /** Registers this row's own screen bounds under `rowKey` (undoing the
-   *  registration on unmount) so a clip dropped elsewhere on the timeline
-   *  can be hit-tested against every OTHER row's real position — see
-   *  Timeline's own pickTrackAt. Omitted for rows with no track concept
-   *  (Video/Transitions) and for a kind's own "+ new track" strip, which
-   *  registers itself directly instead of going through TrackRow. */
+   *  registration on unmount) so a drop anywhere on the timeline can be
+   *  hit-tested against every row's real position — see Timeline's own
+   *  pickRowAt. Omitted only for the Transitions row, which nothing can
+   *  be dropped onto. */
   registerRow?: (key: string, el: HTMLDivElement | null) => void;
   rowKey?: string;
-  /** Present only for an EMPTY layer of a kind that has more than one —
-   *  removing the last/only layer of a kind would just leave nothing for
-   *  the next add* op to attach to until normalizeAllTracks reinvents one,
-   *  which is harmless but a confusing thing for a button to do, so
-   *  Timeline never offers this except when there's a genuine layer to
-   *  spare. */
-  onRemove?: () => void;
+  /** True while a live drag is about to land on THIS row — the row tints
+   *  so the answer to "where will this go?" is visible before release. */
+  highlighted?: boolean;
+  /** Main reel only: the cut a dragged clip is about to be inserted at,
+   *  drawn as a vertical marker — the magnetic track's version of "here". */
+  insertMarkerSec?: number | null;
 }) {
   const lanes = useMemo(() => assignLanes(clips), [clips]);
   const rowHeight = laneCount(lanes) * LANE_HEIGHT;
+  // The clips area (after the label gutter) — marquee coordinates are
+  // relative to this, since that's where clips are positioned from.
   const containerRef = useRef<HTMLDivElement>(null);
+  // The WHOLE row, label included, is what registers for drop hit-testing
+  // — a clip dragged over the sticky label gutter is still over this row.
   // Memoized on rowKey/registerRow (both stable across a row's own
   // lifetime) so React doesn't see a new ref callback identity every
   // render — an unstable one would detach/reattach (null, then the
   // element again) on every re-render instead of only on real mount/
   // unmount, needlessly churning Timeline's own row registry.
-  const setContainerRef = useCallback(
+  const setRowRef = useCallback(
     (el: HTMLDivElement | null) => {
-      containerRef.current = el;
       if (rowKey) registerRow?.(rowKey, el);
     },
     [rowKey, registerRow],
@@ -334,29 +390,29 @@ function TrackRow({
 
   return (
     <div
-      className="relative flex border-b border-[color:var(--ed-border)]"
+      ref={setRowRef}
+      className={`relative flex border-b border-[color:var(--ed-border)] transition-colors duration-100 ${
+        highlighted ? "bg-[color:var(--ed-accent-dim)]" : ""
+      }`}
       style={{ height: rowHeight }}
     >
       <div className="sticky left-0 z-20 flex w-24 shrink-0 items-center gap-2 bg-[color:var(--ed-panel)] px-3 text-[11px] text-[color:var(--ed-ink-dim)]">
         <span className={`h-2 w-2 shrink-0 rounded-[3px] ${colorClass}`} />
         <span className="truncate">{label}</span>
-        {onRemove && (
-          <button
-            onClick={onRemove}
-            title="Remove this empty layer"
-            className="ml-auto shrink-0 text-[color:var(--ed-ink-dim)] hover:text-[color:var(--ed-ink)]"
-          >
-            ×
-          </button>
-        )}
       </div>
       <div
-        ref={setContainerRef}
+        ref={containerRef}
         className="relative flex-1"
         onPointerDown={beginMarquee}
         onPointerMove={onMarqueeMove}
         onPointerUp={endMarquee}
       >
+        {insertMarkerSec !== null && (
+          <div
+            style={{ left: insertMarkerSec * pxPerSec }}
+            className="pointer-events-none absolute top-0 bottom-0 z-40 w-0.5 -translate-x-1/2 bg-[color:var(--ed-accent)] shadow-[0_0_0_1px_var(--ed-panel),0_0_8px_var(--ed-accent)]"
+          />
+        )}
         {clips.map((c) => {
           const clipTrack = c.track ?? track;
           // Which clips this gesture actually moves: a drag on a clip that's
@@ -439,6 +495,13 @@ function TrackRow({
                 if (inExistingGroup) return;
                 onSelect(toggleSelect(selection, clipTrack, c.id, additive));
               }}
+              onDragMove={
+                handlers.dragMove && movingClips.length === 1
+                  ? (d, clientY) =>
+                      handlers.dragMove!(c.id, d, clipTrack, clientY)
+                  : undefined
+              }
+              onDragEnd={handlers.dragEnd}
               onCommitMove={
                 handlers.move
                   ? (d, clientY) => {
@@ -489,57 +552,55 @@ function TrackRow({
   );
 }
 
-/** The persistent "+" strip at the bottom of one kind's group of layers —
- *  clicking it always creates a new empty track; it's ALSO a valid drop
- *  target for a clip dragged down past its own kind's last row (registered
- *  under the same `${kind}:new` key pickTrackAt in Timeline looks for), so
- *  "drag below the last layer" and "click +" both funnel into one place a
- *  brand-new layer can come from. */
-const AddTrackRow: React.FC<{
-  kind: FloatTrack;
-  onAdd: (kind: FloatTrack) => void;
-  registerRow?: (key: string, el: HTMLDivElement | null) => void;
-}> = ({ kind, onAdd, registerRow }) => {
-  const setRef = useCallback(
-    (el: HTMLDivElement | null) => registerRow?.(`${kind}:new`, el),
-    [kind, registerRow],
-  );
-  return (
-    <div
-      ref={setRef}
-      className="flex border-b border-[color:var(--ed-border)]"
-      style={{ height: 22 }}
-    >
-      <div className="sticky left-0 z-20 w-24 shrink-0 bg-[color:var(--ed-panel)]" />
-      <button
-        onClick={() => onAdd(kind)}
-        title={`Add a new ${kind} layer — or drag a clip down here`}
-        className="flex flex-1 items-center px-2 text-[11px] text-[color:var(--ed-ink-dim)] hover:bg-[color:var(--ed-raised)] hover:text-[color:var(--ed-ink)]"
-      >
-        + Add layer
-      </button>
-    </div>
-  );
+/** What a section's layers are called: PiP video layers count up from the
+ *  main reel ("Video 2", "Video 3"…) since they ARE video — a clip lifted
+ *  off the main track lands on the next video layer, not on an "Overlay";
+ *  everything else numbers from 1 within its own kind. */
+const KIND_NOUN: Record<TrackKind, string> = {
+  overlay: "Video",
+  text: "Text",
+  captions: "Captions",
+  music: "Music",
+  sfx: "SFX",
 };
 
-/** "Overlay 2" when a track carries no explicit label of its own (the
- *  common case — a label only exists once a user actually renames a
- *  layer, not yet wired up in the UI, or a format author sets one). */
-const trackLabel = (
-  kind: FloatTrack,
-  track: EdlTrack,
-  index: number,
-): string => {
+/** "Text 2" when a track carries no explicit label of its own (the common
+ *  case — a label only exists once a user actually renames a layer, not
+ *  yet wired up in the UI, or a format author sets one). */
+const trackLabel = (kind: TrackKind, track: EdlTrack, index: number): string => {
   if (track.label) return track.label;
-  const noun =
-    kind === "overlay"
-      ? "Overlay"
-      : kind === "captions"
-        ? "Captions"
-        : kind === "music"
-          ? "Music"
-          : "SFX";
-  return index === 0 ? noun : `${noun} ${index + 1}`;
+  const noun = KIND_NOUN[kind];
+  // The main reel is "Video", so the first PiP layer is already "Video 2".
+  const n = kind === "overlay" ? index + 2 : index + 1;
+  return n === 1 ? noun : `${noun} ${n}`;
+};
+
+/** The dashed placeholder that appears at the bottom of a kind's section
+ *  while a live drag is about to create a new layer there — the only
+ *  "add layer" affordance the timeline has, and it exists only for as
+ *  long as something is being held over it. Releasing turns it into a
+ *  real row in exactly that spot; moving away makes it vanish. */
+const GhostTrackRow: React.FC<{ kind: TrackKind; index: number }> = ({
+  kind,
+  index,
+}) => {
+  const n = kind === "overlay" ? index + 2 : index + 1;
+  return (
+    <div
+      className="flex border-b border-[color:var(--ed-border)] bg-[color:var(--ed-accent-dim)]"
+      style={{ height: GHOST_ROW_HEIGHT }}
+    >
+      <div className="sticky left-0 z-20 flex w-24 shrink-0 items-center gap-2 bg-[color:var(--ed-panel)] px-3 text-[11px] text-[color:var(--ed-accent)]">
+        <span className="h-2 w-2 shrink-0 rounded-[3px] border border-dashed border-[color:var(--ed-accent)]" />
+        <span className="truncate">
+          {KIND_NOUN[kind]} {n}
+        </span>
+      </div>
+      <div className="relative m-1 flex flex-1 items-center rounded-md border border-dashed border-[color:var(--ed-accent)]/60 px-2 text-[11px] text-[color:var(--ed-accent)]">
+        New {KIND_NOUN[kind].toLowerCase()} layer
+      </div>
+    </div>
+  );
 };
 
 /**
@@ -555,6 +616,7 @@ const TimelineTracks = memo(function TimelineTracks({
   useFrames,
   fps,
   videoClips,
+  textGroups,
   overlayGroups,
   captionGroups,
   musicGroups,
@@ -567,16 +629,17 @@ const TimelineTracks = memo(function TimelineTracks({
   onRulerPointerUp,
   resolveDragSnap,
   onSnapGuide,
-  commitVideoMove,
+  commitClipDrag,
+  previewClipDrag,
   commitVideoTrim,
   commitTransitionMove,
   commitTransitionTrim,
-  commitFloatMove,
   commitFloatTrim,
   commitGroupMove,
   registerRow,
-  onAddTrack,
-  onRemoveTrack,
+  clearDropPreview,
+  dropKey,
+  dropInsertSec,
 }: {
   pxPerSec: number;
   majorTicks: number[];
@@ -584,6 +647,7 @@ const TimelineTracks = memo(function TimelineTracks({
   useFrames: boolean;
   fps: number;
   videoClips: ClipView[];
+  textGroups: TrackGroup[];
   overlayGroups: TrackGroup[];
   captionGroups: TrackGroup[];
   musicGroups: TrackGroup[];
@@ -596,7 +660,20 @@ const TimelineTracks = memo(function TimelineTracks({
   onRulerPointerUp: () => void;
   resolveDragSnap: DragSnapResolver;
   onSnapGuide: (sec: number | null) => void;
-  commitVideoMove: (clipId: string, deltaSec: number) => void;
+  /** The one handler every draggable clip's release goes through — main
+   *  reel and free-floating layers alike — see Timeline's own. */
+  commitClipDrag: (
+    track: SelectionTrack,
+    clipId: string,
+    deltaSec: number,
+    clientY: number,
+  ) => void;
+  previewClipDrag: (
+    track: SelectionTrack,
+    clipId: string,
+    deltaSec: number,
+    clientY: number,
+  ) => void;
   commitVideoTrim: (
     clipId: string,
     edge: "in" | "out",
@@ -608,12 +685,6 @@ const TimelineTracks = memo(function TimelineTracks({
     edge: "in" | "out",
     deltaSec: number,
   ) => void;
-  commitFloatMove: (
-    track: FloatTrack,
-    clipId: string,
-    deltaSec: number,
-    clientY: number,
-  ) => void;
   commitFloatTrim: (
     track: FloatTrack,
     clipId: string,
@@ -622,14 +693,32 @@ const TimelineTracks = memo(function TimelineTracks({
   ) => void;
   commitGroupMove: (track: FloatTrack, ids: string[], deltaSec: number) => void;
   registerRow: (key: string, el: HTMLDivElement | null) => void;
-  onAddTrack: (kind: FloatTrack) => void;
-  onRemoveTrack: (trackId: string) => void;
+  clearDropPreview: () => void;
+  /** Where the live drag (if any) is about to land — see dropTargetKey.
+   *  Drives which row tints and which section grows a ghost row. */
+  dropKey: string | null;
+  /** The cut on the main reel a live drag is about to insert at, if the
+   *  drag is headed there. */
+  dropInsertSec: number | null;
 }) {
-  /** One kind's whole section: one TrackRow per real layer, plus the "+"
-   *  strip. Colors/labels/handlers are identical across every layer of a
-   *  kind — only which clips land in which row differs. */
+  // TrackRow hands back (id, delta, track, y); the drag resolvers take the
+  // track first — same four values, reordered once here.
+  const clipHandlers = {
+    move: (id: string, d: number, track: SelectionTrack, clientY: number) =>
+      commitClipDrag(track, id, d, clientY),
+    dragMove: (id: string, d: number, track: SelectionTrack, clientY: number) =>
+      previewClipDrag(track, id, d, clientY),
+    dragEnd: clearDropPreview,
+  };
+  /** One kind's whole section: one TrackRow per real layer, plus — only
+   *  while a drag is about to create one — the ghost row it'll become.
+   *  Colors/labels/handlers are identical across every layer of a kind;
+   *  only which clips land in which row differs. `selectionTrack` is the
+   *  EDL array these clips are addressed by (text and PiP layers both
+   *  hold `overlay` clips). */
   const renderKindSection = (
-    kind: FloatTrack,
+    kind: TrackKind,
+    selectionTrack: FloatTrack,
     groups: TrackGroup[],
     colorClass: string,
   ) => (
@@ -641,12 +730,11 @@ const TimelineTracks = memo(function TimelineTracks({
           clips={g.clips}
           colorClass={colorClass}
           handlers={{
-            move: (id, d, track, clientY) =>
-              commitFloatMove(track as FloatTrack, id, d, clientY),
+            ...clipHandlers,
             trim: (id, edge, d, track) =>
               commitFloatTrim(track as FloatTrack, id, edge, d),
           }}
-          track={kind}
+          track={selectionTrack}
           selection={selection}
           onSelect={onSelect}
           onGroupMove={commitGroupMove}
@@ -654,20 +742,13 @@ const TimelineTracks = memo(function TimelineTracks({
           resolveDragSnap={resolveDragSnap}
           onSnapGuide={onSnapGuide}
           registerRow={registerRow}
-          rowKey={`${kind}:${g.track.id}`}
-          // Only ever offered when there's a spare layer of this kind to
-          // fall back to — removing the only/last one would just leave
-          // nothing for the next add* op to attach to until
-          // normalizeAllTracks reinvents one, a confusing thing for a
-          // button to visibly do.
-          onRemove={
-            g.clips.length === 0 && groups.length > 1
-              ? () => onRemoveTrack(g.track.id)
-              : undefined
-          }
+          rowKey={rowKeyFor(kind, g.track.id)}
+          highlighted={dropKey === rowKeyFor(kind, g.track.id)}
         />
       ))}
-      <AddTrackRow kind={kind} onAdd={onAddTrack} registerRow={registerRow} />
+      {dropKey === `${kind}:new` && (
+        <GhostTrackRow kind={kind} index={groups.length} />
+      )}
     </>
   );
   return (
@@ -701,11 +782,27 @@ const TimelineTracks = memo(function TimelineTracks({
         </div>
       </div>
 
+      {/* CapCut's vertical order, top to bottom: text and captions sit
+          above the picture, picture-in-picture video layers above the
+          main reel, the magnetic main reel itself, then audio underneath.
+          A new layer of any kind always appears at the bottom of its own
+          section (that's where its ghost row previews it, too), so
+          "text goes above, audio goes below" holds no matter what gets
+          dropped where. */}
+      {renderKindSection("text", "overlay", textGroups, TRACK_COLOR.text)}
+      {renderKindSection(
+        "captions",
+        "captions",
+        captionGroups,
+        TRACK_COLOR.captions,
+      )}
+      {renderKindSection("overlay", "overlay", overlayGroups, TRACK_COLOR.pip)}
+
       <TrackRow
         label="Video"
         clips={videoClips}
         colorClass={TRACK_COLOR.video}
-        handlers={{ move: commitVideoMove, trim: commitVideoTrim }}
+        handlers={{ ...clipHandlers, trim: commitVideoTrim }}
         track="video"
         selection={selection}
         onSelect={onSelect}
@@ -713,6 +810,10 @@ const TimelineTracks = memo(function TimelineTracks({
         resolveDragSnap={resolveDragSnap}
         onSnapGuide={onSnapGuide}
         snapMove={false}
+        registerRow={registerRow}
+        rowKey={MAIN_ROW_KEY}
+        highlighted={dropKey?.startsWith(`${MAIN_ROW_KEY}:`) ?? false}
+        insertMarkerSec={dropInsertSec}
       />
       {transitionClips.length > 0 && (
         <TrackRow
@@ -732,24 +833,24 @@ const TimelineTracks = memo(function TimelineTracks({
           trimEdges={OUT_TRIM_EDGE_ONLY}
         />
       )}
-      {/* Overlays (text/image/video) get their own section, independent of
-          captions — each is a true CapCut-style layer with its own
-          start/end, freely draggable onto any OTHER overlay layer (or a
-          brand-new one) without touching anything else, and never sharing
-          a lane with the dozens of word-level caption chips a transcript
-          produces the way one merged row used to. */}
-      {renderKindSection("overlay", overlayGroups, TRACK_COLOR.text)}
-      {renderKindSection("captions", captionGroups, TRACK_COLOR.captions)}
-      {/* Music and sfx each get their own section for the same reason
-          overlays and captions were split above — a music bed's edges
+      {/* Music and sfx each get their own section — a music bed's edges
           shouldn't have to fight a burst of short sfx clips (or vice
-          versa) for lane space, and each can now have several independent
+          versa) for lane space, and each can have several independent
           layers of its own. */}
-      {renderKindSection("music", musicGroups, TRACK_COLOR.music)}
-      {renderKindSection("sfx", sfxGroups, TRACK_COLOR.sfx)}
+      {renderKindSection("music", "music", musicGroups, TRACK_COLOR.music)}
+      {renderKindSection("sfx", "sfx", sfxGroups, TRACK_COLOR.sfx)}
     </>
   );
 });
+
+/** Where a file dragged in from the desktop should land, as the media
+ *  route understands it — computed here from the same drop resolver every
+ *  other drop goes through, then carried up to Editor's uploadMedia. */
+export type UploadPlacement = {
+  trackId?: string;
+  newTrack?: boolean;
+  atIndex?: number;
+};
 
 export function Timeline({
   edl,
@@ -758,6 +859,7 @@ export function Timeline({
   currentTimeSec,
   onSeek,
   onOp,
+  onUpload,
 }: {
   edl: Edl;
   selection: Selection;
@@ -765,18 +867,25 @@ export function Timeline({
   currentTimeSec: number;
   onSeek: (sec: number) => void;
   onOp: (op: TimelineOp) => void;
+  /** A file dragged straight from the desktop onto the timeline — same
+   *  upload path as the media panel's Import, with the drop's own time
+   *  and layer instead of the playhead. */
+  onUpload: (
+    file: File,
+    kind: MediaKind,
+    atSec: number,
+    placement: UploadPlacement,
+  ) => void;
 }) {
   const [pxPerSec, setPxPerSec] = useState(70);
   const [containerWidth, setContainerWidth] = useState(800);
   // Snapping: dragged clips and the scrubbed playhead latch onto nearby
   // boundaries (see snapping.ts and resolveDragSnap below), with the green
-  // guide marking each hit. The video row is the one place it means
-  // something different — that track is always kept contiguous (see
-  // recomputeVideoTrack in timelineOps.ts), so a drag there reorders rather
-  // than repositions, and the flag instead controls how far a clip must
-  // travel to count as having passed a neighbor: off, FREE_MOVE_BIAS pulls
-  // that threshold in so a smaller deliberate drag commits the move (see
-  // commitVideoMove).
+  // guide marking each hit. The main reel is the one place a whole-clip
+  // drag never snaps: that track is always kept contiguous (see
+  // recomputeVideoTrack in timelineOps.ts), so a drag there inserts at the
+  // nearest cut rather than landing at a free time (see commitClipDrag) —
+  // trimming a reel clip DOES set a real time, so that still snaps.
   //
   // Defaults to on, then re-read from localStorage after hydration (see the
   // effect below) — reading storage during render would desync the first
@@ -1003,6 +1112,7 @@ export function Timeline({
         waveformSrc: v.muted ? undefined : previewProxySrc(edl.jobId, v.src),
         waveformInSec: v.srcInSec,
         waveformOutSec: v.srcOutSec,
+        family: "video" as const,
       })),
     [edl.video, edl.jobId],
   );
@@ -1029,6 +1139,13 @@ export function Timeline({
           thumbnailSrc:
             o.component === "ImageOverlay" && src ? `/${src}` : undefined,
           trackId: o.trackId,
+          // A VideoOverlay is footage — it can be dropped back onto the
+          // main reel; an image can only ever be a PiP layer; text only
+          // ever a text layer.
+          family:
+            o.component === "VideoOverlay"
+              ? ("video" as const)
+              : (overlayTrackKind(o.component) as DragFamily),
         };
       }),
     [edl.overlays],
@@ -1043,6 +1160,7 @@ export function Timeline({
         label: s.src.split("/").pop() ?? s.src,
         sublabel: "sfx",
         trackId: s.trackId,
+        family: "sfx" as const,
       })),
     [edl.sfx, edl.durationSec],
   );
@@ -1054,6 +1172,8 @@ export function Timeline({
         tlInSec: t.atSec,
         tlOutSec: t.atSec + t.durationSec,
         label: t.component,
+        // Never dragged between rows — a transition lives on a cut.
+        family: "video" as const,
       })),
     [edl.transitions],
   );
@@ -1067,6 +1187,7 @@ export function Timeline({
         label: c.words.map((w) => w.text).join(" "),
         sublabel: "caption",
         trackId: c.trackId,
+        family: "captions" as const,
       })),
     [edl.captions],
   );
@@ -1080,6 +1201,7 @@ export function Timeline({
         label: m.src.split("/").pop() ?? "music",
         sublabel: "music",
         trackId: m.trackId,
+        family: "music" as const,
       })),
     [edl.music, edl.durationSec],
   );
@@ -1105,8 +1227,25 @@ export function Timeline({
   // one layer per kind, same as before this feature existed; a SECOND
   // layer only ever appears once a user (or an overlap) actually creates
   // one.
+  // Text overlays and picture-in-picture overlays share `edl.overlays`
+  // but live on strictly separate track kinds (see overlayTrackKind), so
+  // each kind's rows are grouped from its own slice of the list.
+  const textGroups = useMemo(
+    () =>
+      groupByTrack(
+        edl.tracks,
+        "text",
+        overlayClips.filter((c) => c.family === "text"),
+      ),
+    [edl.tracks, overlayClips],
+  );
   const overlayGroups = useMemo(
-    () => groupByTrack(edl.tracks, "overlay", overlayClips),
+    () =>
+      groupByTrack(
+        edl.tracks,
+        "overlay",
+        overlayClips.filter((c) => c.family !== "text"),
+      ),
     [edl.tracks, overlayClips],
   );
   const captionGroups = useMemo(
@@ -1122,12 +1261,11 @@ export function Timeline({
     [edl.tracks, sfxClips],
   );
 
-  // Every per-layer row (plus each kind's own "+ new layer" strip)
-  // registers its live DOM element here, keyed `${kind}:${trackId}` (or
-  // `${kind}:new`) — populated by ref callbacks as rows mount/unmount, so
-  // this never goes stale the way a once-measured, cached rect would after
-  // a scroll or a layout change. Read only at the END of a drag (see
-  // pickTrackAt) — a ref, not state, because updating it on every mount
+  // Every droppable row (the main reel and each per-layer row) registers
+  // its live DOM element here, keyed "main" or `${kind}:${trackId}` —
+  // populated by ref callbacks as rows mount/unmount, so this never goes
+  // stale the way a once-measured, cached rect would after a scroll or a
+  // layout change. A ref, not state, because updating it on every mount
   // must never itself trigger a re-render.
   const rowElsRef = useRef(new Map<string, HTMLDivElement>());
   const registerRow = useCallback((key: string, el: HTMLDivElement | null) => {
@@ -1135,25 +1273,238 @@ export function Timeline({
     else rowElsRef.current.delete(key);
   }, []);
 
-  /** Hit-tests a drag's final screen Y against every registered row of the
-   *  given kind, fresh (getBoundingClientRect, not a cached value) since
-   *  this only ever runs once, at drop time. Returns undefined when the
-   *  pointer landed outside every row of this kind (e.g. over the ruler,
-   *  or between sections) — the caller's own fallback is "just do the
-   *  ordinary same-row move," so an inconclusive hit-test never loses the
-   *  drag entirely. */
-  const pickTrackAt = useCallback(
-    (kind: FloatTrack, clientY: number): { trackId?: string } | undefined => {
-      for (const [key, el] of rowElsRef.current) {
-        if (!key.startsWith(`${kind}:`)) continue;
-        const rect = el.getBoundingClientRect();
-        if (clientY < rect.top || clientY >= rect.bottom) continue;
-        const suffix = key.slice(kind.length + 1);
-        return suffix === "new" ? {} : { trackId: suffix };
-      }
-      return undefined;
+  /** Hit-tests a screen Y against every registered row, fresh
+   *  (getBoundingClientRect, not a cached value). Null when the pointer is
+   *  over no row at all — the ruler, or the blank space below the last
+   *  track — which the drop resolver reads as "make a new layer". */
+  const pickRowAt = useCallback((clientY: number): RowHit => {
+    for (const [key, el] of rowElsRef.current) {
+      const rect = el.getBoundingClientRect();
+      if (clientY < rect.top || clientY >= rect.bottom) continue;
+      if (key === MAIN_ROW_KEY) return { kind: "main" };
+      const sep = key.indexOf(":");
+      return {
+        kind: key.slice(0, sep) as TrackKind,
+        trackId: key.slice(sep + 1),
+      };
+    }
+    return null;
+  }, []);
+
+  /** Timeline second under a screen X — the inverse of how every clip,
+   *  tick and the playhead are positioned (time*pxPerSec, after the
+   *  label gutter). */
+  const secFromClientX = useCallback(
+    (clientX: number): number => {
+      const el = scrollRef.current;
+      if (!el) return 0;
+      const rect = el.getBoundingClientRect();
+      const x = clientX - rect.left + el.scrollLeft - TRACK_LABEL_WIDTH;
+      return Math.max(0, x / pxPerSec);
     },
-    [],
+    [pxPerSec],
+  );
+
+  /** Every clip currently on each free-floating layer, for the drop
+   *  resolver's overlap check — rebuilt only when the clips do. */
+  const clipsByTrack = useMemo(() => {
+    const map = new Map<string, Interval[]>();
+    for (const c of [...overlayClips, ...captionClips, ...musicClips, ...sfxClips]) {
+      if (!c.trackId) continue;
+      const list = map.get(c.trackId) ?? [];
+      list.push({ id: c.id, tlInSec: c.tlInSec, tlOutSec: c.tlOutSec });
+      map.set(c.trackId, list);
+    }
+    return map;
+  }, [overlayClips, captionClips, musicClips, sfxClips]);
+  const clipsOnTrack = useCallback(
+    (trackId: string): Interval[] => clipsByTrack.get(trackId) ?? [],
+    [clipsByTrack],
+  );
+
+  /** The one resolver behind every drop, internal and external alike. */
+  const resolveDrop = useCallback(
+    (payload: DragPayload, clientY: number, tlInSec: number): DropTarget =>
+      resolveDropTarget({
+        payload,
+        row: pickRowAt(clientY),
+        tlInSec,
+        clipsOnTrack,
+        mainClips: edl.video,
+      }),
+    [pickRowAt, clipsOnTrack, edl.video],
+  );
+
+  /** Live "where will this land?" feedback: the tinted row / ghost row /
+   *  main-reel insertion marker TimelineTracks draws. Held as the target's
+   *  stable key plus the one number the rows need, and only ever SET when
+   *  the key changes — a pointer move that doesn't change the answer must
+   *  not re-render every track row. */
+  const [dropPreview, setDropPreview] = useState<{
+    key: string;
+    insertSec: number | null;
+  } | null>(null);
+  const clearDropPreview = useCallback(() => setDropPreview(null), []);
+  const showDropPreview = useCallback(
+    (target: DropTarget | null) => {
+      const key = dropTargetKey(target);
+      const insertSec =
+        target?.kind === "main"
+          ? (mainCuts(edl.video)[target.index] ?? null)
+          : null;
+      setDropPreview((prev) => {
+        if (!key) return prev === null ? prev : null;
+        if (prev && prev.key === key && prev.insertSec === insertSec)
+          return prev;
+        return { key, insertSec };
+      });
+    },
+    [edl.video],
+  );
+
+  /** The dragged clip's own view, whichever array it lives in. */
+  const findClipView = useCallback(
+    (track: SelectionTrack, clipId: string): ClipView | undefined =>
+      (track === "video"
+        ? videoClips
+        : track === "overlay"
+          ? overlayClips
+          : track === "sfx"
+            ? sfxClips
+            : track === "captions"
+              ? captionClips
+              : track === "music"
+                ? musicClips
+                : transitionClips
+      ).find((c) => c.id === clipId),
+    [
+      videoClips,
+      overlayClips,
+      sfxClips,
+      captionClips,
+      musicClips,
+      transitionClips,
+    ],
+  );
+
+  /** For a main-reel clip being dragged, the insertion marker has to be
+   *  computed against the reel WITHOUT that clip (it's the sequence the
+   *  clip will be spliced back into) — so the preview for that one case
+   *  re-derives cuts from the remaining clips rather than from edl.video. */
+  const previewClipDrag = useCallback(
+    (
+      track: SelectionTrack,
+      clipId: string,
+      deltaSec: number,
+      clientY: number,
+    ) => {
+      const view = findClipView(track, clipId);
+      if (!view) return;
+      const target = resolveDrop(
+        {
+          family: view.family,
+          durationSec: view.tlOutSec - view.tlInSec,
+          selfId: clipId,
+        },
+        clientY,
+        view.tlInSec + deltaSec,
+      );
+      if (target.kind === "main" && track === "video") {
+        const remaining = edl.video.filter((v) => v.id !== clipId);
+        const insertSec = mainCuts(remaining)[target.index] ?? null;
+        setDropPreview((prev) =>
+          prev && prev.key === `main:${target.index}` && prev.insertSec === insertSec
+            ? prev
+            : { key: `main:${target.index}`, insertSec },
+        );
+        return;
+      }
+      showDropPreview(target);
+    },
+    [findClipView, resolveDrop, showDropPreview, edl.video],
+  );
+
+  /** Every clip drag's release lands here and turns into exactly one op:
+   *
+   *   main-reel clip  → main reel:   reorder (insert at the nearest cut)
+   *                   → PiP layer:   videoToOverlay (lift off the reel)
+   *   VideoOverlay    → main reel:   overlayToVideo (drop back onto it)
+   *   any float clip  → own layer:   move
+   *                   → other layer: moveToTrack (existing, or brand-new)
+   *
+   *  Nothing else is possible: the resolver never answers with a layer
+   *  the clip's kind can't live on. */
+  const commitClipDrag = useCallback(
+    (
+      track: SelectionTrack,
+      clipId: string,
+      deltaSec: number,
+      clientY: number,
+    ) => {
+      setDropPreview(null);
+      const view = findClipView(track, clipId);
+      if (!view) return;
+      const target = resolveDrop(
+        {
+          family: view.family,
+          durationSec: view.tlOutSec - view.tlInSec,
+          selfId: clipId,
+        },
+        clientY,
+        view.tlInSec + deltaSec,
+      );
+
+      if (track === "video") {
+        if (target.kind === "main") {
+          // Insertion index is into the reel minus this clip, which is
+          // exactly what applyReorder's toIndex means (it splices the
+          // clip out first). Landing back in its own slot is a no-op.
+          const from = edl.video.findIndex((v) => v.id === clipId);
+          if (target.index !== from) {
+            onOp({ type: "reorder", id: clipId, toIndex: target.index });
+          }
+          return;
+        }
+        // The reel can't be emptied — the last clip stays put.
+        if (edl.video.length <= 1) return;
+        onOp({
+          type: "videoToOverlay",
+          id: clipId,
+          tlInSec: target.tlInSec,
+          ...(target.newTrack
+            ? { newTrack: true }
+            : { trackId: target.trackId }),
+        });
+        return;
+      }
+
+      if (track === "transition") return;
+      const floatTrack = track as FloatTrack;
+
+      if (target.kind === "main") {
+        onOp({ type: "overlayToVideo", id: clipId, atIndex: target.index });
+        return;
+      }
+      if (!target.newTrack && target.trackId === view.trackId) {
+        if (Math.abs(target.tlInSec - view.tlInSec) < 1e-6) return;
+        onOp({
+          type: "move",
+          track: floatTrack,
+          id: clipId,
+          tlInSec: target.tlInSec,
+        });
+        return;
+      }
+      onOp({
+        type: "moveToTrack",
+        kind: floatTrack,
+        id: clipId,
+        // Omitted trackId = "make a fresh one" (see applyMoveToTrack).
+        ...(target.newTrack ? {} : { trackId: target.trackId }),
+        tlInSec: target.tlInSec,
+      });
+    },
+    [findClipView, resolveDrop, edl.video, onOp],
   );
 
   // Read through a ref inside the resolver below rather than closed over:
@@ -1281,30 +1632,6 @@ export function Timeline({
   );
   const onRulerPointerUp = useCallback(() => setSnapGuideSec(null), []);
 
-  const commitVideoMove = useCallback(
-    (clipId: string, deltaSec: number) => {
-      const clip = edl.video.find((v) => v.id === clipId);
-      if (!clip) return;
-      const width = clip.tlOutSec - clip.tlInSec;
-      // In free-move mode, push the comparison point further along in the
-      // drag direction than the cursor actually traveled — shrinking how
-      // far a clip has to move before it's judged to have passed a
-      // neighbor, without changing the underlying "insert nearest by
-      // center" rule.
-      const bias = snapEnabled
-        ? 0
-        : Math.sign(deltaSec) * width * FREE_MOVE_BIAS;
-      const newCenter = clip.tlInSec + width / 2 + deltaSec + bias;
-      const toIndex = edl.video.filter(
-        (other) =>
-          other.id !== clipId &&
-          other.tlInSec + (other.tlOutSec - other.tlInSec) / 2 < newCenter,
-      ).length;
-      onOp({ type: "reorder", id: clipId, toIndex });
-    },
-    [edl.video, onOp, snapEnabled],
-  );
-
   const commitVideoTrim = useCallback(
     (clipId: string, edge: "in" | "out", deltaSec: number) => {
       const clip = edl.video.find((v) => v.id === clipId);
@@ -1312,7 +1639,7 @@ export function Timeline({
       // A drag can overshoot past the timeline's own start (a fast pointer
       // move easily travels further than the clip has room for) — clamped
       // to 0 rather than sent through and rejected by the server's own
-      // tlSec >= 0 check, same as commitFloatMove already does for a move.
+      // tlSec >= 0 check, same as the drop resolver already does for a move.
       const tlSec = Math.max(
         0,
         (edge === "in" ? clip.tlInSec : clip.tlOutSec) + deltaSec,
@@ -1365,44 +1692,6 @@ export function Timeline({
     [edl.transitions, onOp],
   );
 
-  const commitFloatMove = useCallback(
-    (track: FloatTrack, clipId: string, deltaSec: number, clientY: number) => {
-      const clips =
-        track === "overlay"
-          ? edl.overlays
-          : track === "sfx"
-            ? edl.sfx
-            : track === "captions"
-              ? edl.captions
-              : edl.music;
-      const clip = clips.find((c) => c.id === clipId);
-      if (!clip) return;
-      const tlInSec = Math.max(0, clip.tlInSec + deltaSec);
-
-      // pickTrackAt tells us which row (if any) the pointer ended up over.
-      // Nothing conclusive (dropped over the ruler, between sections, or
-      // — the common case — never left its own row) or it's simply the
-      // clip's own current layer: an ordinary same-layer reposition, same
-      // as before this feature existed. Anything else — a different
-      // existing layer of the SAME kind, or the kind's own "+ new layer"
-      // strip (an empty `trackId`-less hit) — is a genuine drag-to-another-
-      // layer gesture, retracked and retimed together in one atomic edit.
-      const hit = pickTrackAt(track, clientY);
-      if (!hit || hit.trackId === clip.trackId) {
-        onOp({ type: "move", track, id: clipId, tlInSec });
-        return;
-      }
-      onOp({
-        type: "moveToTrack",
-        kind: track,
-        id: clipId,
-        trackId: hit.trackId,
-        tlInSec,
-      });
-    },
-    [edl.overlays, edl.sfx, edl.captions, edl.music, onOp, pickTrackAt],
-  );
-
   const commitFloatTrim = useCallback(
     (
       track: FloatTrack,
@@ -1438,22 +1727,183 @@ export function Timeline({
     [onOp],
   );
 
-  // The explicit "+" affordance under each kind's group of layers — same
-  // outcome dragging a clip down onto that same strip produces, just
-  // without a clip in hand yet.
-  const onAddTrack = useCallback(
-    (kind: FloatTrack) => {
-      onOp({ type: "addTrack", kind });
-    },
-    [onOp],
-  );
+  // ---- External drops: library cards, desktop files, "Add text" ----
+  //
+  // HTML5 drag-and-drop (as opposed to the pointer-event drags clips
+  // already on the timeline use) — the same resolver decides where the
+  // asset lands, and a drop turns into an ordinary add* op with the
+  // resolver's placement attached, or an upload carrying it.
 
-  const onRemoveTrack = useCallback(
-    (trackId: string) => {
-      onOp({ type: "removeTrack", trackId });
-    },
-    [onOp],
-  );
+  /** What a drop target means to an add* op or the media route. */
+  const placementFor = (t: DropTarget): UploadPlacement =>
+    t.kind === "main"
+      ? { atIndex: t.index }
+      : t.newTrack
+        ? { newTrack: true }
+        : { trackId: t.trackId };
+
+  /** Audio is one type to a user ("drop a sound here"), even though the
+   *  EDL keeps music beds and one-shot effects in separate arrays — so an
+   *  audio asset arriving from OUTSIDE the timeline takes on whichever
+   *  audio kind the row under it is. (A clip already on the timeline
+   *  keeps its own kind: there's no music↔sfx conversion op, and it'd be
+   *  surprising for a bed to turn into an effect by being nudged.) */
+  const adoptAudioRow = (family: DragFamily, row: RowHit): DragFamily =>
+    (family === "music" || family === "sfx") &&
+    (row?.kind === "music" || row?.kind === "sfx")
+      ? row.kind
+      : family;
+
+  const onExternalDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    const info = dragFamilyFromTransfer(e.dataTransfer);
+    if (!info) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    const row = pickRowAt(e.clientY);
+    showDropPreview(
+      resolveDropTarget({
+        payload: {
+          family: adoptAudioRow(info.family, row),
+          durationSec: info.durationSec,
+        },
+        row,
+        tlInSec: secFromClientX(e.clientX),
+        clipsOnTrack,
+        mainClips: edl.video,
+      }),
+    );
+  };
+
+  const onExternalDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    // dragleave fires for every child boundary crossed; only a genuine
+    // exit from the whole scroll area clears the preview.
+    const to = e.relatedTarget as Node | null;
+    if (to && e.currentTarget.contains(to)) return;
+    setDropPreview(null);
+  };
+
+  /** A library card becomes a NEW instance of its asset at the drop. */
+  const assetDropOp = (asset: AssetDragPayload, target: DropTarget): TimelineOp => {
+    // Only footage can land on the main reel; the resolver never sends
+    // anything else there, but the types don't know that.
+    const floatPlacement =
+      target.kind === "main" ? { newTrack: true } : placementFor(target);
+    switch (asset.kind) {
+      case "video":
+        if (target.kind === "main") {
+          return {
+            type: "addVideo",
+            src: asset.src,
+            durationSec: asset.durationSec,
+            srcInSec: asset.srcInSec,
+            srcDurationSec: asset.srcDurationSec,
+            atIndex: target.index,
+          };
+        }
+        return {
+          type: "addOverlay",
+          component: "VideoOverlay",
+          src: asset.src,
+          srcInSec: asset.srcInSec,
+          srcDurationSec: asset.srcDurationSec,
+          tlInSec: target.tlInSec,
+          tlOutSec: target.tlInSec + asset.durationSec,
+          ...PIP_DEFAULT_BOX,
+          ...floatPlacement,
+        };
+      case "image":
+        return {
+          type: "addOverlay",
+          component: "ImageOverlay",
+          src: asset.src,
+          tlInSec: target.tlInSec,
+          tlOutSec: target.tlInSec + asset.durationSec,
+          ...asset.box,
+          ...floatPlacement,
+        };
+      case "music":
+        return {
+          type: "addMusic",
+          src: asset.src,
+          tlInSec: target.tlInSec,
+          durationSec: asset.durationSec,
+          ...floatPlacement,
+        };
+      case "sfx":
+        return {
+          type: "addSfx",
+          src: asset.src,
+          tlInSec: target.tlInSec,
+          durationSec: asset.durationSec,
+          ...floatPlacement,
+        };
+    }
+  };
+
+  const onExternalDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    const dt = e.dataTransfer;
+    if (!dragFamilyFromTransfer(dt)) return;
+    e.preventDefault();
+    setDropPreview(null);
+    const tlInSec = secFromClientX(e.clientX);
+    const row = pickRowAt(e.clientY);
+    const resolve = (family: DragFamily, durationSec: number) =>
+      resolveDropTarget({
+        payload: { family: adoptAudioRow(family, row), durationSec },
+        row,
+        tlInSec,
+        clipsOnTrack,
+        mainClips: edl.video,
+      });
+
+    if (dt.types.includes(TEXT_OVERLAY_DRAG_TYPE)) {
+      const target = resolve("text", DEFAULT_STILL_SEC);
+      onOp(
+        buildAddTextOverlayOp(
+          target.tlInSec,
+          undefined,
+          target.kind === "main" ? { newTrack: true } : placementFor(target),
+        ),
+      );
+      return;
+    }
+
+    const asset = readAssetDragData(dt);
+    if (asset) {
+      const family: DragFamily =
+        asset.kind === "video"
+          ? "video"
+          : asset.kind === "image"
+            ? "overlay"
+            : asset.kind;
+      const target = resolve(family, asset.durationSec ?? 0);
+      // The row may have re-typed a music card as sfx (or vice versa).
+      const resolved =
+        (family === "music" || family === "sfx") &&
+        (target.kind === "music" || target.kind === "sfx") &&
+        target.kind !== asset.kind
+          ? { ...asset, kind: target.kind }
+          : asset;
+      onOp(assetDropOp(resolved, target));
+      return;
+    }
+
+    const file = dt.files?.[0];
+    if (!file) return;
+    const family = adoptAudioRow(fileFamily(file.type), row);
+    const target = resolve(family, 0);
+    const kind: MediaKind =
+      family === "video"
+        ? target.kind === "main"
+          ? "video"
+          : "overlayVideo"
+        : family === "overlay"
+          ? "overlayImage"
+          : family === "sfx"
+            ? "sfx"
+            : "music";
+    onUpload(file, kind, target.tlInSec, placementFor(target));
+  };
 
   // Toolbar split/delete act on whatever's currently selected — a shortcut
   // for the same actions available per-clip in the Inspector. Only the
@@ -1614,24 +2064,14 @@ export function Timeline({
         ref={scrollRef}
         className="relative flex-1 overflow-x-auto overflow-y-auto"
         onClick={() => onSelect(null)}
-        onDragOver={(e) => {
-          if (!e.dataTransfer.types.includes(TEXT_OVERLAY_DRAG_TYPE)) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
-        }}
-        onDrop={(e) => {
-          if (!e.dataTransfer.types.includes(TEXT_OVERLAY_DRAG_TYPE)) return;
-          e.preventDefault();
-          const rect = e.currentTarget.getBoundingClientRect();
-          const x =
-            e.clientX -
-            rect.left +
-            e.currentTarget.scrollLeft -
-            TRACK_LABEL_WIDTH;
-          onOp(buildAddTextOverlayOp(Math.max(0, x / pxPerSec)));
-        }}
+        onDragOver={onExternalDragOver}
+        onDragLeave={onExternalDragLeave}
+        onDrop={onExternalDrop}
       >
-        <div style={{ width: contentWidth }} className="relative">
+        {/* min-h-full so the blank space below the last track is part of
+            the drop surface — dropping there is how a new layer gets made
+            from nothing, so it has to actually be there to drop onto. */}
+        <div style={{ width: contentWidth }} className="relative min-h-full">
           <TimelineTracks
             pxPerSec={pxPerSec}
             majorTicks={majorTicks}
@@ -1639,6 +2079,7 @@ export function Timeline({
             useFrames={useFrames}
             fps={edl.fps}
             videoClips={videoClips}
+            textGroups={textGroups}
             overlayGroups={overlayGroups}
             captionGroups={captionGroups}
             musicGroups={musicGroups}
@@ -1651,16 +2092,17 @@ export function Timeline({
             onRulerPointerUp={onRulerPointerUp}
             resolveDragSnap={resolveDragSnap}
             onSnapGuide={setSnapGuideSec}
-            commitVideoMove={commitVideoMove}
+            commitClipDrag={commitClipDrag}
+            previewClipDrag={previewClipDrag}
             commitVideoTrim={commitVideoTrim}
             commitTransitionMove={commitTransitionMove}
             commitTransitionTrim={commitTransitionTrim}
-            commitFloatMove={commitFloatMove}
             commitFloatTrim={commitFloatTrim}
             commitGroupMove={commitGroupMove}
             registerRow={registerRow}
-            onAddTrack={onAddTrack}
-            onRemoveTrack={onRemoveTrack}
+            clearDropPreview={clearDropPreview}
+            dropKey={dropPreview?.key ?? null}
+            dropInsertSec={dropPreview?.insertSec ?? null}
           />
 
           {/* Playhead — the line is decorative only (so it doesn't block
