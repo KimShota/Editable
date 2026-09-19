@@ -30,6 +30,17 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "invalid email or password" }, { status: 401 });
   }
+  // Blocks a RETURNING login, not the signup that created the account (see
+  // signup/route.ts, which still auto-creates a session right after signup
+  // so there's a logged-in /account page to resend the link from). Admins
+  // are exempt — they're created directly via the promoteAdmin tool, not
+  // through this signup/verification flow at all.
+  if (!user.isAdmin && !user.emailVerifiedAt) {
+    return NextResponse.json(
+      { error: "verify your email before logging in — check your inbox for the confirmation link" },
+      { status: 403 },
+    );
+  }
 
   const token = await createSession(user.id, req.headers.get("user-agent") ?? undefined);
   const res = NextResponse.json({ ok: true, user: { email: user.email } }, { status: 200 });
