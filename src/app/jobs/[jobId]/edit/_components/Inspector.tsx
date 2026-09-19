@@ -762,7 +762,7 @@ export function Inspector({
       <div className="flex h-full flex-col">
         {header("Caption group", `${group.tlInSec.toFixed(2)}s – ${group.tlOutSec.toFixed(2)}s`)}
         <div className={sectionClass}>
-          <Field label="Text (auto-transcribed — fix a misheard word freely)">
+          <Field label="Text">
             <textarea
               defaultValue={group.words.map((w) => w.text).join(" ")}
               onBlur={(e) => {
@@ -777,11 +777,11 @@ export function Inspector({
               className={inputClass}
             />
           </Field>
-          <p className="text-xs text-[color:var(--ed-ink-dim)]">
-            Keeping the same number of words keeps each word&apos;s original timing (best for fixing a
-            mis-transcription). Adding or removing words spreads the new text evenly across the group&apos;s span
-            instead.
-          </p>
+          {/* No help copy here on purpose — the panel reads as a form,
+              not a manual. Word-timing rules on edit (same word count
+              keeps per-word timing; a different count spreads evenly)
+              live in wordsFromEditedText; track-wide styling in
+              applyCaptionStylePatch. */}
           {/* "Captions and text are the same thing" — same font/size/style
               controls a TextOverlay event gets, just reading/writing the
               caption group's own top-level fields instead of `params`.
@@ -790,11 +790,6 @@ export function Inspector({
               other variant already has. */}
           {group.variant !== "karaokeTitle" && (
             <>
-              <p className="text-xs text-[color:var(--ed-ink-dim)]">
-                Style and position apply to every caption on this track at
-                once (like CapCut&apos;s caption styling) — this is one look
-                for the whole track, not just this moment&apos;s text.
-              </p>
               <TextStyleFields
                 override={group as TextStyleOverride}
                 defaults={effectiveCaptionDefaults(group, edl)}

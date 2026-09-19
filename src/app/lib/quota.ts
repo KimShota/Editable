@@ -2,6 +2,7 @@ import "server-only";
 import { sql } from "./db";
 import { readJobManifest } from "./jobs";
 import type { SessionUser } from "./session";
+import { loadFormat } from "@backend/pipeline/loader";
 
 /**
  * Per-user daily cap on build/render attempts — the only thing that bounds
@@ -14,12 +15,16 @@ import type { SessionUser } from "./session";
  * concern from the per-user quota, but the same call site in both routes
  * wants to check both before doing any work, so they're exposed together.
  *
- * On top of the rolling daily rate, a handful of formats carry their own
- * LIFETIME cap (see FORMAT_LIFETIME_LIMITS below) — a fixed number of
- * build/render attempts per user, ever, never resetting. "Attempt" not
- * "success," same accounting as the daily count and for the same reason
- * (see db/migrations/003_pipeline_runs.sql: a failed build already spent
- * the Anthropic/Gemini calls behind it).
+ * Access is plan-based:
+ *  - Free users get a FREE_TRIAL_DAYS-long trial (from users.created_at),
+ *    during which every format except PREMIUM_ONLY_FORMATS is available up
+ *    to freeTrialDailyLimit()/day. Once the trial window has passed, a free
+ *    user is locked out entirely — Premium is the only way back in.
+ *  - Premium users get every format, including PREMIUM_ONLY_FORMATS, up to
+ *    premiumDailyLimit()/day.
+ *  - Admins bypass every cap here — they're the operator, not a spend risk
+ *    the quota needs to guard against, and a locked-out admin can't raise
+ *    their own limit without SSH access anyway.
  */
 
 export type QuotaResult = { ok: true } | { ok: false; error: string; status: 429 | 503 };
@@ -28,32 +33,79 @@ export type QuotaStatus =
   | { unlimited: true }
   | { unlimited: false; limit: number; used: number; remaining: number };
 
-const DEFAULT_DAILY_LIMIT = 10;
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
+/** How many days of full-ish access a free account gets before it's locked
+ *  behind Premium — an operational knob, kept in an env var for the same
+ *  reason the daily limits below are. */
+export const freeTrialDays = (): number => {
+  const raw = Number(process.env.FREE_TRIAL_DAYS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 3;
+};
+
 /**
- * PIPELINE_DAILY_LIMIT_PER_USER: unset falls back to DEFAULT_DAILY_LIMIT —
- * quota is meant to be on by default, not opt-in, since it's what makes an
- * invite-gated signup actually safe to hand out. An explicit "0" (or a
- * negative/garbage value) means unlimited: distinct from "0 uses left",
- * which would lock everyone out including future non-admins by mistake the
- * moment the env var is merely absent.
+ * FREE_TRIAL_DAILY_LIMIT_PER_USER: build/render attempts per day for a free
+ * account still inside its trial window. Unset falls back to 3. An explicit
+ * "0" (or negative/garbage) means unlimited-during-trial, same convention as
+ * premiumDailyLimit() below.
  */
-export const dailyLimit = (): number => {
-  if (process.env.PIPELINE_DAILY_LIMIT_PER_USER === undefined) return DEFAULT_DAILY_LIMIT;
-  const raw = Number(process.env.PIPELINE_DAILY_LIMIT_PER_USER);
+export const freeTrialDailyLimit = (): number => {
+  if (process.env.FREE_TRIAL_DAILY_LIMIT_PER_USER === undefined) return 3;
+  const raw = Number(process.env.FREE_TRIAL_DAILY_LIMIT_PER_USER);
   return Number.isFinite(raw) && raw > 0 ? raw : 0;
 };
 
-/** Formats capped at a fixed lifetime total per user, on top of (not
- *  instead of) the daily rate above — a plain in-code map, not an env
- *  var, since this is a per-format product decision ("this template is
- *  limited-run") rather than an operational knob meant to be tuned per
- *  deploy the way the daily rate is. */
-const FORMAT_LIFETIME_LIMITS: Record<string, number> = {
+/**
+ * PREMIUM_DAILY_LIMIT_PER_USER: build/render attempts per day for a Premium
+ * subscriber. Unset falls back to 10. An explicit "0" (or negative/garbage)
+ * means unlimited — distinct from "0 uses left", which would lock out every
+ * subscriber the moment the env var is merely absent.
+ */
+export const premiumDailyLimit = (): number => {
+  if (process.env.PREMIUM_DAILY_LIMIT_PER_USER === undefined) return 10;
+  const raw = Number(process.env.PREMIUM_DAILY_LIMIT_PER_USER);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+};
+
+/** Formats gated behind Premium entirely — a free user can't use these at
+ *  any point, trial or not. A plain in-code set, not an env var, since this
+ *  is a per-format product decision rather than an operational knob meant
+ *  to be tuned per deploy the way the daily rates are. */
+const PREMIUM_ONLY_FORMATS = new Set<string>([
   // "Kumar Method" — a heavier, more personal template (talking-head +
-  // generated b-roll + a name/likeness triptych); one per account, ever.
-  "cinematic-debut-manifesto": 1,
+  // generated b-roll + a name/likeness triptych).
+  "cinematic-debut-manifesto",
+]);
+
+/** Whether `user` is still inside their free trial window. Only meaningful
+ *  for plan === "free" — a Premium user's access is governed by
+ *  premiumDailyLimit() instead, regardless of when they signed up. */
+export const isInFreeTrial = (user: SessionUser): boolean => {
+  const trialEndsAt = new Date(user.createdAt).getTime() + freeTrialDays() * WINDOW_MS;
+  return Date.now() < trialEndsAt;
+};
+
+type DailyAccess =
+  | { kind: "unlimited" }
+  | { kind: "limited"; limit: number }
+  | { kind: "locked"; reason: string };
+
+/** The plan/trial rule above, resolved to a daily-rate outcome — shared by
+ *  getQuotaStatus's read-only peek and checkAndRecordQuota's own check so
+ *  the two can't drift on what a given user is allowed. */
+const resolveDailyAccess = (user: SessionUser): DailyAccess => {
+  if (user.plan === "premium") {
+    const limit = premiumDailyLimit();
+    return limit === 0 ? { kind: "unlimited" } : { kind: "limited", limit };
+  }
+  if (isInFreeTrial(user)) {
+    const limit = freeTrialDailyLimit();
+    return limit === 0 ? { kind: "unlimited" } : { kind: "limited", limit };
+  }
+  return {
+    kind: "locked",
+    reason: `your ${freeTrialDays()}-day free trial has ended — upgrade to Premium to keep creating`,
+  };
 };
 
 /** Rolling-24h attempt count for this user — shared by checkAndRecordQuota's
@@ -68,29 +120,21 @@ const countUsed = async (userId: string): Promise<number> => {
   return (rows[0] as { count: number }).count;
 };
 
-/** All-time attempt count for this user on ONE format — across every job
- *  of that format, not just the one being checked right now, and with no
- *  time window (see FORMAT_LIFETIME_LIMITS). */
-const countUsedForFormat = async (userId: string, formatId: string): Promise<number> => {
-  const rows = await sql`
-    select count(*)::int as count from pipeline_runs
-    where user_id = ${userId} and format_id = ${formatId}
-  `;
-  return (rows[0] as { count: number }).count;
-};
-
 /**
  * Read-only: how much of today's quota is left, without recording an
  * attempt — for showing a "N videos left today" indicator in the UI. Mirrors
- * checkAndRecordQuota's own unlimited rules (admin, or the env var set to
- * unlimited) so the two never disagree about who's capped.
+ * checkAndRecordQuota's own rules so the two never disagree about who's
+ * capped. A locked-out (trial-expired) free user reports as 0/0 remaining
+ * rather than a separate shape — still true today, and every day after,
+ * until they upgrade.
  */
 export const getQuotaStatus = async (user: SessionUser): Promise<QuotaStatus> => {
-  if (user.isAdmin || user.plan === "premium") return { unlimited: true };
-  const limit = dailyLimit();
-  if (limit === 0) return { unlimited: true };
+  if (user.isAdmin) return { unlimited: true };
+  const access = resolveDailyAccess(user);
+  if (access.kind === "unlimited") return { unlimited: true };
+  if (access.kind === "locked") return { unlimited: false, limit: 0, used: 0, remaining: 0 };
   const used = await countUsed(user.id);
-  return { unlimited: false, limit, used, remaining: Math.max(0, limit - used) };
+  return { unlimited: false, limit: access.limit, used, remaining: Math.max(0, access.limit - used) };
 };
 
 /**
@@ -105,12 +149,7 @@ export const getQuotaStatus = async (user: SessionUser): Promise<QuotaStatus> =>
  *
  * Call this BEFORE spawning the pipeline child process — the row records an
  * attempt, not a success, because a build that fails after calling
- * Anthropic/Gemini has still spent the money. That's true of a
- * FORMAT_LIFETIME_LIMITS format too: a failed build/render on a limited
- * template still permanently spends one of the user's lifetime attempts on
- * it, same "attempt, not success" accounting as the daily cap — no retry
- * on failure for a 1-per-account template, by design (see the format's own
- * commit message/PR for the product reasoning if that ever needs revisiting).
+ * Anthropic/Gemini has still spent the money.
  */
 export const checkAndRecordQuota = async (
   user: SessionUser,
@@ -121,43 +160,34 @@ export const checkAndRecordQuota = async (
     return { ok: false, error: "builds and renders are temporarily paused — try again later", status: 503 };
   }
 
-  // Admins and premium subscribers are exempt from every cap here — daily
-  // rate AND per-format lifetime. Admins: they're the operator, not a spend
-  // risk the quota needs to guard against, and a locked-out admin can't
-  // raise their own limit without SSH access anyway. Premium: the $50/mo
-  // fee is what buys the exemption — see billing.ts.
-  if (user.isAdmin || user.plan === "premium") return { ok: true };
+  if (user.isAdmin) return { ok: true };
 
   const formatId = readJobManifest(jobId).format;
 
-  const lifetimeLimit = FORMAT_LIFETIME_LIMITS[formatId];
-  if (lifetimeLimit !== undefined) {
-    const usedLifetime = await countUsedForFormat(user.id, formatId);
-    if (usedLifetime >= lifetimeLimit) {
-      return {
-        ok: false,
-        error: `this template is limited to ${lifetimeLimit} video${lifetimeLimit === 1 ? "" : "s"} per account, ever — you've already used ${lifetimeLimit === 1 ? "yours" : "your limit"}`,
-        status: 429,
-      };
-    }
+  if (PREMIUM_ONLY_FORMATS.has(formatId) && user.plan !== "premium") {
+    const format = loadFormat(formatId);
+    return {
+      ok: false,
+      error: `${format.name} is a Premium-only template — upgrade to unlock it`,
+      status: 429,
+    };
   }
 
-  const limit = dailyLimit();
-  if (limit > 0) {
+  const access = resolveDailyAccess(user);
+  if (access.kind === "locked") {
+    return { ok: false, error: access.reason, status: 429 };
+  }
+  if (access.kind === "limited") {
     const used = await countUsed(user.id);
-    if (used >= limit) {
+    if (used >= access.limit) {
       return {
         ok: false,
-        error: `daily build/render limit reached (${limit}/24h) — try again later`,
+        error: `daily build/render limit reached (${access.limit}/24h) — try again later`,
         status: 429,
       };
     }
   }
 
-  // Recorded for BOTH the daily rolling count (when that's capped) and any
-  // format's own lifetime count (see FORMAT_LIFETIME_LIMITS) — always, even
-  // when the daily rate itself is unlimited (PIPELINE_DAILY_LIMIT_PER_USER
-  // set to 0), since a lifetime cap still needs this row to ever trigger.
   await sql`insert into pipeline_runs (user_id, job_id, kind, format_id) values (${user.id}, ${jobId}, ${kind}, ${formatId})`;
   return { ok: true };
 };

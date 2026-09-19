@@ -255,11 +255,6 @@ export function ResourcesBoard({
     setBinding(slotName, await bindText(jobId, slotName, text));
   };
 
-  // Set by continueToEditor each time it's called, read once the build this
-  // click started finishes — a ref (not state) because the poll interval
-  // that eventually reads it is a closure captured at start-polling time,
-  // not re-created per click.
-  const forceRef = useRef(false);
   const buildTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopBuildPolling = () => {
@@ -281,7 +276,7 @@ export function ResourcesBoard({
       setBuildError(data.error);
     } else if (data.status === "done") {
       const buildDiagnostics: string[] = data.edl.diagnostics ?? [];
-      if (buildDiagnostics.length > 0 && !forceRef.current) {
+      if (buildDiagnostics.length > 0) {
         setDiagnostics(buildDiagnostics);
         return;
       }
@@ -316,8 +311,7 @@ export function ResourcesBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
-  const continueToEditor = async (opts: { force?: boolean } = {}) => {
-    forceRef.current = !!opts.force;
+  const continueToEditor = async () => {
     setBuilding(true);
     setBuildStage(null);
     setBuildError(null);
@@ -718,7 +712,12 @@ export function ResourcesBoard({
                     </Button>
                     <Button
                       variant="secondary"
-                      onClick={() => continueToEditor({ force: true })}
+                      // The build that produced these diagnostics already
+                      // succeeded and already wrote its artifacts — no need
+                      // to spend a second quota credit and a second round of
+                      // Anthropic/Gemini/Higgsfield calls just to reach the
+                      // editor for a build that's already sitting on disk.
+                      onClick={() => router.push(`/jobs/${jobId}/edit`)}
                       className="!px-4 !py-2 text-xs"
                     >
                       Continue to editor anyway
@@ -772,14 +771,15 @@ export function ResourcesBoard({
                     </p>
                   )}
                 </div>
-                {/* Once the diagnostics panel is already on screen the warnings
-                  have been seen, so this proceeds instead of rebuilding into
-                  the same early-return — otherwise the primary CTA looks
-                  broken: it spins, re-lists the same skips, and never
-                  navigates. "Fix and rebuild" clears them to re-arm it. */}
+                {/* Once the diagnostics panel is already on screen the
+                  warnings have been seen and the build that produced them
+                  already succeeded on disk — this navigates straight there
+                  instead of spending a second quota credit and a second
+                  round of paid API calls to rebuild the same result. "Fix
+                  and rebuild" clears diagnostics to re-arm a real rebuild. */}
                 <Button
                   onClick={() =>
-                    continueToEditor({ force: diagnostics !== null })
+                    diagnostics ? router.push(`/jobs/${jobId}/edit`) : continueToEditor()
                   }
                   disabled={!ready || building}
                 >

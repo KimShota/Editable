@@ -44,12 +44,18 @@ export const getRequestUser = async (): Promise<SessionUser | null> => {
   const id = h.get("x-user-id");
   const email = h.get("x-user-email");
   if (!id || !email) return null;
-  // plan isn't in middleware's trusted headers (see middleware.ts's
-  // docstring on why) — one extra indexed PK lookup, not worth threading a
-  // new header through every request for.
-  const rows = await sql`select plan from users where id = ${id}`;
-  const plan = (rows[0] as { plan: "free" | "premium" } | undefined)?.plan ?? "free";
-  return { id, email, isAdmin: h.get("x-user-is-admin") === "1", plan };
+  // plan/created_at aren't in middleware's trusted headers (see
+  // middleware.ts's docstring on why) — one extra indexed PK lookup, not
+  // worth threading new headers through every request for.
+  const rows = await sql`select plan, created_at from users where id = ${id}`;
+  const row = rows[0] as { plan: "free" | "premium"; created_at: string } | undefined;
+  return {
+    id,
+    email,
+    isAdmin: h.get("x-user-is-admin") === "1",
+    plan: row?.plan ?? "free",
+    createdAt: row?.created_at ?? new Date(0).toISOString(),
+  };
 };
 export const createSession = createSessionToken;
 export const destroySession = destroySessionToken;
@@ -90,12 +96,12 @@ export type SignupResult =
 export const signup = async (email: string, password: string): Promise<SignupResult> => {
   const emailNorm = normalizeEmail(email);
   const passwordHash = hashPassword(password);
-  let created: { id: string; email: string; is_admin: boolean; plan: "free" | "premium" };
+  let created: { id: string; email: string; is_admin: boolean; plan: "free" | "premium"; created_at: string };
   try {
     const rows = await sql`
       insert into users (email, email_norm, password_hash)
       values (${email.trim()}, ${emailNorm}, ${passwordHash})
-      returning id, email, is_admin, plan
+      returning id, email, is_admin, plan, created_at
     `;
     created = rows[0] as typeof created;
   } catch {
@@ -103,17 +109,34 @@ export const signup = async (email: string, password: string): Promise<SignupRes
     return { ok: false, error: "an account with that email already exists" };
   }
 
-  return { ok: true, user: { id: created.id, email: created.email, isAdmin: created.is_admin, plan: created.plan } };
+  return {
+    ok: true,
+    user: {
+      id: created.id,
+      email: created.email,
+      isAdmin: created.is_admin,
+      plan: created.plan,
+      createdAt: created.created_at,
+    },
+  };
 };
 
 export const verifyLogin = async (email: string, password: string): Promise<SessionUser | null> => {
   const rows = await sql`
-    select id, email, password_hash, is_admin, plan from users where email_norm = ${normalizeEmail(email)}
+    select id, email, password_hash, is_admin, plan, created_at
+    from users where email_norm = ${normalizeEmail(email)}
   `;
   const row = rows[0] as
-    | { id: string; email: string; password_hash: string; is_admin: boolean; plan: "free" | "premium" }
+    | {
+        id: string;
+        email: string;
+        password_hash: string;
+        is_admin: boolean;
+        plan: "free" | "premium";
+        created_at: string;
+      }
     | undefined;
   if (!row || !verifyPassword(password, row.password_hash)) return null;
   await sql`update users set last_login_at = now() where id = ${row.id}`;
-  return { id: row.id, email: row.email, isAdmin: row.is_admin, plan: row.plan };
+  return { id: row.id, email: row.email, isAdmin: row.is_admin, plan: row.plan, createdAt: row.created_at };
 };

@@ -259,11 +259,15 @@ only the Anthropic resolver/corrector calls.
 
 **Per-user quota + kill switch (`src/app/lib/quota.ts`)** — the invite gate
 only ever controlled *who* could spend, not *how much*; this is what bounds
-the *how much*. `PIPELINE_DAILY_LIMIT_PER_USER` (default 10) caps build+render
-attempts per user in a rolling 24h, enforced in both
-`api/jobs/[jobId]/build` and `.../render` before the child process spawns —
-an attempt counts even if the build fails, since a failed build has already
-made its Anthropic/Gemini calls. Admins are exempt. `PIPELINE_DISABLED=1` +
+the *how much*. Free accounts get a `FREE_TRIAL_DAYS`-day trial (default 3,
+from `users.created_at`) at `FREE_TRIAL_DAILY_LIMIT_PER_USER` build+render
+attempts/day (default 3), then are locked out until they upgrade. Premium
+subscribers get `PREMIUM_DAILY_LIMIT_PER_USER` attempts/day (default 10).
+"Kumar Method" (`cinematic-debut-manifesto`) is Premium-only regardless of
+trial status. All caps are enforced in both `api/jobs/[jobId]/build` and
+`.../render` before the child process spawns — an attempt counts even if the
+build fails, since a failed build has already made its Anthropic/Gemini
+calls. Admins are exempt. `PIPELINE_DISABLED=1` +
 `systemctl restart editable` refuses every build/render immediately (503) —
 an env var rather than a DB flag, so it can't fail open if Neon is
 unreachable. Quota rows live in `pipeline_runs`

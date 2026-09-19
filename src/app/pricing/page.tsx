@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { getSessionUser, SessionUser, SESSION_COOKIE } from "../lib/auth";
-import { dailyLimit } from "../lib/quota";
+import { freeTrialDailyLimit, freeTrialDays, premiumDailyLimit } from "../lib/quota";
 import { Container, PageHeader, Card, Pill } from "../_components/ui";
 import { UpgradeButton } from "./_components/UpgradeButton";
 
@@ -20,7 +20,9 @@ export default async function PricingPage() {
             <p className="mt-4 font-[family-name:var(--font-display)] text-3xl font-bold text-[color:var(--ink)]">$0</p>
           </div>
           <p className="text-sm text-[color:var(--ink-dim)]">
-            {dailyLimit()} build/render{dailyLimit() === 1 ? "" : "s"} per day.
+            {freeTrialDays()}-day free trial — {freeTrialDailyLimit()} build/render
+            {freeTrialDailyLimit() === 1 ? "" : "s"} per day, every format except Kumar Method. Locked after the
+            trial unless you upgrade.
           </p>
         </Card>
         <Card className="flex flex-col gap-4 p-6">
@@ -30,7 +32,10 @@ export default async function PricingPage() {
               $50<span className="text-base font-normal text-[color:var(--ink-dim)]">/month</span>
             </p>
           </div>
-          <p className="text-sm text-[color:var(--ink-dim)]">Unlimited builds and renders.</p>
+          <p className="text-sm text-[color:var(--ink-dim)]">
+            {premiumDailyLimit()} build/render{premiumDailyLimit() === 1 ? "" : "s"} per day, every format including
+            Kumar Method.
+          </p>
           {isPremium ? (
             <Pill>You&apos;re on Premium</Pill>
           ) : user ? (
