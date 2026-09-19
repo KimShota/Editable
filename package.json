@@ -22,6 +22,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "remotion": "4.0.482",
+    "resend": "^6.28.1",
     "server-only": "^0.0.1",
     "stripe": "^22.6.0",
     "tailwindcss": "4.0.0",

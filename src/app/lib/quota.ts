@@ -98,6 +98,14 @@ const resolveDailyAccess = (user: SessionUser): DailyAccess => {
     const limit = premiumDailyLimit();
     return limit === 0 ? { kind: "unlimited" } : { kind: "limited", limit };
   }
+  // Gates the free trial on a clicked email link (see emailVerification.ts)
+  // — otherwise the trial itself is the exploit: anyone can mint unlimited
+  // free-trial accounts with made-up addresses. Checked before trial status
+  // so an unverified account never gets a "trial ended" message instead of
+  // the actionable "verify your email" one.
+  if (!user.emailVerifiedAt) {
+    return { kind: "locked", reason: "verify your email to start your free trial — check your inbox, or resend the link from your account page" };
+  }
   if (isInFreeTrial(user)) {
     const limit = freeTrialDailyLimit();
     return limit === 0 ? { kind: "unlimited" } : { kind: "limited", limit };

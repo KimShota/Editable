@@ -44,17 +44,20 @@ export const getRequestUser = async (): Promise<SessionUser | null> => {
   const id = h.get("x-user-id");
   const email = h.get("x-user-email");
   if (!id || !email) return null;
-  // plan/created_at aren't in middleware's trusted headers (see
-  // middleware.ts's docstring on why) — one extra indexed PK lookup, not
-  // worth threading new headers through every request for.
-  const rows = await sql`select plan, created_at from users where id = ${id}`;
-  const row = rows[0] as { plan: "free" | "premium"; created_at: string } | undefined;
+  // plan/created_at/email_verified_at aren't in middleware's trusted
+  // headers (see middleware.ts's docstring on why) — one extra indexed PK
+  // lookup, not worth threading new headers through every request for.
+  const rows = await sql`select plan, created_at, email_verified_at from users where id = ${id}`;
+  const row = rows[0] as
+    | { plan: "free" | "premium"; created_at: string; email_verified_at: string | null }
+    | undefined;
   return {
     id,
     email,
     isAdmin: h.get("x-user-is-admin") === "1",
     plan: row?.plan ?? "free",
     createdAt: row?.created_at ?? new Date(0).toISOString(),
+    emailVerifiedAt: row?.email_verified_at ?? null,
   };
 };
 export const createSession = createSessionToken;
@@ -117,13 +120,16 @@ export const signup = async (email: string, password: string): Promise<SignupRes
       isAdmin: created.is_admin,
       plan: created.plan,
       createdAt: created.created_at,
+      // Newly inserted row — email_verified_at is null by default, no need
+      // to round-trip it back from the insert.
+      emailVerifiedAt: null,
     },
   };
 };
 
 export const verifyLogin = async (email: string, password: string): Promise<SessionUser | null> => {
   const rows = await sql`
-    select id, email, password_hash, is_admin, plan, created_at
+    select id, email, password_hash, is_admin, plan, created_at, email_verified_at
     from users where email_norm = ${normalizeEmail(email)}
   `;
   const row = rows[0] as
@@ -134,9 +140,17 @@ export const verifyLogin = async (email: string, password: string): Promise<Sess
         is_admin: boolean;
         plan: "free" | "premium";
         created_at: string;
+        email_verified_at: string | null;
       }
     | undefined;
   if (!row || !verifyPassword(password, row.password_hash)) return null;
   await sql`update users set last_login_at = now() where id = ${row.id}`;
-  return { id: row.id, email: row.email, isAdmin: row.is_admin, plan: row.plan, createdAt: row.created_at };
+  return {
+    id: row.id,
+    email: row.email,
+    isAdmin: row.is_admin,
+    plan: row.plan,
+    createdAt: row.created_at,
+    emailVerifiedAt: row.email_verified_at,
+  };
 };

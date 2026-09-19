@@ -25,6 +25,9 @@ export type SessionUser = {
   plan: "free" | "premium";
   /** ISO timestamp — quota.ts's free-trial window is measured from this. */
   createdAt: string;
+  /** ISO timestamp, or null if unverified — quota.ts locks a free account
+   *  out of build/render quota until this is set (see emailVerification.ts). */
+  emailVerifiedAt: string | null;
 };
 
 /**
@@ -82,16 +85,30 @@ export const getSessionUser = async (token: string | undefined): Promise<Session
   if (cached && cached.expiresAt > Date.now()) return cached.user;
 
   const rows = await sql`
-    select u.id, u.email, u.is_admin, u.plan, u.created_at
+    select u.id, u.email, u.is_admin, u.plan, u.created_at, u.email_verified_at
     from sessions s
     join users u on u.id = s.user_id
     where s.token_hash = ${tokenHash} and s.expires_at > now()
   `;
   const row = rows[0] as
-    | { id: string; email: string; is_admin: boolean; plan: "free" | "premium"; created_at: string }
+    | {
+        id: string;
+        email: string;
+        is_admin: boolean;
+        plan: "free" | "premium";
+        created_at: string;
+        email_verified_at: string | null;
+      }
     | undefined;
   const user = row
-    ? { id: row.id, email: row.email, isAdmin: row.is_admin, plan: row.plan, createdAt: row.created_at }
+    ? {
+        id: row.id,
+        email: row.email,
+        isAdmin: row.is_admin,
+        plan: row.plan,
+        createdAt: row.created_at,
+        emailVerifiedAt: row.email_verified_at,
+      }
     : null;
 
   sessionCache.set(tokenHash, {
