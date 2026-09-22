@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { AnalysisSchema, DraftSchema, IngestResultSchema, VerifyResultSchema } from "./schemas";
-import { ingestFromUrl, newDraftId } from "./ingest";
+import { ingestFromFile, ingestFromUrl, newDraftId } from "./ingest";
 import { analyze } from "./analyze";
 import { synthesize } from "./synthesize";
 import { verify } from "./verify";
@@ -15,6 +15,7 @@ import { authoringDir } from "../pipeline/paths";
  * assembling a user's own video.
  *
  *   npm run author -- --url <reelUrl> [--draft <draftId>] [--only <stage>]
+ *   npm run author -- --file <path/to/reel.mp4> [--draft <draftId>]
  *
  * Stages: ingest → analyze → synthesize → verify. Each writes its artifact
  * to authoring/<draftId>/ — same "inspect the artifact, not the video" idea
@@ -23,17 +24,28 @@ import { authoringDir } from "../pipeline/paths";
  * the draftId when one isn't given). "verify" self-checks the draft
  * against its own reference clip (see verify.ts) — it can be skipped or
  * re-run independently of "synthesize" via --only, same as any other stage.
+ *
+ * "validate" isn't a pipeline stage with its own artifact — it's a cheap,
+ * render-free check of draft.json against DraftSchema (including
+ * FormatSchema's cross-reference superRefine rules), for a draft.json an
+ * agent wrote BY HAND instead of through synthesize()'s API call (see the
+ * reel-to-template skill). Loop `--only validate` while fixing errors,
+ * then move on to `--only verify` once it's clean — verify actually
+ * renders, so it's much more expensive to iterate against.
  */
 
-const STAGES = ["ingest", "analyze", "synthesize", "verify"] as const;
+const STAGES = ["ingest", "analyze", "synthesize", "validate", "verify"] as const;
 type Stage = (typeof STAGES)[number];
 
 const parseArgs = (argv: string[]) => {
-  const args: { url?: string; draft?: string; only?: Stage } = {};
+  const args: { url?: string; file?: string; draft?: string; only?: Stage } = {};
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case "--url":
         args.url = argv[++i];
+        break;
+      case "--file":
+        args.file = argv[++i];
         break;
       case "--draft":
         args.draft = argv[++i];
@@ -50,15 +62,19 @@ const parseArgs = (argv: string[]) => {
         throw new Error(`unknown argument "${argv[i]}"`);
     }
   }
-  if (!args.url && !args.draft) {
+  if (args.url && args.file) {
+    throw new Error("--url and --file are mutually exclusive — a reel comes from one or the other");
+  }
+  if (!args.url && !args.file && !args.draft) {
     throw new Error(
-      "usage: npm run author -- --url <reelUrl> [--draft <draftId>] [--only ingest|analyze|synthesize|verify]\n" +
-        "  (--draft without --url resumes an existing draft; --only needs an existing --draft)",
+      "usage: npm run author -- --url <reelUrl>|--file <path> [--draft <draftId>] " +
+        "[--only ingest|analyze|synthesize|validate|verify]\n" +
+        "  (--draft alone resumes an existing draft; --only needs an existing --draft)",
     );
   }
   // "ingest" is the entry stage — it CREATES the draft, so `--only ingest`
-  // needs no pre-existing --draft. "analyze"/"synthesize"/"verify" resume
-  // from an earlier stage's artifact and have nothing to read without one.
+  // needs no pre-existing --draft. Every other stage resumes from an
+  // earlier stage's artifact and has nothing to read without one.
   if (args.only && args.only !== "ingest" && !args.draft) {
     throw new Error(`--only ${args.only} requires --draft <draftId> (nothing to resume from otherwise)`);
   }
@@ -87,12 +103,30 @@ const main = async () => {
   const wants = (stage: Stage) => !args.only || args.only === stage;
   console.log(`editable authoring — draft "${draftId}"${args.only ? ` (only: ${args.only})` : ""}`);
 
+  if (args.only === "validate") {
+    const draftPath = artifactPath("draft");
+    if (!fs.existsSync(draftPath)) {
+      throw new Error(
+        `artifact "draft" not found at ${draftPath} — run synthesize first, or write draft.json by hand`,
+      );
+    }
+    const raw = JSON.parse(fs.readFileSync(draftPath, "utf8"));
+    const parsed = DraftSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error(`draft.json failed validation:\n${z.prettifyError(parsed.error)}`);
+    }
+    console.log(`  ✔ draft.json is valid — "${parsed.data.format.name}" (${parsed.data.format.blocks.length} blocks)`);
+    return;
+  }
+
   const ingested = wants("ingest")
     ? args.url
       ? ingestFromUrl(args.url, draftId)
-      : (() => {
-          throw new Error("ingest: --url is required to (re-)ingest");
-        })()
+      : args.file
+        ? ingestFromFile(args.file, draftId)
+        : (() => {
+            throw new Error("ingest: --url or --file is required to (re-)ingest");
+          })()
     : read("ingest", IngestResultSchema);
   if (wants("ingest")) write("ingest", ingested);
   if (args.only === "ingest") return;

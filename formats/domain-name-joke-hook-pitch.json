@@ -1,0 +1,312 @@
+{
+  "id": "domain-name-joke-hook-pitch",
+  "name": "I Made a Website Called [Domain Joke] — Product Pitch",
+  "niche": "AI",
+  "description": "Opens with a punchline domain name built from a relatable pain point, pitches the product in one line, narrates a quick demo with two screen-recording cutaways, and closes on a comment-to-get-the-link CTA.",
+  "fps": 30,
+  "width": 720,
+  "height": 1280,
+  "captionStyle": {
+    "component": "Captions",
+    "params": {
+      "position": "lowerThird"
+    }
+  },
+  "musicVolume": 0.5,
+  "sharedSlots": [],
+  "blocks": [
+    {
+      "id": "hook",
+      "title": "Hook — domain name reveal",
+      "kind": "voice",
+      "repeat": false,
+      "videoSlot": "hook-clip",
+      "slots": [
+        {
+          "name": "hook-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Look at the camera in a casual home setting, holding your phone or a mic prop like you're about to record. Say: 'I just made a website called [your relatable pain point turned into a run-on domain name] dot com.' The joke is that the whole sentence literally becomes the URL.",
+          "example": "I just made a website called ineedmorefollowersbuthatepostingcontent.com"
+        },
+        {
+          "name": "hook-headline-text",
+          "mediaType": "text",
+          "required": true,
+          "instructions": "Type the exact punchline domain you say out loud in hook-clip, e.g. 'ineedmorefollowersbuthatepostingcontent.com' — shown as the big on-screen reveal. (Kept as its own text field rather than auto-captured from your voice: the engine can only auto-capture up to about 8 spoken words, too short for a full run-on domain sentence.)",
+          "example": "ineedmorefollowersbuthatepostingcontent.com"
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "speed": 1,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "hook-name",
+          "kind": "literal",
+          "phrases": [
+            "I just made a website called",
+            "I just built a website called"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "hook-headline-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textSlot": "hook-headline-text",
+              "variant": "hook"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "hook-name",
+            "edge": "end",
+            "offsetSec": 0
+          },
+          "until": {
+            "kind": "fixed",
+            "anchor": "blockEnd",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.05,
+            "y": 0.05,
+            "width": 0.9,
+            "height": 0.22
+          },
+          "states": [],
+          "repeatScope": "all"
+        }
+      ]
+    },
+    {
+      "id": "pitch",
+      "title": "Pitch — what it is",
+      "kind": "voice",
+      "repeat": false,
+      "videoSlot": "pitch-clip",
+      "slots": [
+        {
+          "name": "pitch-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Same setting, talk directly to camera. Say what your product/service actually is in one sentence, then bridge into the demo with something like 'let me show you how it works.'",
+          "example": "It's an AI video editor that you hire so you never have to edit again. Let me show you how it works."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "speed": 1,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "pitch-open",
+          "kind": "literal",
+          "phrases": [
+            "It's an",
+            "It is an",
+            "This is an"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "demo",
+      "title": "Demo — narrated walkthrough with screen-recording cutaways",
+      "kind": "voice",
+      "repeat": false,
+      "videoSlot": "demo-clip",
+      "slots": [
+        {
+          "name": "demo-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Continuous talking-head take narrating how your product works, casual/energetic tone. Include two marker lines: one right before you describe the first step, one right before you describe the payoff/result.",
+          "example": "Just dump all of your raw files in and talk to it like a friend, make me sound funnier than I actually am. And it cooks up a polished video for you in seconds."
+        },
+        {
+          "name": "demo-screencap-1",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Screen recording of the first step of using your product (e.g. uploading/dumping in raw files)."
+        },
+        {
+          "name": "demo-screencap-2",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Screen recording of the payoff step (e.g. the finished/polished output appearing)."
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "speed": 1,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "demo-step1",
+          "kind": "literal",
+          "phrases": [
+            "just dump all",
+            "just drop all",
+            "just dump your"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockStart",
+            "offsetSec": 0
+          }
+        },
+        {
+          "id": "demo-payoff",
+          "kind": "literal",
+          "phrases": [
+            "it cooks up",
+            "and it cooks up"
+          ],
+          "capture": false,
+          "fallback": {
+            "anchor": "blockEnd",
+            "offsetSec": -2.5
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "demo-cutaway-1",
+          "kind": "overlay",
+          "component": {
+            "component": "CutawayOverlay",
+            "params": {
+              "videoSlot": "demo-screencap-1"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "demo-step1",
+            "edge": "start",
+            "offsetSec": 0
+          },
+          "durationSec": 1.2,
+          "states": [],
+          "repeatScope": "all"
+        },
+        {
+          "id": "demo-cutaway-2",
+          "kind": "overlay",
+          "component": {
+            "component": "CutawayOverlay",
+            "params": {
+              "videoSlot": "demo-screencap-2"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "demo-payoff",
+            "edge": "start",
+            "offsetSec": 0
+          },
+          "durationSec": 1.2,
+          "states": [],
+          "repeatScope": "all"
+        }
+      ]
+    },
+    {
+      "id": "cta",
+      "title": "CTA — comment to get the link",
+      "kind": "voice",
+      "repeat": false,
+      "videoSlot": "cta-clip",
+      "slots": [
+        {
+          "name": "cta-clip",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "Talking head, energetic close. Mention it's free right now, then say 'just comment [your chosen keyword] and I'll send you the link', then a quick sign-off.",
+          "example": "By the way guys, this tool is totally free to use right now, so just comment EDITOR and I'll send you the link. Bye!!!"
+        }
+      ],
+      "captions": true,
+      "captionVariant": "lowerThird",
+      "backgroundReplace": false,
+      "silhouette": false,
+      "speed": 1,
+      "optional": false,
+      "roles": [],
+      "anchors": [
+        {
+          "id": "cta-keyword",
+          "kind": "literal",
+          "phrases": [
+            "just comment",
+            "so just comment",
+            "so comment"
+          ],
+          "capture": true,
+          "fallback": {
+            "anchor": "blockEnd",
+            "offsetSec": -1.5
+          }
+        }
+      ],
+      "events": [
+        {
+          "id": "cta-comment-ov",
+          "kind": "overlay",
+          "component": {
+            "component": "TextOverlay",
+            "params": {
+              "textAnchor": "cta-keyword",
+              "textTemplate": "comment \"{captured}\"",
+              "variant": "cta"
+            }
+          },
+          "timing": {
+            "kind": "role",
+            "roleId": "cta-keyword",
+            "edge": "captureStart",
+            "offsetSec": 0
+          },
+          "until": {
+            "kind": "fixed",
+            "anchor": "blockEnd",
+            "offsetSec": 0
+          },
+          "layout": {
+            "x": 0.05,
+            "y": 0.68,
+            "width": 0.7,
+            "height": 0.1
+          },
+          "states": [],
+          "repeatScope": "all"
+        }
+      ]
+    }
+  ]
+}

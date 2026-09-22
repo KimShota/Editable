@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { authoringDir } from "../pipeline/paths";
+import { authoringDir, repoRoot } from "../pipeline/paths";
 import { listFormats, loadFormat } from "../pipeline/loader";
 import { DraftSchema } from "./schemas";
 import { Analysis, Draft } from "./types";
@@ -91,88 +91,22 @@ const selectFramesForSynthesis = (analysis: Analysis): SampledFrame[] => {
  * The FormatSchema contract, in prose — the model never sees the zod
  * source, so every field, every union variant, and the closed lists of
  * real renderer components/transitions it may reference are spelled out
- * here. Keeping this accurate to src/backend/pipeline/schemas.ts and
- * src/backend/remotion/EdlVideo.tsx is what keeps drafts renderable.
+ * in formatContract.md, which lives next to this file so it's easy to
+ * find from either consumer. Read once per process; there's exactly one
+ * copy, shared with the reel-to-template skill (an agent authoring
+ * draft.json by hand instead of through this API call) so the two never
+ * drift out of sync with each other OR with schemas.ts/EdlVideo.tsx.
  */
-const FORMAT_CONTRACT = `Produce a JSON object of the shape {"rationale": string, "format": FORMAT}.
+const FORMAT_CONTRACT = fs.readFileSync(
+  path.join(repoRoot, "src/backend/authoring/formatContract.md"),
+  "utf8",
+);
 
-"rationale" is 2-4 sentences in plain English: what structural pattern you found (the beats, the pacing, why it likely works) — for a human reviewer, not consumed by any code.
-
-FORMAT is a reusable, fill-in-the-blank template for THIS pipeline (not a description of the specific video — abstract the topic into a niche/placeholder the way "5 Secret [Tool] Codes" abstracts "Claude" into "[Tool]"):
-
-{
-  "id": string,               // kebab-case slug, unique-sounding
-  "name": string,              // e.g. "5 Secret [Tool] Codes" — bracket the part that varies by niche
-  "niche": string,              // ONE WORD (e.g. "Gym", "Neuroscience", "Travel", "Work") — reuse an EXISTING niche listed below if it correlates, only mint a new one-word niche if none genuinely fit
-  "description": string,        // 1-3 sentences: the structural pattern, for format pickers
-  "fps": 30,
-  "width": <source width>, "height": <source height>,   // match the analyzed video exactly
-  "captionStyle": { "component": "Captions", "params": { "position": "lowerThird" } },  // omit only if the source has no burned-in captions
-  "sharedSlots": [ { "name": string, "mediaType": "audio", "required": false, "instructions": string } ],  // SFX reused across multiple blocks (e.g. a recurring "ding"); OMIT the whole array if there's nothing shared
-  "blocks": [ BLOCK, ... ]
-}
-
-BLOCK (one per beat of the video — a hook, then each point/step/reveal, then a CTA — in the order they play):
-{
-  "id": string,          // kebab-case, unique within the format
-  "title": string,       // human label, e.g. "Hook"
-  "kind": "voice" | "broll",   // "voice" = the creator is talking and gets transcribed/anchored; "broll" = silent footage/screen-recording with no speech to anchor against
-  "videoSlot": string,   // must equal the "name" of one of this block's own "slots" below (the main clip)
-  "slots": [ SLOT, ... ], // every asset a user must film/supply for this block, INCLUDING the main clip
-  "captions": boolean,    // true only for "voice" blocks where the source burns in word captions
-  "anchors": [ ANCHOR, ... ],  // ONLY for "voice" blocks — omit/empty for "broll" (no transcript to anchor against)
-  "events": [ EVENT, ... ],     // overlays/sfx that fire during this block
-  "transitionAfter": { "component": "cut" | "fade" | "whooshZoom", "params": { "durationSec": number } }  // OMIT for a hard cut with no params object; include only if the source visibly transitions into the next block
-}
-
-SLOT (one thing the user must film/supply, with real filming direction — this is the founder-judgment part, be specific and concrete, not generic):
-{ "name": string, "mediaType": "video" | "image" | "audio" | "text", "required": boolean, "instructions": string }
-Every "voice" block's main clip slot must instruct the user to say a literal marker phrase matching that block's literal anchor phrasing (see ANCHOR below) — this is how the engine finds the block's own structure in EVERY user's differently-worded recording.
-
-ANCHOR — two kinds, only inside "voice" blocks:
-  LITERAL (near-certain, no LLM; marks block structure and captures the user's own variable words):
-    { "id": string, "kind": "literal", "phrases": [string, ...],  // 1+ ways a user might actually phrase the fixed instruction line, e.g. ["Number one is", "First is"]
-      // When "capture" is true, EVERY phrase must contain ONLY the fixed marker words — never the variable words that follow, not even as an example. Listing "For research" beside "For" when "research" is what gets captured makes the phrase swallow the content and the capture come back empty, silently dropping every event timed off this anchor.
-      "capture": boolean,        // true if the words right after the phrase are content to reuse (e.g. the user's own name for "code 1")
-      "captureUntil": string,     // OPTIONAL: a fixed phrase that ends the capture
-      "fallback": { "anchor": "blockStart" | "blockEnd", "offsetSec": number } }
-  SEMANTIC (a free-form content moment, located by an LLM per real recording):
-    { "id": string, "kind": "semantic", "description": string,   // plain-language description of the MEANING of the moment, e.g. "the pivot from problem to solution" — not keywords
-      "form": string,   // OPTIONAL light constraint, e.g. "one sentence, starts with a verb"
-      "window": { "afterAnchor": string, "beforeAnchor": string },  // OPTIONAL: bounds the search to between two LITERAL anchor ids IN THE SAME BLOCK (never a semantic anchor id)
-      "fallback": { "anchor": "blockStart" | "blockEnd", "offsetSec": number }, "fallbackDurationSec": number }
-
-EVENT (an overlay or sound effect that fires during a block; "id" must be unique across the WHOLE format):
-{ "id": string, "kind": "overlay" | "sfx",
-  "component": { "component": COMPONENT_NAME, "params": { ... } },
-  "timing": TIMING,
-  "durationSec": number,   // OPTIONAL — omit for an overlay that stays up until the block ends
-  "until": TIMING,         // OPTIONAL — alternative to durationSec: ends exactly when another anchor/role fires
-  "layout": { "x": number, "y": number, "width": number, "height": number },  // OPTIONAL, overlays only — the on-canvas box as a FRACTION of the frame (0-1), MEASURED from the frames you were shown. Omit only when the reference truly centers the element with nothing else on screen at the same time. See the mandatory rule below.
-  "states": [ { "trigger": TIMING, "params": { ... } }, ... ]  // OPTIONAL, overlays only — additional param values that REPLACE this event's own params at a LATER moment in its lifetime (same component, no remount) — e.g. a card that starts blurred/white-labeled and becomes sharp/colored the instant the speaker names it. Each "trigger" is a TIMING (fixed or role — NOT sequence) tying the change to a specific word/anchor, exactly like the event's own "timing".
-}
-
-MANDATORY RULE — distinct simultaneous elements need distinct "layout": when the reference shows more than one image/card/element on screen AT THE SAME TIME in FIXED, DISTINCT positions (e.g. three logo cards side by side, a badge in a corner while another element is centered), EVERY one of those events MUST get its own "layout" box measured from the frame. Giving two simultaneous events the same box (or omitting "layout" on both) is a modeling mistake — they will render stacked on top of each other and unreadable. Only omit "layout" for an element that is truly alone on screen and should simply auto-center.
-
-COMPONENT_NAME — a CLOSED list; using anything else means the overlay silently never renders:
-  overlays: "TextOverlay" (params: "textSlot" OR "textAnchor"+"textTemplate", "variant": "hook"|"resolve"|"title"|"description"|"cta", "fontSize"?),
-            "ImageOverlay" (params: "imageSlot": <a slot name of mediaType "image">, "label"? <a short text tag rendered ABOVE the image, e.g. "BAD"/"GOOD"/"GREAT">, "labelColor"? <hex color, sampled from the frame>, "blurred"? <true = renders as a blurred placeholder, for a card that starts blurred and is later revealed via a "states" entry setting "blurred": false>),
-            "VideoOverlay" (params: "videoSlot": <a slot name of mediaType "video"> — a concurrent screen-recording/b-roll layered OVER the talking clip, muted),
-            "StickerTitle" (params: "textAnchor"+"textTemplate" containing "{captured}", "fontSize"? — a rotated sticky-note title card),
-            "SkillCard" (params: "textAnchor", "imageSlot"? — a named-thing card with a preview image below it)
-  sfx: always "Sfx" (params: "audioSlot": <a slot name of mediaType "audio", usually from sharedSlots>, "volume": 0-1)
-
-Slot indirection in "component.params" (assemble-time, not literal values you invent):
-  "textSlot": <slot name of mediaType "text"> → renders that slot's literal text
-  "textAnchor": <anchor id in this block> + optional "textTemplate" containing the substring "{captured}" → renders that anchor's captured words (from a "capture": true literal anchor), inserted into the template
-  "imageSlot" / "audioSlot" / "videoSlot": <slot name of the matching mediaType> → renders that user-supplied file
-
-TIMING — when an event fires, one of:
-  { "kind": "role", "roleId": <anchor id, same block>, "edge": "start" | "end" | "captureStart", "offsetSec": number }
-  { "kind": "fixed", "anchor": "blockStart" | "blockEnd", "offsetSec": number }
-  { "kind": "sequence", "roleId": <anchor id>, "edge": "start"|"end"|"captureStart", "index": number, "count": number, "targetGapSec": number }  // use for N sibling events evenly spaced after one anchor (e.g. a flip-through of preview images) — every sibling repeats the same roleId/count/targetGapSec, only "index" differs (0-based)
-
-Rules that WILL be checked and must hold:
+/** Rules that WILL be checked and must hold — kept here (not in the
+ *  shared .md) since these are specifically about what FAILS validation,
+ *  which only matters to the model generating a draft, not to a human or
+ *  agent reading the contract as reference documentation. */
+const VALIDATION_RULES = `Rules that WILL be checked and must hold:
 - every block's "videoSlot" names one of that block's own "slots"
 - every anchor "id" is unique within its block; every event "id" is unique across the whole format
 - a semantic anchor's "window.afterAnchor"/"beforeAnchor" must each name a LITERAL anchor id in the SAME block (never itself, never a semantic anchor, never cross-block)
@@ -206,6 +140,8 @@ const buildSynthesisPrompt = (
   return `You are reverse-engineering a short-form vertical video (${analysis.durationSec.toFixed(1)}s, ${analysis.width}x${analysis.height}) into a reusable FORMAT for "Katalab", a video-templating engine. A format captures a proven structure — the beats, the timing, the overlay/sfx moments, AND their exact on-screen positions/animations — as data, so a different creator can film their OWN content into the same slots and get a video out that looks EXACTLY like this reference, just with their own footage.
 
 ${FORMAT_CONTRACT}
+
+${VALIDATION_RULES}
 
 ${nicheNote}
 

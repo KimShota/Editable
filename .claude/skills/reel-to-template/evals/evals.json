@@ -1,0 +1,44 @@
+{
+  "skill_name": "reel-to-template",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Here's a reel I want turned into a template: https://www.instagram.com/reel/DzExampleId1/ — can you reverse-engineer it so other people can fill it in with their own footage?",
+      "expected_output": "Should run `npm run author -- --url <link> --only ingest`, then `--only analyze`, then run contact-sheets.sh, study the evidence via the analysis checklist, write draft.json directly with the Write tool (not by calling --only synthesize / the Anthropic API), loop --only validate until clean, run --only verify and read the per-block SSIM scores, iterate on any block scoring low, then show the user the block/slot list and verify scores and wait for approval before running npm run author:save.",
+      "assertions": [
+        "Runs ingest via the real CLI, captures the draft id",
+        "Runs analyze and the contact-sheets.sh script",
+        "Reads formatContract.md (or references/format-schema.md pointing to it) before writing draft.json",
+        "Writes draft.json directly rather than calling --only synthesize / requiring ANTHROPIC_API_KEY",
+        "Loops --only validate until it passes",
+        "Runs --only verify and reports per-block SSIM scores",
+        "Confirms with the user before running author:save",
+        "Never copies the source creator's actual spoken/on-screen words into slot instructions or examples"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "the ingest step failed with 'yt-dlp failed to download ... login required'",
+      "expected_output": "Should recognize this as an Instagram login wall (from analysis.json/ingest.json context or the error text) and consult references/troubleshooting.md. Should suggest setting EDITABLE_YTDLP_COOKIES_BROWSER to a browser the user is logged into Instagram in, and retrying --only ingest. Should mention --file as a fallback if cookies don't work, rather than giving up or inventing an unrelated workaround.",
+      "assertions": [
+        "Identifies the login-wall failure mode",
+        "Suggests EDITABLE_YTDLP_COOKIES_BROWSER",
+        "Offers --file as a fallback",
+        "Does not fabricate an unsupported flag or workaround"
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Can you write up a breakdown of why this TikTok is doing well? [link] I just want to understand the editing, I'm not trying to build anything from it.",
+      "expected_output": "This is a plain analysis request with no template/reuse goal, so it should NOT necessarily run the full author pipeline (ingest/synthesize/save) unless the user confirms they want a template out of it — a prose breakdown may be enough. If genuinely ambiguous, should ask whether they want a reusable template or just a written breakdown before running npm run author.",
+      "assertions": [
+        "Recognizes the request may not need the full template pipeline",
+        "Does not silently run npm run author:save without the user asking for a template",
+        "Asks a clarifying question if the goal is ambiguous, rather than assuming"
+      ],
+      "files": []
+    }
+  ]
+}

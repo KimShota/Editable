@@ -1,0 +1,32 @@
+{
+  "skill_name": "reel-edit",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I have the cs-resources template and 5 clips in ~/Downloads (hook.mov, resource1.mov, resource2.mov, resource3.mov, cta.mov) plus a music track. Can you edit them into that format for me?",
+      "expected_output": "Should read formats/cs-resources.json to see its blocks/slots, probe and thumbnail each candidate clip, match them to slots using slot instructions, confirm the planned mapping with the user before writing job.json, copy files into jobs/<name>/assets/, write job.json, run npm run pipeline -- --job jobs/<name>, read gates.json, run the self-check (timeline-view.sh at cut boundaries from edl.json) before handing over out/<name>.mp4, and report any gate failures or self-check findings honestly.",
+      "assertions": [
+        "Reads the target format's blocks/slots before matching footage",
+        "Confirms the slot mapping with the user before writing job.json",
+        "Writes job.json with correct relative asset paths",
+        "Runs npm run pipeline against the job",
+        "Reads gates.json rather than assuming success from exit code alone",
+        "Runs a self-check using timeline-view.sh at real cut boundaries from edl.json",
+        "Delivers the output path plus an honest status, not just 'done'"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "the render finished but there's a weird flash right where it cuts to the second resource clip",
+      "expected_output": "Should locate the relevant cut boundary in artifacts/<job>/edl.json, run timeline-view.sh around that boundary to inspect it, form a hypothesis about the cause (e.g. a transition mismatch, a trim boundary issue), apply the smallest fix (e.g. --only assemble or --only render, or an overrides entry), re-render, and re-check with timeline-view.sh before declaring it fixed — not just re-render blindly and assume it's resolved.",
+      "assertions": [
+        "Locates the specific cut in edl.json rather than re-rendering blindly",
+        "Uses timeline-view.sh to inspect the boundary before and after the fix",
+        "Applies a targeted fix (--only stage or an overrides entry) rather than a full re-author",
+        "Verifies the fix before telling the user it's resolved"
+      ],
+      "files": []
+    }
+  ]
+}

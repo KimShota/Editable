@@ -1,11 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import { FormatSchema } from "@backend/pipeline/schemas";
-import { formatsDir } from "@backend/pipeline/paths";
+import { FormatAlreadyExistsError, saveFormat } from "@backend/authoring/save";
 import { draftExists } from "../../../../lib/authoring";
-import { formatExists } from "../../../../lib/formats";
 
 /**
  * Saves a reviewed/edited draft as a real formats/<id>.json — the moment a
@@ -23,23 +18,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ dra
   }
 
   const body = await req.json().catch(() => null);
-  const parsed = FormatSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: `format failed validation:\n${z.prettifyError(parsed.error)}` },
-      { status: 400 },
-    );
+  try {
+    const { formatId } = saveFormat(body);
+    return NextResponse.json({ formatId }, { status: 201 });
+  } catch (err) {
+    if (err instanceof FormatAlreadyExistsError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    return NextResponse.json({ error: (err as Error).message }, { status: 400 });
   }
-
-  const format = parsed.data;
-  if (formatExists(format.id)) {
-    return NextResponse.json(
-      { error: `a format with id "${format.id}" already exists — change the id and try again` },
-      { status: 409 },
-    );
-  }
-
-  fs.mkdirSync(formatsDir, { recursive: true });
-  fs.writeFileSync(path.join(formatsDir, `${format.id}.json`), JSON.stringify(format, null, 2));
-  return NextResponse.json({ formatId: format.id }, { status: 201 });
 }
