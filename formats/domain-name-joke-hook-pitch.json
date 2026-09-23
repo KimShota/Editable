@@ -2,7 +2,7 @@
   "id": "domain-name-joke-hook-pitch",
   "name": "I Made a Website Called [Domain Joke] — Product Pitch",
   "niche": "AI",
-  "description": "Opens with a punchline domain name built from a relatable pain point, pitches the product in one line, narrates a quick demo with two screen-recording cutaways, and closes on a comment-to-get-the-link CTA.",
+  "description": "Opens with a punchline domain name built from a relatable pain point, pitches the product in one line, narrates a quick demo with three flash-cut cutaways of you naming different example prompts, and closes on a comment-to-get-the-link CTA.",
   "fps": 30,
   "width": 720,
   "height": 1280,
@@ -143,20 +143,26 @@
           "name": "demo-clip",
           "mediaType": "video",
           "required": true,
-          "instructions": "Continuous talking-head take narrating how your product works, casual/energetic tone. Include two marker lines: one right before you describe the first step, one right before you describe the payoff/result.",
-          "example": "Just dump all of your raw files in and talk to it like a friend, make me sound funnier than I actually am. And it cooks up a polished video for you in seconds."
+          "instructions": "Continuous talking-head take narrating how your product works, casual/energetic tone. Include a marker line right before you describe the first step, optionally rattling off a few example prompts/requests you could give it, then a marker line right before you describe the payoff/result.",
+          "example": "Just dump all of your raw files in and talk to it like a friend — make me a car-style video, make me a tier list video, make me a ranking video, whatever you want. And it cooks up a polished video for you in seconds."
         },
         {
           "name": "demo-screencap-1",
           "mediaType": "video",
           "required": true,
-          "instructions": "Screen recording of the first step of using your product (e.g. uploading/dumping in raw files)."
+          "instructions": "A quick cutaway clip of you naming your FIRST example prompt/request — you on camera (or doing something illustrative), saying something like 'make me a car-style video.' Doesn't need to be a screen recording — any short action shot of you delivering that line works."
         },
         {
           "name": "demo-screencap-2",
           "mediaType": "video",
           "required": true,
-          "instructions": "Screen recording of the payoff step (e.g. the finished/polished output appearing)."
+          "instructions": "A quick cutaway clip of you naming your SECOND example prompt/request (e.g. 'make me a tier list video'), same style as the first cutaway."
+        },
+        {
+          "name": "demo-screencap-3",
+          "mediaType": "video",
+          "required": true,
+          "instructions": "A quick cutaway clip of you naming your THIRD example prompt/request (e.g. 'make me a ranking video'), same style as the first two cutaways."
         }
       ],
       "captions": true,
@@ -206,10 +212,12 @@
             }
           },
           "timing": {
-            "kind": "role",
+            "kind": "sequence",
             "roleId": "demo-step1",
             "edge": "start",
-            "offsetSec": 0
+            "index": 0,
+            "count": 3,
+            "targetGapSec": 2.5
           },
           "durationSec": 1.2,
           "states": [],
@@ -225,10 +233,33 @@
             }
           },
           "timing": {
-            "kind": "role",
-            "roleId": "demo-payoff",
+            "kind": "sequence",
+            "roleId": "demo-step1",
             "edge": "start",
-            "offsetSec": 0
+            "index": 1,
+            "count": 3,
+            "targetGapSec": 2.5
+          },
+          "durationSec": 1.2,
+          "states": [],
+          "repeatScope": "all"
+        },
+        {
+          "id": "demo-cutaway-3",
+          "kind": "overlay",
+          "component": {
+            "component": "CutawayOverlay",
+            "params": {
+              "videoSlot": "demo-screencap-3"
+            }
+          },
+          "timing": {
+            "kind": "sequence",
+            "roleId": "demo-step1",
+            "edge": "start",
+            "index": 2,
+            "count": 3,
+            "targetGapSec": 2.5
           },
           "durationSec": 1.2,
           "states": [],

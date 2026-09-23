@@ -267,15 +267,27 @@ const chunkHoldsAnAnchor = (chunkWords: Word[], anchors: LiteralAnchor[]): boole
  *  confident opinion) if the resolver is unavailable, fails, or answers
  *  below confidence — callers fall back to the filler-word heuristic in
  *  that case, rather than treating "the resolver had nothing to say" as
- *  "keep the chunk". `detail` is always set, for diagnostics. */
+ *  "keep the chunk". `detail` is always set, for diagnostics.
+ *
+ *  Shown the take's FULL transcript (`contextWords`), not just the edge
+ *  chunk in isolation — a trailing chunk separated from the rest by a pause
+ *  can still be the second half of a sentence that started before the
+ *  pause ("and it cooks... [breath] ...up a video for you in seconds"), and
+ *  judging it with no visibility into what came before makes it read as an
+ *  unrelated trailing remark. The chunk's own span is passed as the
+ *  anchor's search window so the resolver still answers about THIS chunk
+ *  specifically, just informed by the surrounding words. */
 const judgeChunkWithResolver = async (
   resolver: RoleResolver,
   instructions: string,
   chunkWords: Word[],
+  contextWords: Word[],
   edge: "leading" | "trailing",
   clipDurationSec: number,
 ): Promise<{ verdict: boolean | null; detail: string }> => {
   if (chunkWords.length === 0) return { verdict: null, detail: "resolver: empty chunk" };
+  const chunkStartSec = chunkWords[0].startSec;
+  const chunkEndSec = chunkWords[chunkWords.length - 1].endSec;
   try {
     const resolutions = await resolver.resolveBlock({
       blockId: "filler-check",
@@ -283,16 +295,19 @@ const judgeChunkWithResolver = async (
         {
           id: "chunk",
           description:
-            `This ${edge} chunk of speech, on its own: does it actually help deliver what these ` +
-            `filming instructions ask for — "${instructions}" — or is it filler/aside/chatter not part ` +
-            `of that (e.g. "okay cool um", a false start, a trailing remark)? Answer by returning this ` +
-            `chunk's own full span (start of its first word to end of its last) with confidence near 1 if ` +
-            `it DOES help deliver the ask, or confidence near 0 if it's filler/unrelated.`,
-          windowStartSec: 0,
-          windowEndSec: clipDurationSec,
+            `The ${edge} chunk of speech between ${chunkStartSec.toFixed(2)}s and ${chunkEndSec.toFixed(2)}s ` +
+            `(the rest of this take's transcript is included for context — that chunk may simply continue a ` +
+            `sentence that started before the pause separating it, so read the surrounding words before ` +
+            `judging): does that chunk actually help deliver what these filming instructions ask for — ` +
+            `"${instructions}" — or is it filler/aside/chatter not part of that (e.g. "okay cool um", a false ` +
+            `start, a trailing remark)? Answer by returning that chunk's own full span (start of its first word ` +
+            `to end of its last) with confidence near 1 if it DOES help deliver the ask, or confidence near 0 if ` +
+            `it's filler/unrelated.`,
+          windowStartSec: chunkStartSec,
+          windowEndSec: chunkEndSec,
         },
       ],
-      words: chunkWords,
+      words: contextWords,
       blockDurationSec: clipDurationSec,
     });
     const hit = resolutions.find((r) => r.roleId === "chunk");
@@ -429,7 +444,7 @@ const trimFiller = async (
     let detail = heuristicIsFiller ? "heuristic: filler-word match" : "heuristic: not filler";
 
     if (resolver) {
-      const judged = await judgeChunkWithResolver(resolver, instructions, chunkWords, edge, clipDurationSec);
+      const judged = await judgeChunkWithResolver(resolver, instructions, chunkWords, words, edge, clipDurationSec);
       detail = judged.detail;
       if (judged.verdict !== null) drop = judged.verdict; // confident resolver answer wins either way
       // else: resolver had no confident opinion — the heuristic's verdict above stands.
