@@ -79,6 +79,18 @@ const MIN_GROUP_DURATION_SEC = 0.15;
  *  the word (~1.8 words/sec).*/
 const MIN_BIGTITLE_DURATION_SEC = 0.45;
 const DEFAULT_TRANSITION_SEC = 0.3;
+/** Punch-in scale for every OTHER internal cut within a block that has
+ *  more than one take/range (select.ts's own internal cuts, or a block
+ *  simply filmed as several standalone takes) — the ordinary "punch in on
+ *  a jump cut" reel technique that hides a same-setting cut having no
+ *  real camera movement of its own. Alternates from 1 (no zoom) so the
+ *  FIRST segment of a block always renders at its natural framing. */
+const INTERNAL_CUT_ZOOM = 1.08;
+/** Static zoom for take index `i` of `totalTakes` in one block — 1 for a
+ *  single-take block (nothing to hide a cut between), alternating
+ *  otherwise. See INTERNAL_CUT_ZOOM's own doc comment. */
+const internalCutZoom = (i: number, totalTakes: number): number =>
+  totalTakes > 1 && i % 2 === 1 ? INTERNAL_CUT_ZOOM : 1;
 /** Two sfx cues within this long of each other, from the same source file,
  *  are the same beat firing twice (e.g. a "sequence" whose runway collapsed
  *  before this fix) rather than two intentionally distinct sounds. */
@@ -543,6 +555,7 @@ export const assemble = (
         tlOutSec: segCursor + leadInSec,
         muted: true,
         volume: 1,
+        zoom: 1,
       });
       voiceovers.push({
         id: `${block.id}__nameAudio`,
@@ -581,6 +594,7 @@ export const assemble = (
           // speech is unlistenable.
           muted: block.kind === "broll" || speed !== 1,
           volume: 1,
+          zoom: internalCutZoom(i, trim.takes.length),
           fgSrc: i === 0 && fgAsset ? stage(fgAsset) : undefined,
         });
         segCursor += durationSec;
@@ -664,6 +678,7 @@ export const assemble = (
               speed: 1,
               muted: true,
               volume: 1,
+              zoom: 1,
             });
           }
           pendingVoSec = 0;
@@ -683,6 +698,7 @@ export const assemble = (
           tlOutSec: segCursor + durationSec,
           muted: block.kind === "broll",
           volume: 1,
+          zoom: internalCutZoom(i, trim.takes.length),
           fgSrc: i === 0 && fgAsset ? stage(fgAsset) : undefined,
         });
         segCursor += durationSec;
@@ -713,6 +729,7 @@ export const assemble = (
             tlOutSec: segCursor + fwdExtendSec,
             muted: true,
             volume: 1,
+            zoom: 1,
           });
         }
       });

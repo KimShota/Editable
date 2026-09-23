@@ -1448,6 +1448,14 @@ export const EdlVideoSegmentSchema = z.object({
    *  EdlVideo.tsx renders it as a SEPARATE layer above the karaoke title
    *  and below other overlays — see its own render-order doc comment. */
   fgSrc: z.string().optional(),
+  /** Static scale applied to this segment only — assemble.ts alternates
+   *  this between 1 and a punch-in value across consecutive segments of
+   *  the SAME block (select.ts's internal cuts, or several standalone
+   *  takes), the ordinary "punch in on a jump cut" reel technique that
+   *  hides a same-setting cut having no real camera movement of its own.
+   *  1 (the default) is a no-op — every existing format/job renders
+   *  identically without authoring this. */
+  zoom: z.number().positive().default(1),
 });
 
 /**
@@ -2089,4 +2097,30 @@ export const TakePrepSchema = z.object({
   /** Bumped whenever the ordering/trim/concat algorithm changes in a way
    *  that should invalidate every existing cached combined file. */
   pipelineVersion: z.string(),
+});
+
+// ---------------------------------------------------------------------------
+// Selection — select.ts's own record of which utterances inside each voice
+// block's (already dead-air/filler-edge-trimmed) take(s) it kept vs. dropped
+// as a retake, false start, or aside — a flat list rather than nested by
+// block since it's read-only diagnostic output, never re-parsed as input to
+// a later stage. See select.ts's own doc comment for the algorithm.
+// ---------------------------------------------------------------------------
+
+export const SelectionUtteranceSchema = z.object({
+  id: z.string(),
+  blockId: z.string(),
+  /** Index into the block's own bound file(s) — 0 for a single-file block. */
+  fileIdx: z.number().int().min(0),
+  /** This utterance's own (unpadded) span, that file's raw seconds. */
+  srcInSec: z.number().min(0),
+  srcOutSec: z.number().positive(),
+  text: z.string(),
+  keep: z.boolean(),
+  reason: z.string(),
+  source: z.enum(["heuristic", "resolver"]),
+});
+
+export const SelectionSchema = z.object({
+  utterances: z.array(SelectionUtteranceSchema),
 });

@@ -590,6 +590,7 @@ const applyOverlayToVideo = (edl: Edl, op: Extract<TimelineOp, { type: "overlayT
     srcInSec,
     srcOutSec: srcInSec + duration,
     speed: 1,
+    zoom: 1,
     srcDurationSec,
     tlInSec: 0,
     tlOutSec: 0,
@@ -1134,6 +1135,7 @@ const applyAddVideo = (edl: Edl, op: Extract<TimelineOp, { type: "addVideo" }>):
     // Media dropped onto the timeline by hand always lands at real time;
     // the speed field exists for format-authored timelapse beats.
     speed: 1,
+    zoom: 1,
     srcDurationSec: op.srcDurationSec ?? srcInSec + op.durationSec,
     tlInSec: 0,
     tlOutSec: 0,

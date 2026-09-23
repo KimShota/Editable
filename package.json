@@ -46,6 +46,7 @@
     "reference:beats": "tsx src/backend/pipeline/tools/buildReferenceBeats.ts",
     "reference:exemplar": "tsx src/backend/pipeline/tools/registerExemplar.ts",
     "test:anchors": "tsx src/backend/authoring/tools/anchorRobustness.ts",
+    "test:select": "tsx src/backend/pipeline/tools/selectRobustness.ts",
     "reels:sync": "tsx src/backend/tools/reelsSync.ts",
     "db:migrate": "tsx src/backend/tools/migrate.ts",
     "invites:mint": "tsx src/backend/tools/mintInvite.ts",

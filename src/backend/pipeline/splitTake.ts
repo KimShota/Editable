@@ -397,8 +397,10 @@ export const splitTake = (
  *  counting utterances below so a leading throat-clear doesn't throw off
  *  "does this clip's utterance count match the number of lines" (a false
  *  start would otherwise silently add one bogus utterance and make an
- *  otherwise-clean 1:1 mapping look like a mismatch). */
-const isNonVerbalUtterance = (words: Word[]): boolean => /[()]/.test(words.map((w) => w.text).join(""));
+ *  otherwise-clean 1:1 mapping look like a mismatch). Exported for
+ *  select.ts, which filters the same way when splitting a take's own
+ *  audio into candidate utterances to keep/drop. */
+export const isNonVerbalUtterance = (words: Word[]): boolean => /[()]/.test(words.map((w) => w.text).join(""));
 
 /** How long a gap between two consecutive whisper words has to be to read
  *  as the boundary between two separately-spoken LINES, for a clip whose

@@ -44,6 +44,8 @@ import {
   ResolvedRoleSchema,
   ResolvedRolesSchema,
   SemanticAnchorSchema,
+  SelectionSchema,
+  SelectionUtteranceSchema,
   SlotSchema,
   StyleProfileSchema,
   SubShotSpecSchema,
@@ -122,6 +124,8 @@ export type Inserts = z.infer<typeof InsertsSchema>;
 export type TakePrepInput = z.infer<typeof TakePrepInputSchema>;
 export type TakePrepClip = z.infer<typeof TakePrepClipSchema>;
 export type TakePrep = z.infer<typeof TakePrepSchema>;
+export type SelectionUtterance = z.infer<typeof SelectionUtteranceSchema>;
+export type Selection = z.infer<typeof SelectionSchema>;
 
 export type BBoxFrac = z.infer<typeof BBoxFracSchema>;
 export type MatteBlock = z.infer<typeof MatteBlockSchema>;

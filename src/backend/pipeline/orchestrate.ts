@@ -19,6 +19,7 @@ import { readScriptSuggestions } from "./alignToScript";
 import { readTakePrep } from "./prepareTake";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
+import { select } from "./select";
 import { runMatte } from "./matte";
 import { replaceBackgrounds } from "./backgroundReplace";
 import { resolveRoles } from "./resolveRoles";
@@ -282,6 +283,15 @@ export const buildJob = async (
   if (!trims) {
     trims = await trim(format, filled, transcript, resolver);
   }
+
+  // select.ts: finds and removes a retake/false-start/aside INSIDE what
+  // trim (or the single-take split above) already narrowed each take
+  // down to — see select.ts's own doc comment. Runs unconditionally,
+  // same as trim itself, regardless of which path produced `trims` above.
+  const selected = await select(format, filled, transcript, trims, resolver);
+  transcript = selected.transcript;
+  trims = selected.trim;
+  writeArtifact(jobId, "select", selected.selection);
 
   // Matte (video-native RVM, or Vision+temporal-median fallback — see
   // matte.ts) runs against trims' PURE, take-relative spans, before

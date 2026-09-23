@@ -24,6 +24,7 @@ export const defaultEdl: Edl = {
       muted: true,
     speed: 1,
       volume: 1,
+      zoom: 1,
     },
   ],
   voiceovers: [],

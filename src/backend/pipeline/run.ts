@@ -23,6 +23,7 @@ import { discover, discoverResultToSplitTake, DiscoverResult } from "./discover"
 import { expandFormat, hasRepeatBlock } from "./expandFormat";
 import { correctTranscript } from "./correctTranscript";
 import { trim } from "./trim";
+import { select } from "./select";
 import { runMatte } from "./matte";
 import { replaceBackgrounds } from "./backgroundReplace";
 import { resolveRoles } from "./resolveRoles";
@@ -37,11 +38,19 @@ import { artifactsDir } from "./paths";
  *
  *   npm run pipeline -- --job jobs/demo [--only <stage>] [--stop-after <stage>] [--resolver <name>] [--generator <name>] [--soft-gates]
  *
- * Stages: intake → generate → transcribe → trim → matte → composite →
+ * Stages: intake → generate → transcribe → trim → select → matte → composite →
  * roles → assemble → render. Each stage writes its artifact to
  * artifacts/<job>/ — the debugging surface. When a video comes out wrong,
  * look at which artifact first went wrong, not at the video. --only
  * re-runs a single stage against the artifacts already on disk.
+ *
+ * select (select.ts) runs right after trim: trim only narrows each take's
+ * OUTER edges (dead air, edge filler); select finds and removes a retake,
+ * false start, or aside INSIDE what's left, using trim's own output as its
+ * search window. Its output is the same transcript.json/trim.json shape
+ * trim itself writes (just possibly more takes per block), so every stage
+ * after it needs no changes to consume several ranges from one block —
+ * that's already how a block filmed as several standalone takes works.
  *
  * matte/composite are split so a backgroundReplace block's matte (video-
  * native RVM, or Vision+temporal-median fallback — see matte.ts) can be
@@ -63,7 +72,7 @@ import { artifactsDir } from "./paths";
  * no-op that passes `filled` through unchanged.
  */
 
-const STAGES = ["intake", "discover", "generate", "transcribe", "trim", "matte", "composite", "roles", "assemble", "render"] as const;
+const STAGES = ["intake", "discover", "generate", "transcribe", "trim", "select", "matte", "composite", "roles", "assemble", "render"] as const;
 type Stage = (typeof STAGES)[number];
 
 const parseArgs = (argv: string[]) => {
@@ -338,6 +347,25 @@ const main = async () => {
     write("transcript", transcript);
   }
   if (stop("trim")) return;
+
+  if (wants("select")) {
+    const before = trims.diagnostics.length;
+    const selected = await select(format, filled, transcript, trims, args.resolver);
+    transcript = selected.transcript;
+    trims = selected.trim;
+    write("select", selected.selection);
+    // Overwrites trim.json/transcript.json with the post-select versions —
+    // same "--only trim clobbers a later stage's own rebase of these same
+    // files, re-run forward from trim if you do that" contract composite
+    // already documents above. A later `--only <stage>` reads these files
+    // straight off disk (the ordinary `wants(stage) ? ... : read(...)`
+    // pattern every stage here already follows), so it sees select's own
+    // output with no restore branch needed.
+    write("trim", trims);
+    write("transcript", transcript);
+    for (const d of trims.diagnostics.slice(before)) console.log(`    ${d}`);
+  }
+  if (stop("select")) return;
 
   const matteArtifact = wants("matte") ? await runMatte(format, filled, trims) : read("matte", MatteArtifactSchema);
   if (wants("matte")) write("matte", matteArtifact);

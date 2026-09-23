@@ -147,6 +147,26 @@ const FgLayer: React.FC<{ src: string; srcInSec: number; srcOutSec: number; jobI
   );
 };
 
+/** How long a segment's own audio fades in/out at its two edges — masks the
+ *  hard-cut audio pop an internal cut (select.ts, or several standalone
+ *  takes laid back to back) otherwise produces at a boundary that isn't a
+ *  real silence. Applied to EVERY segment's own edges uniformly (not only
+ *  an internal cut) rather than threading through "is this an internal
+ *  boundary" — 30ms is inaudible as a fade on an ordinary block-to-block
+ *  hard cut, so this is a no-op there in practice. */
+const SEGMENT_AUDIO_FADE_SEC = 0.03;
+
+/** `seg.volume` ramped to 0 over the first/last SEGMENT_AUDIO_FADE_SEC of
+ *  this segment's own LOCAL timeline (frame 0 = this segment's own
+ *  Sequence start, per Remotion's volume-callback contract) — see
+ *  SEGMENT_AUDIO_FADE_SEC's own doc comment. */
+const segmentVolumeAt = (baseVolume: number, fps: number, durationInFrames: number) => (frame: number): number => {
+  const fadeFrames = Math.max(1, Math.round(SEGMENT_AUDIO_FADE_SEC * fps));
+  const fadeIn = clamp01(frame / fadeFrames);
+  const fadeOut = clamp01((durationInFrames - 1 - frame) / fadeFrames);
+  return baseVolume * Math.min(fadeIn, fadeOut);
+};
+
 const Segment: React.FC<{
   seg: EdlVideoSegment;
   transition?: EdlTransition;
@@ -155,30 +175,38 @@ const Segment: React.FC<{
 }> = ({ seg, transition, jobId, previewMode }) => {
   const { fps } = useVideoConfig();
   const src = previewMode ? previewProxySrc(jobId, seg.src) : staticFile(seg.src);
+  const durationInFrames = Math.max(1, Math.round((seg.tlOutSec - seg.tlInSec) * fps));
   return (
     <IncomingTransition transition={transition}>
-      <OffthreadVideo
-        src={src}
-        muted={seg.muted}
-        volume={() => seg.volume}
-        // A boosted volume (>1, i.e. +dB gain in the Inspector) is inaudible
-        // through the plain HTML <video> element the Player otherwise uses
-        // — its native `.volume` is hard-clamped to 1 by the browser, no
-        // matter what's assigned to it. Routing through a Web Audio
-        // GainNode (preview only; export mixes audio via ffmpeg separately
-        // and doesn't go through this DOM element at all) is what actually
-        // lets it exceed unity.
-        useWebAudioApi={previewMode}
-        // A sped-up segment consumes its whole source span across a
-        // proportionally shorter timeline span — assemble.ts already
-        // divided tlOutSec-tlInSec by the same number, so startFrom/endAt
-        // stay in SOURCE frames and playbackRate is what reconciles the
-        // two. 1 for every ordinary segment.
-        playbackRate={seg.speed}
-        startFrom={Math.round(seg.srcInSec * fps)}
-        endAt={Math.round(seg.srcOutSec * fps)}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-      />
+      {/* seg.zoom (assemble.ts's internalCutZoom) — a static punch-in on
+          alternating segments of a multi-take block, the ordinary way to
+          hide a same-setting jump cut having no real camera movement of
+          its own. 1 for every ordinary/single-take segment: a plain,
+          unscaled AbsoluteFill, zero visual change. */}
+      <AbsoluteFill style={seg.zoom !== 1 ? { transform: `scale(${seg.zoom})` } : undefined}>
+        <OffthreadVideo
+          src={src}
+          muted={seg.muted}
+          volume={segmentVolumeAt(seg.volume, fps, durationInFrames)}
+          // A boosted volume (>1, i.e. +dB gain in the Inspector) is inaudible
+          // through the plain HTML <video> element the Player otherwise uses
+          // — its native `.volume` is hard-clamped to 1 by the browser, no
+          // matter what's assigned to it. Routing through a Web Audio
+          // GainNode (preview only; export mixes audio via ffmpeg separately
+          // and doesn't go through this DOM element at all) is what actually
+          // lets it exceed unity.
+          useWebAudioApi={previewMode}
+          // A sped-up segment consumes its whole source span across a
+          // proportionally shorter timeline span — assemble.ts already
+          // divided tlOutSec-tlInSec by the same number, so startFrom/endAt
+          // stay in SOURCE frames and playbackRate is what reconciles the
+          // two. 1 for every ordinary segment.
+          playbackRate={seg.speed}
+          startFrom={Math.round(seg.srcInSec * fps)}
+          endAt={Math.round(seg.srcOutSec * fps)}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+      </AbsoluteFill>
     </IncomingTransition>
   );
 };

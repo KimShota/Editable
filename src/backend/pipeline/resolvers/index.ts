@@ -4,6 +4,9 @@ import { claudeCliAvailable, claudeCliResolver } from "./claudeCli";
 import { TranscriptCorrector } from "./correctionProtocol";
 import { anthropicCorrector } from "./anthropicCorrector";
 import { claudeCliCorrector } from "./claudeCliCorrector";
+import { SelectionResolver } from "./selectionProtocol";
+import { anthropicSelector } from "./anthropicSelector";
+import { claudeCliSelector } from "./claudeCliSelector";
 
 export type ResolverChoice = "anthropic" | "claude-cli" | "fallback" | "auto";
 
@@ -62,6 +65,36 @@ export const pickCorrector = (choice: ResolverChoice = "auto"): TranscriptCorrec
     case "auto":
       if (process.env.ANTHROPIC_API_KEY) return anthropicCorrector();
       if (claudeCliAvailable()) return claudeCliCorrector();
+      return null;
+  }
+};
+
+/**
+ * Pick the retake/false-start selection provider (select.ts). Same
+ * provider precedence as pickResolver/pickCorrector. Returns null for
+ * "fallback"/"auto"-with-nothing-available, which is NOT "skip selection
+ * entirely" (unlike pickCorrector) — select.ts's own filler/retake
+ * heuristic always runs regardless; this only decides whether an LLM can
+ * override a low-confidence heuristic call, same relationship trim.ts's
+ * own resolver has to its filler heuristic.
+ */
+export const pickSelector = (choice: ResolverChoice = "auto"): SelectionResolver | null => {
+  switch (choice) {
+    case "anthropic":
+      if (!process.env.ANTHROPIC_API_KEY) {
+        throw new Error("resolver 'anthropic' requires ANTHROPIC_API_KEY (put it in .env)");
+      }
+      return anthropicSelector();
+    case "claude-cli":
+      if (!claudeCliAvailable()) {
+        throw new Error("resolver 'claude-cli' requires the `claude` CLI on PATH");
+      }
+      return claudeCliSelector();
+    case "fallback":
+      return null;
+    case "auto":
+      if (process.env.ANTHROPIC_API_KEY) return anthropicSelector();
+      if (claudeCliAvailable()) return claudeCliSelector();
       return null;
   }
 };
