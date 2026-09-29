@@ -27,6 +27,23 @@ export const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
   return sqlClient(strings, ...values);
 }) as NeonQueryFunction<false, false>;
 
+/** A parameterized query — `$1, $2` placeholders plus a params array —
+ *  returning rows. Used where the tagged template can't express the call
+ *  (an array parameter, SQL assembled from a fixed fragment) and, more
+ *  importantly, as the ONE seam the queue/analysis stores take as an
+ *  argument: production passes this, the tests pass an in-process Postgres
+ *  (PGlite) with the same signature. Never interpolate user input into
+ *  `text`; put it in `params`. */
+export type QueryFn = (text: string, params?: unknown[]) => Promise<Record<string, unknown>[]>;
+
+export const query: QueryFn = async (text, params = []) => {
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is not set — see .env for the Postgres (Neon) setup.");
+  }
+  sqlClient ??= neon(process.env.DATABASE_URL);
+  return (await sqlClient.query(text, params)) as Record<string, unknown>[];
+};
+
 /** Escape hatch for the migration runner, which builds SQL text it can't
  *  express as a tagged template. Never use this with user input. */
 export const rawQuery = async (text: string): Promise<void> => {

@@ -29,6 +29,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@remotion/eslint-config-flat": "4.0.482",
     "@types/node": "^26.1.1",
     "@types/react": "19.2.7",
@@ -49,6 +50,13 @@
     "test:select": "tsx src/backend/pipeline/tools/selectRobustness.ts",
     "reels:sync": "tsx src/backend/tools/reelsSync.ts",
     "db:migrate": "tsx src/backend/tools/migrate.ts",
+    "analyze": "tsx src/backend/analysis/cli.ts",
+    "worker": "tsx src/backend/queue/workerCli.ts",
+    "test:storage": "tsx src/backend/tools/storageChecks.ts",
+    "test:analysis": "tsx src/backend/analysis/tools/analysisChecks.ts",
+    "test:style": "tsx src/backend/style/tools/styleChecks.ts",
+    "test:db": "tsx src/backend/tools/dbChecks.ts",
+    "test:foundations": "npm run test:storage && npm run test:style && npm run test:analysis && npm run test:db",
     "invites:mint": "tsx src/backend/tools/mintInvite.ts",
     "admin:promote": "tsx src/backend/tools/promoteAdmin.ts",
     "dev": "remotion studio src/backend/index.ts",

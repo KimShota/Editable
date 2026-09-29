@@ -3,6 +3,7 @@ import path from "node:path";
 import "dotenv/config";
 import { sql, rawQuery } from "../../app/lib/db";
 import { repoRoot } from "../pipeline/paths";
+import { splitStatements } from "./sqlMigrations";
 
 /**
  * Minimal migration runner for db/migrations/*.sql — applies each file
@@ -33,26 +34,8 @@ const alreadyApplied = async (): Promise<Set<string>> => {
   return new Set((rows as { filename: string }[]).map((r) => r.filename));
 };
 
-// Strips "-- ..." line comments before splitting on ";" — a naive split on
-// the raw file breaks when a comment itself contains a semicolon (as
-// 001_waitlist.sql's does, mid-sentence). Safe for these migrations: none
-// have "--" inside a string literal.
-const stripLineComments = (content: string): string =>
-  content
-    .split("\n")
-    .map((line) => {
-      const idx = line.indexOf("--");
-      return idx === -1 ? line : line.slice(0, idx);
-    })
-    .join("\n");
-
 const runFile = async (filePath: string): Promise<void> => {
-  const content = stripLineComments(fs.readFileSync(filePath, "utf8"));
-  const statements = content
-    .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  for (const statement of statements) {
+  for (const statement of splitStatements(fs.readFileSync(filePath, "utf8"))) {
     await rawQuery(statement);
   }
 };

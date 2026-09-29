@@ -12,6 +12,9 @@ artifacts
 public/jobs
 public/formats
 
+# Creator-brand-memory: object storage root for the local driver (src/backend/storage.ts)
+/storage
+
 # Format-authoring: downloaded reference clips, sampled frames, drafts
 # (root-anchored — src/backend/authoring/ and src/app/authoring/ are source code)
 /authoring
