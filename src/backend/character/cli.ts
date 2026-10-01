@@ -227,7 +227,7 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
     // were generating, and that write must not be lost.
     const latest = (await storage.exists(k.character)) ? await readJson(k.character, (x) => LockedCharacterSchema.parse(x)) : null;
     const character: LockedCharacter = {
-      kind: "mascot",
+      kind: concept.style === "photoreal" ? "realistic" : "mascot",
       concept,
       baseImageKey: k.candidate(from),
       sheet,

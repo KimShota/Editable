@@ -7,7 +7,8 @@ import { z } from "zod";
  * the whole consistency mechanism (decision 18: reference images, no LoRA).
  */
 
-export const CharacterStyleSchema = z.enum(["3d_render", "2d_flat", "anime", "claymation", "plush", "pixel"]);
+/** "photoreal" is a realistic AI avatar (a fictional person); the rest are mascot styles. */
+export const CharacterStyleSchema = z.enum(["3d_render", "2d_flat", "anime", "claymation", "plush", "pixel", "photoreal"]);
 
 export const MascotConceptSchema = z.object({
   name: z.string().describe("The mascot's own name: short, sayable, memorable."),
