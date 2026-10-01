@@ -257,14 +257,20 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
     const library = option(args, "--library")?.split(",").filter(Boolean);
     if (library) {
       // One at a time: lower ElevenLabs plans cap concurrent requests at 2.
+      // Saved after each voice, and a voice that fails (e.g. a professional
+      // voice on the free plan) is skipped rather than losing the rest.
       for (const [i, voiceId] of library.entries()) {
         const name = `d${round}-${i}`;
-        const audio = await textToSpeech(voiceId, text, { costSink: consoleSink, ref: `${brand}/voice/${name}` });
-        await storage.putBuffer(k.voicePreview(name), audio);
-        records.push({ name, libraryVoiceId: voiceId, key: k.voicePreview(name), description: `library voice ${voiceId}` });
-        console.log(`  ✔ ${name}  ${voiceId}  ${await storage.localPath(k.voicePreview(name))}`);
+        try {
+          const audio = await textToSpeech(voiceId, text, { costSink: consoleSink, ref: `${brand}/voice/${name}` });
+          await storage.putBuffer(k.voicePreview(name), audio);
+          records.push({ name, libraryVoiceId: voiceId, key: k.voicePreview(name), description: `library voice ${voiceId}` });
+          await writeJson(k.voicePreviews, records);
+          console.log(`  ✔ ${name}  ${voiceId}  ${await storage.localPath(k.voicePreview(name))}`);
+        } catch (err) {
+          console.log(`  ✘ ${name}  ${voiceId}: ${err instanceof Error ? err.message.slice(0, 300) : err}`);
+        }
       }
-      await writeJson(k.voicePreviews, records);
       console.log(`\ntext: "${text}"`);
       return;
     }
