@@ -74,6 +74,17 @@ export const anthropicCostUsd = (model: string, usage: AnthropicUsage): number =
   );
 };
 
+/** Google image-model list prices, USD per output image at ≤2K resolution. */
+const GOOGLE_IMAGE_PRICES: Record<string, number> = {
+  "gemini-3-pro-image": 0.134,
+};
+
+export const googleImageCostEntry = (model: string, images: number, operation: string, extra: { brandId?: string | null; ref?: string | null } = {}): CostEntry => {
+  const price = GOOGLE_IMAGE_PRICES[model];
+  if (price === undefined) throw new Error(`cost ledger: no price for Google image model "${model}" — add it to GOOGLE_IMAGE_PRICES`);
+  return { ...extra, provider: "google", model, operation, units: { images }, usd: price * images };
+};
+
 export const anthropicCostEntry = (
   model: string,
   usage: AnthropicUsage,

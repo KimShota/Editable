@@ -1,4 +1,7 @@
-import { anthropicCostUsd, dbSink } from "../../cost/ledger";
+import { buildConceptPrompt } from "../../character/concepts";
+import { candidatePrompt, refinePrompt, sheetViewPrompt } from "../../character/images";
+import type { MascotConcept } from "../../character/schemas";
+import { anthropicCostUsd, dbSink, googleImageCostEntry } from "../../cost/ledger";
 import { makeChecker, near } from "../../tools/checks";
 import { makeTestDb } from "../../tools/testDb";
 import { buildIntakePrompt } from "../intake/extract";
@@ -209,6 +212,32 @@ const main = async () => {
   t.check("deleting a workspace cascades to its brands", left[0].b === 0 && left[0].p === 0 && left[0].k === 0, JSON.stringify(left[0]));
   const [kept] = await query(`select count(*)::int as n from cost_ledger`);
   t.check("…while its cost history is kept", kept.n === 1);
+
+  // Mascot prompts.
+  const concept: MascotConcept = {
+    name: "Maru",
+    form: "a round owl",
+    style: "3d_render",
+    oneLine: "An owl.",
+    personality: ["calm", "certain"],
+    appearance: "Lavender egg-shaped body.",
+    signatureProp: "a glowing decision card",
+    catchphrase: "Sorted.",
+    voiceDescription: "Calm, low.",
+    whyItFits: "Owls are wise.",
+    contentAngle: "Sorting inboxes.",
+  };
+  const conceptPrompt = buildConceptPrompt(intakeFixture(), 0, 3, "make it cute");
+  t.check("concept prompt names the product, count and direction", conceptPrompt.includes(intakeFixture().products[0].name) && conceptPrompt.includes("exactly 3") && conceptPrompt.includes("make it cute"));
+  const cand = candidatePrompt(concept, "bolder");
+  t.check("candidate prompt carries appearance, style and the no-text rule", cand.includes("Lavender egg-shaped") && cand.includes("3D animated-film") && cand.includes("No text") && cand.includes("Variation: bolder"));
+  t.check("refine prompt without a feature reference mentions no second image", !refinePrompt(concept, "add lips").includes("second reference"));
+  t.check("refine prompt with a feature reference borrows shape only", /second reference image.*Do not copy its realism/.test(refinePrompt(concept, "add lips", true)));
+  t.check("only the with_prop view describes the prop", sheetViewPrompt(concept, "with_prop").includes("glowing decision card") && !sheetViewPrompt(concept, "front").includes("glowing decision card"));
+
+  // Image cost.
+  t.check("gemini-3-pro-image is $0.134 an image", near(googleImageCostEntry("gemini-3-pro-image", 3, "x").usd, 0.402, 1e-9));
+  t.throws("an unpriced image model throws instead of recording $0", () => googleImageCostEntry("unknown-image-model", 1, "x"), /no price/);
 
   t.finish("brand");
 };

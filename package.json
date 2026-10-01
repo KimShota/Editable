@@ -52,6 +52,7 @@
     "db:migrate": "tsx src/backend/tools/migrate.ts",
     "analyze": "tsx src/backend/analysis/cli.ts",
     "intake": "tsx src/backend/brand/intake/cli.ts",
+    "character": "tsx src/backend/character/cli.ts",
     "worker": "tsx src/backend/queue/workerCli.ts",
     "test:storage": "tsx src/backend/tools/storageChecks.ts",
     "test:analysis": "tsx src/backend/analysis/tools/analysisChecks.ts",
