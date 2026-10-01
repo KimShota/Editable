@@ -2,6 +2,7 @@ import { buildConceptPrompt } from "../../character/concepts";
 import { candidatePrompt, refinePrompt, sheetViewPrompt } from "../../character/images";
 import type { MascotConcept } from "../../character/schemas";
 import { anthropicCostUsd, dbSink, googleImageCostEntry } from "../../cost/ledger";
+import { elevenLabsCostEntry } from "../../voice/elevenlabs";
 import { makeChecker, near } from "../../tools/checks";
 import { makeTestDb } from "../../tools/testDb";
 import { buildIntakePrompt } from "../intake/extract";
@@ -238,6 +239,8 @@ const main = async () => {
   // Image cost.
   t.check("gemini-3-pro-image is $0.134 an image", near(googleImageCostEntry("gemini-3-pro-image", 3, "x").usd, 0.402, 1e-9));
   t.throws("an unpriced image model throws instead of recording $0", () => googleImageCostEntry("unknown-image-model", 1, "x"), /no price/);
+
+  t.check("ElevenLabs characters are priced at the Creator rate", near(elevenLabsCostEntry("eleven_v4", 1000, "tts").usd, 0.22, 1e-9));
 
   t.finish("brand");
 };

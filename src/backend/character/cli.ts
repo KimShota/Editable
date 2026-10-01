@@ -4,6 +4,7 @@ import { consoleSink } from "../cost/ledger";
 import { getStorage } from "../storage";
 import { generateMascotConcepts } from "./concepts";
 import { buildGrid } from "./grid";
+import { designVoice, saveDesignedVoice, textToSpeech } from "../voice/elevenlabs";
 import { generateCandidate, generateSheetView, refineCandidate } from "./images";
 import { type LockedCharacter, LockedCharacterSchema, type MascotConcept, MascotConceptsSchema, SHEET_VIEWS, type SheetView } from "./schemas";
 
@@ -16,13 +17,22 @@ import { type LockedCharacter, LockedCharacterSchema, type MascotConcept, Mascot
  *   npm run character -- candidates --brand <slug> [--concepts 0,2] [--variations 1]
  *   npm run character -- refine     --brand <slug> --from <candidate> --note "…" [--ref <image path>]
  *   npm run character -- lock       --brand <slug> --from <candidate> [--views front,happy,…]
+ *   npm run character -- voice      --brand <slug> [--description "…"] [--text "…"] [--seed n] [--library <voiceId,…>]
+ *   npm run character -- voice-pick --brand <slug> --preview <d0-1> [--name "…"] [--sample "…"]
  *   npm run character -- show       --brand <slug>
+ *
+ * `voice` designs 3 candidate voices for the locked character from its
+ * concept's voice description (each run adds a round d<n>-0..2 to
+ * character/voice/), or with --library auditions existing ElevenLabs voices
+ * speaking the same text (round d<n>-0..). Voice design needs a paid plan;
+ * library voices work on any. `voice-pick` saves a designed one to the
+ * account, speaks a sample line, and writes the voice into character.json.
  *
  * Candidates are named c<concept>-v<variation> (or c<concept>-r<n> when
  * refined) and stored as brands/<slug>/character/candidates/<name>.png.
  */
 
-const USAGE = "usage: npm run character -- <concepts|candidates|refine|lock|show> --brand <slug> [options]  (see cli.ts)";
+const USAGE = "usage: npm run character -- <concepts|candidates|refine|lock|voice|voice-pick|show> --brand <slug> [options]  (see cli.ts)";
 
 const option = (args: string[], name: string): string | undefined => {
   const i = args.indexOf(name);
@@ -56,6 +66,9 @@ const keys = (brand: string) => {
     sheetView: (view: string) => `${root}/character/sheet/${view}.png`,
     sheetGrid: `${root}/character/sheet-grid.png`,
     character: `${root}/character/character.json`,
+    voicePreviews: `${root}/character/voice/previews.json`,
+    voicePreview: (name: string) => `${root}/character/voice/${name}.mp3`,
+    voiceSample: `${root}/character/voice/sample.mp3`,
   };
 };
 
@@ -73,6 +86,29 @@ const printConcept = (c: MascotConcept, i: number) => {
   console.log(`    videos: ${c.contentAngle}`);
   console.log(`    why: ${c.whyItFits}`);
 };
+
+const loadCharacter = async (brand: string): Promise<LockedCharacter> => {
+  const k = keys(brand);
+  if (!(await storage.exists(k.character))) throw new Error(`no locked character for ${brand}: run lock first`);
+  return readJson(k.character, (x) => LockedCharacterSchema.parse(x));
+};
+
+/** One auditioned voice: either a voice-design preview (`generatedVoiceId`,
+ *  not yet on the account) or an existing library voice (`libraryVoiceId`). */
+type VoicePreviewRecord = {
+  name: string;
+  generatedVoiceId?: string;
+  libraryVoiceId?: string;
+  key: string;
+  description: string;
+  durationSecs?: number;
+};
+
+/** A line long enough for voice design (100+ characters), in the character's
+ *  own words, ending on its catchphrase. */
+const defaultVoiceText = (c: MascotConcept): string =>
+  `Hi, I'm ${c.name}. I've been watching everything that landed on your desk today, and honestly? ` +
+  `Most of it can wait. One thing can't, and it's right here. ${c.catchphrase}`;
 
 const regrid = async (brand: string) => {
   const k = keys(brand);
@@ -202,6 +238,73 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
     const gridPath = (await storage.localPath(k.character)).replace(/character\.json$/, "sheet-grid.png");
     buildGrid(tiles, gridPath, 5);
     console.log(`\nlocked ${concept.name}: ${Object.keys(sheet).length} views\nsheet grid: ${gridPath}`);
+  },
+
+  voice: async (args) => {
+    const brand = required(args, "--brand");
+    const k = keys(brand);
+    const character = await loadCharacter(brand);
+    const description = option(args, "--description") ?? character.concept.voiceDescription;
+    const text = option(args, "--text") ?? defaultVoiceText(character.concept);
+    const seed = option(args, "--seed") ? Number(option(args, "--seed")) : undefined;
+
+    const records: VoicePreviewRecord[] = (await storage.exists(k.voicePreviews)) ? await readJson(k.voicePreviews, (x) => x as VoicePreviewRecord[]) : [];
+    const round = new Set(records.map((r) => r.name.split("-")[0])).size;
+
+    const library = option(args, "--library")?.split(",").filter(Boolean);
+    if (library) {
+      // One at a time: lower ElevenLabs plans cap concurrent requests at 2.
+      for (const [i, voiceId] of library.entries()) {
+        const name = `d${round}-${i}`;
+        const audio = await textToSpeech(voiceId, text, { costSink: consoleSink, ref: `${brand}/voice/${name}` });
+        await storage.putBuffer(k.voicePreview(name), audio);
+        records.push({ name, libraryVoiceId: voiceId, key: k.voicePreview(name), description: `library voice ${voiceId}` });
+        console.log(`  ✔ ${name}  ${voiceId}  ${await storage.localPath(k.voicePreview(name))}`);
+      }
+      await writeJson(k.voicePreviews, records);
+      console.log(`\ntext: "${text}"`);
+      return;
+    }
+
+    const previews = await designVoice(description, text, { costSink: consoleSink, ref: `${brand}/voice/d${round}`, seed });
+    for (const [i, p] of previews.entries()) {
+      const name = `d${round}-${i}`;
+      await storage.putBuffer(k.voicePreview(name), p.audio);
+      records.push({ name, generatedVoiceId: p.generatedVoiceId, key: k.voicePreview(name), description, durationSecs: p.durationSecs });
+      console.log(`  ✔ ${name}  ${p.durationSecs.toFixed(1)}s  ${await storage.localPath(k.voicePreview(name))}`);
+    }
+    await writeJson(k.voicePreviews, records);
+    console.log(`\nvoice: "${description}"\ntext: "${text}"`);
+  },
+
+  "voice-pick": async (args) => {
+    const brand = required(args, "--brand");
+    const k = keys(brand);
+    const character = await loadCharacter(brand);
+    const records = await readJson(k.voicePreviews, (x) => x as VoicePreviewRecord[]);
+    const pick = records.find((r) => r.name === required(args, "--preview"));
+    if (!pick) throw new Error(`no voice preview "${option(args, "--preview")}" (have ${records.map((r) => r.name).join(", ")})`);
+
+    const name = option(args, "--name") ?? `${character.concept.name} (${brand})`;
+    const saved = pick.libraryVoiceId
+      ? { voiceId: pick.libraryVoiceId, name }
+      : await saveDesignedVoice({
+          generatedVoiceId: pick.generatedVoiceId!,
+          name,
+          description: pick.description,
+          notSelectedIds: records.flatMap((r) => (r !== pick && r.generatedVoiceId ? [r.generatedVoiceId] : [])),
+        });
+    console.log(`  ✔ ${pick.libraryVoiceId ? "using library" : "saved"} voice ${saved.name} (${saved.voiceId})`);
+
+    const sampleText = option(args, "--sample") ?? `${character.concept.catchphrase}`;
+    const sample = await textToSpeech(saved.voiceId, sampleText, { costSink: consoleSink, ref: `${brand}/voice/sample` });
+    await storage.putBuffer(k.voiceSample, sample);
+
+    await writeJson(k.character, {
+      ...character,
+      voice: { provider: "elevenlabs", voiceId: saved.voiceId, name: saved.name, source: pick.libraryVoiceId ? "library" : "designed", sampleKey: k.voiceSample },
+    } satisfies LockedCharacter);
+    console.log(`  ✔ sample "${sampleText}": ${await storage.localPath(k.voiceSample)}\n\nvoice locked into ${k.character}`);
   },
 
   show: async (args) => {
