@@ -223,13 +223,16 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
       }),
     );
 
+    // Re-read for the voice: a voice-pick may have finished while the views
+    // were generating, and that write must not be lost.
+    const latest = (await storage.exists(k.character)) ? await readJson(k.character, (x) => LockedCharacterSchema.parse(x)) : null;
     const character: LockedCharacter = {
       kind: "mascot",
       concept,
       baseImageKey: k.candidate(from),
       sheet,
       lockedAt: new Date().toISOString(),
-      voice: previous?.voice ?? null,
+      voice: latest?.voice ?? null,
     };
     await writeJson(k.character, character);
 
