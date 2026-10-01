@@ -8,7 +8,6 @@ import { createAnalysisHandlers, createAnalyzeHandler, enqueueAnalysis } from ".
 import { getAnalysis, getVideo, insertVideo, saveAnalysis } from "../analysis/store";
 import { makePunchInVideo } from "../analysis/tools/fixtures";
 import { ANALYZER_VERSION } from "../analysis/version";
-import { repoRoot } from "../pipeline/paths";
 import { runOnce, runWorker } from "../queue/worker";
 import { QueueJob, retryDelaySec, WorkQueue } from "../queue/workQueue";
 import { STYLE_DIM_COUNT } from "../style/dims";
@@ -16,7 +15,7 @@ import { neutralStyleSpec } from "../style/defaults";
 import { getStyleSpec, saveStyleSpec } from "../style/store";
 import { hashFile, LocalStorage, videoKey } from "../storage";
 import { makeChecker } from "./checks";
-import { splitStatements } from "./sqlMigrations";
+import { applyMigrations } from "./testDb";
 
 /**
  * Real SQL against a real (in-process) Postgres: every migration in
@@ -50,27 +49,6 @@ const canon = (x: unknown): string =>
   );
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-const shimVectorStatements = (statements: string[]): string[] =>
-  statements
-    .filter((s) => !/^create extension\b.*\bvector\b/i.test(s) && !/\busing hnsw\b/i.test(s))
-    .map((s) => s.replace(/vector\(\d+\)/g, "vector"));
-
-const applyMigrations = async (db: PGlite, only?: (file: string) => boolean): Promise<number> => {
-  const dir = path.join(repoRoot, "db/migrations");
-  let statements = 0;
-  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".sql") && (!only || only(f))).sort()) {
-    for (const stmt of shimVectorStatements(splitStatements(fs.readFileSync(path.join(dir, file), "utf8")))) {
-      try {
-        await db.exec(stmt);
-        statements++;
-      } catch (err) {
-        throw new Error(`migration ${file} failed on:\n${stmt}\n→ ${err instanceof Error ? err.message : err}`);
-      }
-    }
-  }
-  return statements;
-};
 
 const main = async () => {
   const t = makeChecker();
