@@ -55,10 +55,12 @@ export const refinePrompt = (concept: MascotConcept, note: string, hasFeatureRef
   [
     `This is ${concept.name}, a brand ${concept.style === "photoreal" ? "presenter" : "mascot"} (${concept.form}). Redraw the SAME character from the first reference image with one change: ${note}.`,
     hasFeatureRef
-      ? "The second reference image shows the feature to borrow and nothing else: take only the shape of that feature, translated into the mascot's own style, materials and colours. Do not copy its realism, lighting, setting, body, colours or mood."
+      ? concept.style === "photoreal"
+        ? "The second reference image shows the feature to borrow: reproduce that feature faithfully and photorealistically. Do not copy its background, clothing, framing or any watermark or text."
+        : "The second reference image shows the feature to borrow and nothing else: take only the shape of that feature, translated into the mascot's own style, materials and colours. Do not copy its realism, lighting, setting, body, colours or mood."
       : "",
     "Keep everything not mentioned identical: silhouette, proportions, colours, materials, style.",
-    concept.style === "photoreal" ? `The face must stay the same person. ${ORIGINAL_PERSON}` : "",
+    concept.style === "photoreal" && !hasFeatureRef ? "The face must stay the same person." : "",
     concept.style === "photoreal" ? "Waist-up, facing the camera, centered." : "Full body, standing, facing the camera, centered.",
     SHARED_RULES,
   ]
