@@ -54,6 +54,8 @@
     "intake": "tsx src/backend/brand/intake/cli.ts",
     "character": "tsx src/backend/character/cli.ts",
     "recreate": "tsx src/backend/recreation/cli.ts",
+    "produce": "tsx src/backend/production/cli.ts",
+    "test:production": "tsx src/backend/production/tools/productionChecks.ts",
     "worker": "tsx src/backend/queue/workerCli.ts",
     "test:storage": "tsx src/backend/tools/storageChecks.ts",
     "test:analysis": "tsx src/backend/analysis/tools/analysisChecks.ts",

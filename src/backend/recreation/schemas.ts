@@ -133,6 +133,10 @@ export const ProductFootageSchema = z.object({
       startSec: z.number(),
       endSec: z.number(),
       shows: z.string(),
+      /** Framing for a vertical video: the horizontal centre of the crop (0-1)
+       *  and its width as a fraction of the recording's. */
+      focusX: z.number().min(0).max(1).optional(),
+      cropWidth: z.number().min(0.2).max(1).optional(),
     }),
   ),
   source: z.string().optional(),

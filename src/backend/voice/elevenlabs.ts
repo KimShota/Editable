@@ -108,3 +108,39 @@ export const textToSpeech = async (
   await opts.costSink?.(elevenLabsCostEntry(model, billedChars(res, text), "tts", { ref: opts.ref, brandId: opts.brandId }));
   return audio;
 };
+
+export type TimedWord = { text: string; startSec: number; endSec: number };
+export type CharacterAlignment = { characters: string[]; character_start_times_seconds: number[]; character_end_times_seconds: number[] };
+
+/** Groups ElevenLabs' per-character timings into words (split on whitespace). */
+export const wordsFromAlignment = (a: CharacterAlignment): TimedWord[] => {
+  const words: TimedWord[] = [];
+  let current: TimedWord | null = null;
+  a.characters.forEach((ch, i) => {
+    if (/\s/.test(ch)) {
+      if (current) words.push(current);
+      current = null;
+      return;
+    }
+    if (!current) current = { text: "", startSec: a.character_start_times_seconds[i], endSec: a.character_end_times_seconds[i] };
+    current.text += ch;
+    current.endSec = a.character_end_times_seconds[i];
+  });
+  if (current) words.push(current);
+  return words;
+};
+
+/** Speech for one line plus when each word is spoken (for captions and cuts). */
+export const textToSpeechTimed = async (
+  voiceId: string,
+  text: string,
+  opts: { model?: string; costSink?: CostSink; ref?: string; brandId?: string | null } = {},
+): Promise<{ audio: Buffer; words: TimedWord[] }> => {
+  const model = opts.model ?? TTS_MODEL;
+  const res = await call(`/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=mp3_44100_128`, { text, model_id: model });
+  const json = (await res.json()) as { audio_base64: string; alignment: CharacterAlignment | null; normalized_alignment: CharacterAlignment | null };
+  await opts.costSink?.(elevenLabsCostEntry(model, billedChars(res, text), "tts", { ref: opts.ref, brandId: opts.brandId }));
+  const alignment = json.alignment ?? json.normalized_alignment;
+  if (!alignment) throw new Error("elevenlabs: speech came back without timestamps");
+  return { audio: Buffer.from(json.audio_base64, "base64"), words: wordsFromAlignment(alignment) };
+};

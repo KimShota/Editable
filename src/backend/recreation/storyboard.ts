@@ -28,7 +28,18 @@ const CHARACTER_VIEW: Partial<Record<AdaptedScript["shots"][number]["treatment"]
 
 const ordinal = ["image 1", "image 2", "image 3", "image 4"];
 
-export const framePrompt = (shot: AdaptedScript["shots"][number], character: LockedCharacter, refs: FrameRef[], set: string): string => {
+/** The display of a green-screen frame: real footage is keyed onto it later
+ *  (production/greenscreen.py), so it must be flat green edge to edge. */
+export const GREEN_SCREEN =
+  "The laptop's entire display is a flat, solid, evenly lit chroma-key green (#00FF00) from edge to edge: no windows, menu bar, dock, text, glare or reflections on it. The whole screen and its bezel stay fully visible.";
+
+export const framePrompt = (
+  shot: AdaptedScript["shots"][number],
+  character: LockedCharacter,
+  refs: FrameRef[],
+  set: string,
+  opts: { greenScreen?: boolean } = {},
+): string => {
   const at = (role: FrameRef["role"]) => ordinal[refs.findIndex((r) => r.role === role)];
   const name = character.concept.name;
   const lines = [
@@ -38,7 +49,8 @@ export const framePrompt = (shot: AdaptedScript["shots"][number], character: Loc
       : `The person is ${name}, the woman in ${at("character")}: the same person, with her exact face, hair, skin, outfit and jewellery. ${character.concept.appearance}`,
     `Copy only the composition of ${at("composition")}: camera distance, angle, framing, pose and where things sit in the frame. Do not copy its person, face, hair, clothes, room, device, text, captions or watermark, and never copy what is on its screen.`,
   ];
-  if (at("screen")) lines.push(`The laptop screen shows exactly the screen in ${at("screen")}, sharp and legible. Do not change or invent any of its interface.`);
+  if (opts.greenScreen) lines.push(GREEN_SCREEN);
+  else if (at("screen")) lines.push(`The laptop screen shows exactly the screen in ${at("screen")}, sharp and legible. Do not change or invent any of its interface.`);
   else if (shot.otherScreen) lines.push(`The laptop screen shows: ${shot.otherScreen}. Generic interface, no real brand logos.`);
   lines.push(`Action: ${shot.action}`);
   if (shot.treatment !== "device_closeup" && shot.treatment !== "screen_fill") lines.push(`Setting: ${set}.`);
