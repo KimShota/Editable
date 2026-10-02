@@ -137,6 +137,14 @@ export const RedoIcon = ({ className }: IconProps) => (
   </svg>
 );
 
+/** Two arrows chasing each other round: "make this again" (a new AI take). */
+export const RegenerateIcon = ({ className }: IconProps) => (
+  <svg viewBox="0 0 24 24" fill={base} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M20 12a8 8 0 0 1-14.3 4.9M4 12a8 8 0 0 1 14.3-4.9" />
+    <path d="M18.5 3v4.2h-4.2M5.5 21v-4.2h4.2" />
+  </svg>
+);
+
 export const ArrowLeftIcon = ({ className }: IconProps) => (
   <svg viewBox="0 0 24 24" fill={base} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M19 12H5M11 6l-6 6 6 6" />

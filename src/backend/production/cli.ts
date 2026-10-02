@@ -7,7 +7,7 @@ import { LockedCharacterSchema } from "../character/schemas";
 import { consoleSink, googleImageCostEntry } from "../cost/ledger";
 import { GEMINI_IMAGE_MODEL, generateImage } from "../pipeline/generation/geminiImage";
 import { artifactsDir, repoRoot } from "../pipeline/paths";
-import { render } from "../pipeline/render";
+import { render, stageAssets } from "../pipeline/render";
 import { EdlSchema } from "../pipeline/schemas";
 import { AdaptedScriptSchema, ProductFootageSchema, RecreationSpecSchema } from "../recreation/schemas";
 import { DEFAULT_SET, framePrompt, planFrames } from "../recreation/storyboard";
@@ -31,7 +31,7 @@ import {
   textCardClip,
   voiceSegment,
 } from "./clips";
-import { compileEdl, type MadeClip, type VoiceFile } from "./edl";
+import { compileEdl, type MadeClip, swapShotClip, type VoiceFile } from "./edl";
 import { AI_VIDEO_FORMAT } from "./format";
 import { estimateUsd, generate, seedanceUsd, uploadFile, waitFor, download } from "./higgsfield";
 import { buildTimeline, type Timeline } from "./timeline";
@@ -47,6 +47,8 @@ import { buildTimeline, type Timeline } from "./timeline";
  *       --regenerate pays for new generations; --new-stills also redraws green-screen stills
  *   npm run produce -- render --brand <slug> --source <id> [--discard-edits]
  *       also makes the video a project the app's editor opens (jobs/<brand>-<source>)
+ *   npm run produce -- regen-clip --job <jobId> --clip <clipId> [--dry]
+ *       a new take of one shot, swapped into the editor's timeline (the Regenerate button)
  *   npm run produce -- all    --brand <slug> --source <id> [--dry]
  *
  *   voice/line-<i>.tts.mp3/.json each line as ElevenLabs spoke it, with word timings
@@ -60,7 +62,7 @@ import { buildTimeline, type Timeline } from "./timeline";
  *   edl.json, final.mp4          the editable timeline and its render
  */
 
-const USAGE = "usage: npm run produce -- <voice|clips|render|all> --brand <slug> --source <id> [options]  (see cli.ts)";
+const USAGE = "usage: npm run produce -- <voice|clips|render|all> --brand <slug> --source <id> [options], or regen-clip --job <id> --clip <id>  (see cli.ts)";
 
 const option = (args: string[], name: string): string | undefined => {
   const i = args.indexOf(name);
@@ -242,7 +244,17 @@ const greenStill = async (c: Ctx, shot: Ctx["script"]["shots"][number]): Promise
 
 /** `regenerate` false reuses a provider's earlier output (clips/<shot>.raw.mp4)
  *  when there is one: re-cropping, re-compositing or re-aligning is free. */
-const makeClip = async (c: Ctx, timeline: Timeline, shot: Ctx["script"]["shots"][number], kind: ClipKind, regenerate: boolean): Promise<ClipRecord> => {
+const makeClip = async (
+  c: Ctx,
+  timeline: Timeline,
+  shot: Ctx["script"]["shots"][number],
+  kind: ClipKind,
+  regenerate: boolean,
+  /** Where the finished clip goes. A take an EDL already references must
+   *  never be overwritten (undo would show the new one), so the editor's
+   *  Regenerate writes each take to its own key. */
+  outKey = c.k.clip(shot.shotId),
+): Promise<ClipRecord> => {
   const at = timeline.shots.find((s) => s.shotId === shot.shotId)!;
   const len = at.tlOutSec - at.tlInSec;
   return withTmp(async (dir) => {
@@ -300,8 +312,8 @@ const makeClip = async (c: Ctx, timeline: Timeline, shot: Ctx["script"]["shots"]
         normalize(raw, out, kind === "talking" ? 1 : 0);
       }
     }
-    await storage.putFile(c.k.clip(shot.shotId), out);
-    return { kind, key: c.k.clip(shot.shotId), durationSec: Math.min(durationOf(out), cleanUntil), inSec, rate, lipSyncDriftSec };
+    await storage.putFile(outKey, out);
+    return { kind, key: outKey, durationSec: Math.min(durationOf(out), cleanUntil), inSec, rate, lipSyncDriftSec };
   });
 };
 
@@ -383,6 +395,8 @@ const publishToEditor = (c: Ctx) => {
   if (!fs.existsSync(manifest)) {
     fs.writeFileSync(manifest, JSON.stringify({ format: AI_VIDEO_FORMAT, bindings: {}, lexicon: [], language: c.script.language }, null, 2));
   }
+  // Which brand video this job is, for the editor's per-clip Regenerate.
+  fs.writeFileSync(path.join(dir, "ai-video.json"), JSON.stringify({ brand: c.brand, source: c.id }, null, 2));
   const sidecar = path.join(dir, "project.json");
   if (!fs.existsSync(sidecar)) {
     const hook = c.script.lines[0].text.split(/\s+/).slice(0, 6).join(" ");
@@ -432,8 +446,64 @@ const renderVideo = async (c: Ctx, args: string[]) => {
   console.log(`  editor: /jobs/${c.jobId}/edit (admin account)`);
 };
 
+/**
+ * The editor's Regenerate button (api/jobs/[jobId]/regenerate-clip): a new
+ * take of the one shot a timeline clip was cut from, swapped into the
+ * editor's own edl.json so every other edit stays. Each take is kept as its
+ * own versioned file, so undo in the editor brings the previous take back.
+ * With --dry it only prints `estimate_usd <x>`.
+ */
+const regenClip = async (args: string[]) => {
+  const jobId = required(args, "--job");
+  const clipId = required(args, "--clip");
+  const metaFile = path.join(repoRoot, "jobs", jobId, "ai-video.json");
+  if (!fs.existsSync(metaFile)) throw new Error(`${jobId} is not an AI video`);
+  const meta = JSON.parse(fs.readFileSync(metaFile, "utf8")) as { brand: string; source: string };
+  const c = await context(["--brand", meta.brand, "--source", meta.source]);
+  const editorEdl = path.join(artifactsDir(jobId), "edl.json");
+  const edl = EdlSchema.parse(JSON.parse(fs.readFileSync(editorEdl, "utf8")));
+  const segment = edl.video.find((v) => v.id === clipId);
+  if (!segment) throw new Error(`no clip ${clipId} on the timeline`);
+  const shot = c.script.shots.find((s) => s.shotId === segment.blockId);
+  if (!shot) throw new Error("this clip was added by hand, not generated: there is nothing to regenerate");
+  const kind = planClip(shot);
+  if (kind === "footage" || kind === "text") throw new Error("this shot is the product's own footage, not AI: regenerating would give the same clip");
+  const timeline = (await readJson(c.k.timeline, "timeline")) as Timeline;
+
+  if (args.includes("--dry")) {
+    const usd = await estimate(c, timeline, [{ shot, kind }], false);
+    console.log(`estimate_usd ${usd.toFixed(2)}`);
+    return;
+  }
+
+  await storage.remove(c.k.request(shot.shotId));
+  // Each take its own file: the previous take stays exactly as the editor's
+  // undo history references it.
+  const version = `${shot.shotId}.v${Date.now()}.mp4`;
+  const versionKey = `${c.k.root}/clips/${version}`;
+  const record = await makeClip(c, timeline, shot, kind, true, versionKey);
+  const records = (await readJson(c.k.clips, "clips")) as Record<string, ClipRecord>;
+  records[shot.shotId] = record;
+  await writeJson(c.k.clips, records);
+
+  const made: MadeClip = {
+    src: `jobs/${jobId}/generated/clips/${version}`,
+    file: await storage.localPath(versionKey),
+    durationSec: record.durationSec,
+    inSec: record.inSec,
+    rate: record.rate,
+  };
+  // Re-read: the editor may have saved edits while the shot was generating.
+  const latest = EdlSchema.parse(JSON.parse(fs.readFileSync(editorEdl, "utf8")));
+  const swapped = EdlSchema.parse(swapShotClip(latest, shot.shotId, made));
+  fs.writeFileSync(editorEdl, JSON.stringify(swapped, null, 2));
+  stageAssets(swapped);
+  console.log(`regenerated ${clipId} (shot ${shot.shotId}, ${kind})`);
+};
+
 const main = async () => {
   const [command, ...args] = process.argv.slice(2);
+  if (command === "regen-clip") return regenClip(args);
   if (!["voice", "clips", "render", "all"].includes(command)) {
     console.error(USAGE);
     process.exit(1);

@@ -91,14 +91,24 @@ const TransportButton = ({
  * step in this loop; that only happens via the explicit reset button,
  * which discards these edits (see RenderPanel's neighbor action, TODO).
  */
+/** How often the editor checks on clips that are regenerating. A new take
+ *  takes one to several minutes, so a few seconds of lag is invisible. */
+const REGEN_POLL_MS = 4000;
+
+type RegenStatus = { status: "running" | "done" | "error"; error?: string };
+
 export function Editor({
   jobId,
   formatName,
   initialEdl,
+  aiVideo = false,
 }: {
   jobId: string;
   formatName: string;
   initialEdl: Edl;
+  /** Made by the production pipeline: every main-track clip gets a
+   *  Regenerate button (a new AI take of that shot). */
+  aiVideo?: boolean;
 }) {
   const [edl, setEdl] = useState<Edl>(initialEdl);
   const [selection, setSelection] = useState<Selection>(null);
@@ -415,6 +425,97 @@ export function Editor({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selection, submitOp, stepFrame, undo, redo]);
 
+  // ── Regenerate one clip (AI videos) ─────────────────────────────────
+  // The server makes the new take and swaps it into edl.json itself (see
+  // api/jobs/[jobId]/regenerate-clip); this asks the price first, then polls
+  // and loads the swapped document, pushing the old one onto undo so the
+  // previous take is one ⌘Z away.
+  const [regenBusy, setRegenBusy] = useState<string[]>([]);
+
+  const loadServerEdl = useCallback(async () => {
+    const res = await fetch(`/api/jobs/${jobId}/edl`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "could not reload the timeline");
+    return data.edl as Edl;
+  }, [jobId]);
+
+  const regenerateClip = useCallback(
+    async (clipId: string) => {
+      setError(null);
+      try {
+        const quote = await fetch(`/api/jobs/${jobId}/regenerate-clip`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clipId }),
+        });
+        const q = await quote.json();
+        if (!quote.ok) throw new Error(q.error ?? "could not price the new take");
+        const ok = window.confirm(
+          `Make a new AI take of this shot?\n\nIt costs about $${Number(q.estimateUsd).toFixed(2)} and takes a few minutes. Only this clip changes; your other edits stay, and undo brings the old take back.`,
+        );
+        if (!ok) return;
+        const start = await fetch(`/api/jobs/${jobId}/regenerate-clip`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clipId, confirm: true }),
+        });
+        if (!start.ok) throw new Error((await start.json()).error ?? "could not start the new take");
+        setRegenBusy((b) => (b.includes(clipId) ? b : [...b, clipId]));
+      } catch (err) {
+        setError((err as Error).message);
+      }
+    },
+    [jobId],
+  );
+
+  // Picks up takes already running when the page (re)loads.
+  useEffect(() => {
+    if (!aiVideo) return;
+    fetch(`/api/jobs/${jobId}/regenerate-clip`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { clips: Record<string, RegenStatus> } | null) => {
+        if (!data) return;
+        const running = Object.entries(data.clips).filter(([, s]) => s.status === "running").map(([id]) => id);
+        if (running.length) setRegenBusy(running);
+      })
+      .catch(() => {
+        // Nothing to resume is the common case; a failed check just means
+        // a take that is still running won't show its spinner.
+      });
+  }, [aiVideo, jobId]);
+
+  const edlRef = useRef(edl);
+  edlRef.current = edl;
+  useEffect(() => {
+    if (regenBusy.length === 0) return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/regenerate-clip`);
+        if (!res.ok) return;
+        const { clips } = (await res.json()) as { clips: Record<string, RegenStatus> };
+        const finished = regenBusy.filter((id) => clips[id] && clips[id].status !== "running");
+        if (finished.length === 0) return;
+        const failed = finished.map((id) => clips[id]).find((c) => c.status === "error");
+        if (failed) setError(`Regenerate failed: ${failed.error ?? "unknown error"}`);
+        if (finished.some((id) => clips[id].status === "done")) {
+          const next = await loadServerEdl();
+          setUndoStack((st) => [...st.slice(-(MAX_HISTORY - 1)), edlRef.current]);
+          setRedoStack([]);
+          setEdl(next);
+        }
+        setRegenBusy((b) => b.filter((id) => !finished.includes(id)));
+      } catch {
+        // A missed poll is retried on the next tick.
+      }
+    }, REGEN_POLL_MS);
+    return () => clearInterval(timer);
+  }, [regenBusy, jobId, loadServerEdl]);
+
+  const regenerateProp = useMemo(
+    () => (aiVideo ? { busyIds: regenBusy, onRegenerate: regenerateClip } : undefined),
+    [aiVideo, regenBusy, regenerateClip],
+  );
+
   const jumpTo = (sel: Selection, tlInSec: number) => {
     setSelection(sel);
     seekToSec(tlInSec);
@@ -619,6 +720,7 @@ export function Editor({
             onSeek={seekToSec}
             onOp={submitOp}
             onUpload={uploadMedia}
+            regenerate={regenerateProp}
           />
         </div>
       </div>

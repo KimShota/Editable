@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ClipWaveform } from "./ClipWaveform";
+import { RegenerateIcon } from "./Icons";
 import type { SnapResult } from "./snapping";
 
 /**
@@ -44,6 +45,7 @@ export function TimelineClip({
   onCommitTrim,
   snap,
   onSnapGuide,
+  action,
 }: {
   left: number;
   width: number;
@@ -101,6 +103,10 @@ export function TimelineClip({
   /** Reports the snapped-to second up to the timeline, which draws the one
    *  shared guide line across every track. Null clears it. */
   onSnapGuide?: (sec: number | null) => void;
+  /** A one-click action on the clip itself (an AI video's "regenerate this
+   *  shot"): a small button in the clip's corner, shown on hover or while
+   *  it runs. It never starts a drag or changes the selection. */
+  action?: { title: string; busy: boolean; onClick: () => void };
 }) {
   const [dragPx, setDragPx] = useState(0);
   // Vertical offset during a live "move" drag only — trim never changes
@@ -270,6 +276,25 @@ export function TimelineClip({
         <p className="relative truncate text-[10px] leading-tight text-white/70">
           {sublabel}
         </p>
+      )}
+
+      {action && (
+        <button
+          type="button"
+          title={action.busy ? "Generating a new take…" : action.title}
+          aria-label={action.title}
+          disabled={action.busy}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            action.onClick();
+          }}
+          className={`absolute top-1 right-3 z-10 flex h-5 w-5 items-center justify-center rounded-md bg-black/55 text-white transition-opacity hover:bg-black/80 ${
+            action.busy ? "opacity-100" : selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          }`}
+        >
+          <RegenerateIcon className={`h-3.5 w-3.5 ${action.busy ? "animate-spin" : ""}`} />
+        </button>
       )}
 
       {!locked && onCommitTrim && trimEdges.includes("in") && (

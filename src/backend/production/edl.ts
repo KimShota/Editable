@@ -156,3 +156,30 @@ export const compileEdl = (args: {
     diagnostics,
   } as Edl;
 };
+
+/**
+ * A regenerated shot into an EDL someone may already have edited: every
+ * main-track segment cut from that shot (`blockId`, several after a split)
+ * keeps its place and length on the timeline and its offset into the shot;
+ * only the source changes. Everything else (titles, captions, trims of
+ * other clips, music) is untouched.
+ */
+export const swapShotClip = (edl: Edl, shotId: string, clip: MadeClip): Edl => {
+  const segments = edl.video.filter((v) => v.blockId === shotId).sort((a, b) => a.tlInSec - b.tlInSec);
+  if (segments.length === 0) throw new Error(`edl: no clip of shot ${shotId} on the timeline`);
+  const start = segments[0].tlInSec;
+  const span = segments[segments.length - 1].tlOutSec - start;
+  const rate = clip.rate ?? 1;
+  const available = clip.durationSec - clip.inSec;
+  const speed = available >= span * rate ? rate : available / span;
+  const ids = new Set(segments.map((s) => s.id));
+  return {
+    ...edl,
+    video: edl.video.map((v) => {
+      if (!ids.has(v.id)) return v;
+      const srcInSec = clip.inSec + (v.tlInSec - start) * speed;
+      return { ...v, src: clip.src, srcInSec, srcOutSec: srcInSec + (v.tlOutSec - v.tlInSec) * speed, srcDurationSec: clip.durationSec, speed };
+    }),
+    assets: { ...edl.assets, [clip.src]: clip.file },
+  };
+};

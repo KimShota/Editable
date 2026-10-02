@@ -148,6 +148,9 @@ type ClipView = {
    *  the one thing that can land on the main reel; every other clip only
    *  ever moves between layers of its own kind. */
   family: DragFamily;
+  /** See TimelineClip's own `action` prop (only an AI video's main-track
+   *  clips have one: regenerate that shot). */
+  action?: { title: string; busy: boolean; onClick: () => void };
 };
 
 /** The four EDL arrays a free-floating clip can live in — what ops and
@@ -531,6 +534,7 @@ function TrackRow({
               }
               snap={snap}
               onSnapGuide={onSnapGuide}
+              action={c.action}
             />
           );
         })}
@@ -860,6 +864,7 @@ export function Timeline({
   onSeek,
   onOp,
   onUpload,
+  regenerate,
 }: {
   edl: Edl;
   selection: Selection;
@@ -867,6 +872,9 @@ export function Timeline({
   currentTimeSec: number;
   onSeek: (sec: number) => void;
   onOp: (op: TimelineOp) => void;
+  /** AI videos only: a Regenerate button on every main-track clip.
+   *  `busyIds` are the clips generating right now. */
+  regenerate?: { busyIds: string[]; onRegenerate: (clipId: string) => void };
   /** A file dragged straight from the desktop onto the timeline — same
    *  upload path as the media panel's Import, with the drop's own time
    *  and layer instead of the playhead. */
@@ -1113,8 +1121,11 @@ export function Timeline({
         waveformInSec: v.srcInSec,
         waveformOutSec: v.srcOutSec,
         family: "video" as const,
+        action: regenerate
+          ? { title: "Regenerate this shot (new AI take)", busy: regenerate.busyIds.includes(v.id), onClick: () => regenerate.onRegenerate(v.id) }
+          : undefined,
       })),
-    [edl.video, edl.jobId],
+    [edl.video, edl.jobId, regenerate],
   );
 
   const overlayClips: ClipView[] = useMemo(

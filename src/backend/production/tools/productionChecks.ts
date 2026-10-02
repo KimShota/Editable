@@ -3,7 +3,7 @@ import type { AdaptedScript, RecreationSpec } from "../../recreation/schemas";
 import { makeChecker } from "../../tools/checks";
 import { wordsFromAlignment } from "../../voice/elevenlabs";
 import { planClip, requestSeconds } from "../clips";
-import { captionGroups, compileEdl, type MadeClip } from "../edl";
+import { captionGroups, compileEdl, type MadeClip, swapShotClip } from "../edl";
 import { seedanceUsd } from "../higgsfield";
 import { buildTimeline, MIN_SHOT_SEC } from "../timeline";
 
@@ -108,6 +108,14 @@ const main = () => {
   t.check("on-screen text is an editable overlay, not burned in", edl.overlays.length === 1 && edl.overlays[0].component === "TextOverlay" && edl.overlays[0].params.text === "HOOK");
   t.check("captions are editable groups", edl.captions.length === 4 && edl.captionStyle?.params.position === "center");
   t.check("every file is staged", Object.keys(edl.assets).length === 5 && edl.assets["jobs/j/s0.mp4"] === "/abs/s0.mp4");
+  // Regenerating one shot inside an edited timeline.
+  const edited = { ...edl, overlays: [{ ...edl.overlays[0], params: { text: "EDITED" } }], video: [edl.video[0], { ...edl.video[1], id: "s1a", tlOutSec: 2 }, { ...edl.video[1], id: "s1b", tlInSec: 2 }, edl.video[2]] };
+  const swapped = swapShotClip(edited, "s1", clip("s1.v2", 5, 0.5));
+  t.check("a regenerated shot replaces every piece of that shot", swapped.video.filter((v) => v.src === "jobs/j/s1.v2.mp4").map((v) => v.id).join() === "s1a,s1b");
+  t.check("pieces keep their place on the timeline and continue through the new take", swapped.video[1].tlInSec === edited.video[1].tlInSec && near(swapped.video[1].srcInSec, 0.5, 1e-9) && near(swapped.video[2].srcInSec, 0.5 + (2 - edited.video[1].tlInSec), 1e-9));
+  t.check("other shots and every edit stay as they were", swapped.video[0] === edited.video[0] && swapped.overlays[0].params.text === "EDITED" && swapped.assets["jobs/j/s1.v2.mp4"] === "/abs/s1.v2.mp4" && swapped.assets["jobs/j/s1.mp4"] !== undefined);
+  t.throws("a shot that is not on the timeline is an error", () => swapShotClip(edl, "s9", clip("s9", 3)), /no clip of shot s9/);
+
   t.throws("a missing clip is an error", () => compileEdl({ jobId: "j", script, spec, timeline: tl, clips: new Map(), voice: new Map() }), /no clip/);
 
   t.finish("production");

@@ -31,7 +31,7 @@ export default async function EditPage({ params }: { params: Promise<{ jobId: st
 
   return (
     <div className="fixed inset-0 z-10">
-      <Editor jobId={jobId} formatName={formatName} initialEdl={edl} />
+      <Editor jobId={jobId} formatName={formatName} initialEdl={edl} aiVideo={manifest.format === AI_VIDEO_FORMAT} />
     </div>
   );
 }
