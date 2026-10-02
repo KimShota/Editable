@@ -393,7 +393,9 @@ const publishToEditor = (c: Ctx) => {
 const renderVideo = async (c: Ctx, args: string[]) => {
   const timeline = (await readJson(c.k.timeline, "timeline")) as Timeline;
   const records = (await readJson(c.k.clips, "clips")) as Record<string, ClipRecord>;
-  const prefix = `jobs/${c.jobId}`;
+  // Under generated/: the app only serves a job's assets/, generated/ and
+  // derived/ folders (next.config.mjs rewrite, previewAssets.ts allow-list).
+  const prefix = `jobs/${c.jobId}/generated`;
   const made = new Map<string, MadeClip>();
   for (const shot of c.script.shots) {
     const r = records[shot.shotId];
