@@ -20,6 +20,9 @@ export type MadeClip = {
   durationSec: number;
   /** Where in the clip the shot starts (a lip-synced clip's speech offset). */
   inSec: number;
+  /** How fast the clip plays (a lip-synced clip whose speech the model
+   *  stretched plays faster to land on our voice); 1 when absent. */
+  rate?: number;
 };
 
 export type VoiceFile = { src: string; file: string; durationSec: number };
@@ -75,15 +78,19 @@ export const compileEdl = (args: {
 }): Edl => {
   const { jobId, script, timeline, clips, voice } = args;
   const assets: Record<string, string> = {};
+  const diagnostics: string[] = [];
 
   const video = timeline.shots.map((t) => {
     const clip = clips.get(t.shotId);
     if (!clip) throw new Error(`edl: no clip for ${t.shotId}`);
     assets[clip.src] = clip.file;
     const len = t.tlOutSec - t.tlInSec;
+    const rate = clip.rate ?? 1;
     const available = clip.durationSec - clip.inSec;
-    // A clip shorter than its shot plays a little slower instead of freezing.
-    const speed = available >= len ? 1 : Math.max(0.5, available / len);
+    // A clip shorter than its shot plays slower instead of freezing, but
+    // never past its usable end (a green-screen clip's clean part).
+    const speed = available >= len * rate ? rate : available / len;
+    if (speed < 0.5) diagnostics.push(`${t.shotId}: only ${available.toFixed(2)}s of usable clip for a ${len.toFixed(2)}s shot (plays at ${speed.toFixed(2)}x)`);
     return {
       id: t.shotId,
       blockId: t.shotId,
@@ -145,6 +152,6 @@ export const compileEdl = (args: {
     music: [],
     tracks: [],
     assets,
-    diagnostics: [],
+    diagnostics,
   } as Edl;
 };

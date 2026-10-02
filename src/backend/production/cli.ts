@@ -24,7 +24,8 @@ import {
   normalize,
   planClip,
   requestSeconds,
-  speechOffset,
+  speechAlign,
+  whisperModel,
   TALKING_MODEL,
   talkingPrompt,
   textCardClip,
@@ -40,7 +41,9 @@ import { buildTimeline, type Timeline } from "./timeline";
  * brands/<brand>/videos/<source>/ and is safe to rerun; --redo regenerates.
  *
  *   npm run produce -- voice  --brand <slug> --source <id> [--tempo 1.25] [--redo]
- *   npm run produce -- clips  --brand <slug> --source <id> [--shots s0,s3] [--redo] [--dry]
+ *   npm run produce -- clips  --brand <slug> --source <id> [--shots s0,s3] [--redo | --regenerate | --new-stills] [--dry]
+ *       --redo rebuilds clips from what the providers already returned (free);
+ *       --regenerate pays for new generations; --new-stills also redraws green-screen stills
  *   npm run produce -- render --brand <slug> --source <id>
  *   npm run produce -- all    --brand <slug> --source <id> [--dry]
  *
@@ -172,7 +175,7 @@ const voice = async (c: Ctx, redo: boolean, tempo: number): Promise<Timeline> =>
 
 // ── clips ──────────────────────────────────────────────────────────────
 
-type ClipRecord = { kind: ClipKind; key: string; durationSec: number; inSec: number; lipSyncMatch?: number };
+type ClipRecord = { kind: ClipKind; key: string; durationSec: number; inSec: number; rate?: number; lipSyncDriftSec?: number };
 
 /** Submit-or-resume: a request id saved before polling means a rerun after a
  *  crash waits for the same generation instead of paying for another. */
@@ -220,19 +223,32 @@ const greenStill = async (c: Ctx, shot: Ctx["script"]["shots"][number]): Promise
     await storage.putBuffer(c.k.green(shot.shotId), bytes);
     const file = await storage.localPath(c.k.green(shot.shotId));
     const g = greenFraction(file);
-    if (g > 0.04) return file;
+    if (g > 0.04) {
+      // Repaint anything the image model drew onto the green (a fake window,
+      // a cursor): the video model would animate it and the key would keep it.
+      await withTmp(async (dir) => {
+        const cleaned = path.join(dir, "clean.png");
+        execFileSync("python3", [greenscreenScript, "--clean-still", file, cleaned], { stdio: ["ignore", "ignore", "inherit"] });
+        await storage.putFile(c.k.green(shot.shotId), cleaned);
+      });
+      return storage.localPath(c.k.green(shot.shotId));
+    }
     console.log(`  ! ${shot.shotId}: green still is only ${(g * 100).toFixed(1)}% green, retrying`);
   }
   throw new Error(`${shot.shotId}: could not get a green-screen still`);
 };
 
-const makeClip = async (c: Ctx, timeline: Timeline, shot: Ctx["script"]["shots"][number], kind: ClipKind): Promise<ClipRecord> => {
+/** `regenerate` false reuses a provider's earlier output (clips/<shot>.raw.mp4)
+ *  when there is one: re-cropping, re-compositing or re-aligning is free. */
+const makeClip = async (c: Ctx, timeline: Timeline, shot: Ctx["script"]["shots"][number], kind: ClipKind, regenerate: boolean): Promise<ClipRecord> => {
   const at = timeline.shots.find((s) => s.shotId === shot.shotId)!;
   const len = at.tlOutSec - at.tlInSec;
   return withTmp(async (dir) => {
     const out = path.join(dir, "clip.mp4");
     let inSec = 0;
-    let lipSyncMatch: number | undefined;
+    let rate: number | undefined;
+    let lipSyncDriftSec: number | undefined;
+    let cleanUntil = Infinity;
 
     if (kind === "footage") {
       const clip = c.footage.clips.find((f) => f.id === shot.footageId)!;
@@ -241,45 +257,54 @@ const makeClip = async (c: Ctx, timeline: Timeline, shot: Ctx["script"]["shots"]
       textCardClip(len, out);
     } else {
       const raw = path.join(dir, "raw.mp4");
+      const reuse = !regenerate && (await storage.exists(c.k.raw(shot.shotId)));
+      if (reuse) fs.copyFileSync(await storage.localPath(c.k.raw(shot.shotId)), raw);
       if (kind === "talking") {
         const still = await storage.localPath(c.k.still(shot.shotId));
         const wav = path.join(dir, "voice.wav");
-        voiceSegment(await storage.localPath(c.k.track), at.tlInSec, at.tlOutSec, wav);
+        voiceSegment(await storage.localPath(c.k.track), at.tlInSec, at.tlOutSec, wav, requestSeconds(kind, len));
         const input = {
           prompt: talkingPrompt(shot, c.character.concept.name),
-          image_urls: [await uploadFile(still)],
-          audio_urls: [await uploadFile(wav)],
+          image_urls: [] as string[],
+          audio_urls: [] as string[],
           duration: requestSeconds(kind, len),
           resolution: "720p",
           aspect_ratio: "9:16",
         };
-        fs.writeFileSync(raw, await generateOnce(c, shot.shotId, TALKING_MODEL, input, "talking_shot"));
-        const sync = speechOffset(raw, wav);
+        if (!reuse) {
+          input.image_urls = [await uploadFile(still)];
+          input.audio_urls = [await uploadFile(wav)];
+          fs.writeFileSync(raw, await generateOnce(c, shot.shotId, TALKING_MODEL, input, "talking_shot"));
+        }
+        const sync = speechAlign(raw, wav, whisperModel(c.script.language));
         inSec = Math.max(0, sync.offsetSec);
-        lipSyncMatch = sync.match;
-        if (sync.match < 0.4) console.log(`  ! ${shot.shotId}: lip-sync match is weak (r=${sync.match.toFixed(2)}); check this shot`);
-      } else {
+        rate = sync.rate;
+        lipSyncDriftSec = sync.driftSec;
+        if (sync.driftSec > 0.12) console.log(`  ! ${shot.shotId}: lips drift ${sync.driftSec.toFixed(2)}s from the voice; check this shot`);
+      } else if (!reuse) {
         const still = kind === "green" ? await greenStill(c, shot) : await storage.localPath(c.k.still(shot.shotId));
         const input = { image_url: await uploadFile(still), prompt: animatePrompt(shot, kind), duration: requestSeconds(kind, len), sound: "off" };
         fs.writeFileSync(raw, await generateOnce(c, shot.shotId, ANIMATE_MODEL, input, kind === "green" ? "device_shot" : "animate_shot"));
       }
-      await storage.putFile(c.k.raw(shot.shotId), raw);
+      if (!reuse) await storage.putFile(c.k.raw(shot.shotId), raw);
       if (kind === "green") {
         const clip = c.footage.clips.find((f) => f.id === shot.footageId)!;
         const comp = path.join(dir, "comp.mp4");
-        execFileSync("python3", [greenscreenScript, raw, await storage.localPath(clip.key), String(clip.startSec), String(clip.endSec), comp], { stdio: ["ignore", "inherit", "inherit"] });
+        const report = execFileSync("python3", [greenscreenScript, raw, await storage.localPath(clip.key), String(clip.startSec), String(clip.endSec), comp], { stdio: ["ignore", "pipe", "inherit"] }).toString();
         normalize(comp, out);
+        cleanUntil = Number(report.match(/clean_until_sec ([\d.]+)/)?.[1] ?? Infinity);
+        if (cleanUntil < len) console.log(`  ! ${shot.shotId}: the model drew on the screen from ${cleanUntil.toFixed(1)}s; only the clean part plays (slowed to fit)`);
       } else {
-        normalize(raw, out);
+        normalize(raw, out, kind === "talking" ? 1 : 0);
       }
     }
     await storage.putFile(c.k.clip(shot.shotId), out);
-    return { kind, key: c.k.clip(shot.shotId), durationSec: durationOf(out), inSec, lipSyncMatch };
+    return { kind, key: c.k.clip(shot.shotId), durationSec: Math.min(durationOf(out), cleanUntil), inSec, rate, lipSyncDriftSec };
   });
 };
 
 /** What the not-yet-made clips would cost, without spending anything. */
-const estimate = async (c: Ctx, timeline: Timeline, todo: { shot: Ctx["script"]["shots"][number]; kind: ClipKind }[]): Promise<number> => {
+const estimate = async (c: Ctx, timeline: Timeline, todo: { shot: Ctx["script"]["shots"][number]; kind: ClipKind }[], newStills: boolean): Promise<number> => {
   let total = 0;
   for (const { shot, kind } of todo) {
     const at = timeline.shots.find((s) => s.shotId === shot.shotId)!;
@@ -287,7 +312,7 @@ const estimate = async (c: Ctx, timeline: Timeline, todo: { shot: Ctx["script"][
     let usd = 0;
     if (kind === "talking") usd = seedanceUsd({ resolution: "720p", aspect_ratio: "9:16", duration: secs });
     if (kind === "animate" || kind === "green") usd = await estimateUsd(ANIMATE_MODEL, { image_url: "https://example.com/x.png", prompt: "x", duration: secs, sound: "off" });
-    if (kind === "green" && !(await storage.exists(c.k.green(shot.shotId)))) usd += 0.134;
+    if (kind === "green" && (newStills || !(await storage.exists(c.k.green(shot.shotId))))) usd += 0.134;
     total += usd;
     console.log(`  ${shot.shotId.padEnd(4)} ${kind.padEnd(8)} ${(at.tlOutSec - at.tlInSec).toFixed(1).padStart(4)}s → ${secs}s  $${usd.toFixed(2)}`);
   }
@@ -298,7 +323,9 @@ const estimate = async (c: Ctx, timeline: Timeline, todo: { shot: Ctx["script"][
 const clips = async (c: Ctx, args: string[]) => {
   const timeline = (await readJson(c.k.timeline, "timeline (run voice first)")) as Timeline;
   const only = option(args, "--shots")?.split(",");
-  const redo = args.includes("--redo");
+  const newStills = args.includes("--new-stills");
+  const regenerate = newStills || args.includes("--regenerate");
+  const redo = regenerate || args.includes("--redo");
   const records: Record<string, ClipRecord> = (await storage.exists(c.k.clips)) ? ((await readJson(c.k.clips, "clips")) as Record<string, ClipRecord>) : {};
 
   const todo: { shot: Ctx["script"]["shots"][number]; kind: ClipKind }[] = [];
@@ -309,17 +336,24 @@ const clips = async (c: Ctx, args: string[]) => {
     if ((kind === "talking" || kind === "animate") && !(await storage.exists(c.k.still(shot.shotId)))) {
       throw new Error(`${shot.shotId} needs its storyboard still: run npm run recreate -- storyboard first`);
     }
-    if (redo) await storage.remove(c.k.request(shot.shotId));
     todo.push({ shot, kind });
   }
   console.log(`${todo.length} clip(s) to make:`);
-  await estimate(c, timeline, todo);
+  const paid: typeof todo = [];
+  for (const t of todo) if (regenerate || !(await storage.exists(c.k.raw(t.shot.shotId)))) paid.push(t);
+  await estimate(c, timeline, paid, newStills);
   if (args.includes("--dry")) return;
+  if (regenerate) {
+    for (const { shot } of todo) {
+      await storage.remove(c.k.request(shot.shotId));
+      if (newStills) await storage.remove(c.k.green(shot.shotId));
+    }
+  }
 
   const failed: string[] = [];
   const run = async ({ shot, kind }: (typeof todo)[number]) => {
     try {
-      records[shot.shotId] = await makeClip(c, timeline, shot, kind);
+      records[shot.shotId] = await makeClip(c, timeline, shot, kind, regenerate);
       await writeJson(c.k.clips, records);
       console.log(`  ✔ ${shot.shotId} ${kind}`);
     } catch (err) {
@@ -342,7 +376,7 @@ const renderVideo = async (c: Ctx) => {
   for (const shot of c.script.shots) {
     const r = records[shot.shotId];
     if (!r) throw new Error(`no clip for ${shot.shotId}: run clips first`);
-    made.set(shot.shotId, { src: `${prefix}/clips/${shot.shotId}.mp4`, file: await storage.localPath(r.key), durationSec: r.durationSec, inSec: r.inSec });
+    made.set(shot.shotId, { src: `${prefix}/clips/${shot.shotId}.mp4`, file: await storage.localPath(r.key), durationSec: r.durationSec, inSec: r.inSec, rate: r.rate });
   }
   const voiceFiles = new Map<number, VoiceFile>();
   for (const l of timeline.lines) {

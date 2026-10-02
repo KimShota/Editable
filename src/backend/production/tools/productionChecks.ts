@@ -101,7 +101,9 @@ const main = () => {
   );
   t.check("every shot is its own muted clip on the main track", edl.video.length === 3 && edl.video.every((v) => v.muted));
   t.check("a lip-synced clip plays from its speech offset", edl.video[0].srcInSec === 0.2 && near(edl.video[0].srcOutSec, 0.2 + 1, 1e-9));
-  t.check("a clip shorter than its shot slows down instead of freezing", edl.video[1].speed < 1 && edl.video[1].speed >= 0.5, String(edl.video[1].speed));
+  t.check("a clip shorter than its shot slows down instead of freezing", edl.video[1].speed < 1, String(edl.video[1].speed));
+  t.check("a short clip is never read past its usable end", near(edl.video[1].srcOutSec, 0.9, 1e-9), String(edl.video[1].srcOutSec));
+  t.check("a very slow clip is flagged", edl.diagnostics.some((d) => d.startsWith("s1:")), edl.diagnostics.join("; "));
   t.check("every line is its own voice clip", edl.voiceovers.map((v) => `${v.id}@${v.tlInSec}`).join() === "line-0@0,line-1@2.08");
   t.check("on-screen text is an editable overlay, not burned in", edl.overlays.length === 1 && edl.overlays[0].component === "TextOverlay" && edl.overlays[0].params.text === "HOOK");
   t.check("captions are editable groups", edl.captions.length === 4 && edl.captionStyle?.params.position === "center");

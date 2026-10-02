@@ -31,7 +31,8 @@ const ordinal = ["image 1", "image 2", "image 3", "image 4"];
 /** The display of a green-screen frame: real footage is keyed onto it later
  *  (production/greenscreen.py), so it must be flat green edge to edge. */
 export const GREEN_SCREEN =
-  "The laptop's entire display is a flat, solid, evenly lit chroma-key green (#00FF00) from edge to edge: no windows, menu bar, dock, text, glare or reflections on it. The whole screen and its bezel stay fully visible.";
+  "The laptop's entire display is a flat, solid, evenly lit chroma-key green (#00FF00) from edge to edge: no windows, menu bar, dock, text, glare or reflections on it. The whole screen and its bezel stay fully visible. " +
+  "The green gives off no light: hands, skin, keyboard, trackpad and everything else keep their natural neutral colours, with no green tint or reflection anywhere.";
 
 export const framePrompt = (
   shot: AdaptedScript["shots"][number],
