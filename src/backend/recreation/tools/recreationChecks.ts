@@ -2,6 +2,7 @@ import type { VideoAnalysis } from "../../analysis/schemas";
 import { makeChecker } from "../../tools/checks";
 import { assembleSpec, buildDecompositionText, type Keyframe, keyframeTimes, sourceIdFromUrl } from "../decompose";
 import { assembleScript, buildAdaptText } from "../adapt";
+import { boardHtml, planFrames } from "../storyboard";
 import { type Adaptation, AdaptedScriptSchema, type Decomposition, type ProductFootage, RecreationSpecSchema } from "../schemas";
 
 /**
@@ -146,6 +147,30 @@ const main = () => {
   const prompt = buildAdaptText(spec, intake, character, footage, { keep: [0], cta: "SHOGUN" });
   t.check("adapt prompt marks kept lines and lists the footage", prompt.includes('[0] hook · 1 words · 0.0s · KEEP VERBATIM: "Stop"') && prompt.includes("draft (3.0s)"));
   t.check("adapt prompt names the skeleton and the keyword", prompt.includes("indices 0-3") && prompt.includes("s0, s1, s2") && prompt.includes('"SHOGUN"'));
+
+  // Storyboard frames.
+  const locked = {
+    ...character,
+    baseImageKey: "base",
+    sheet: { front: "front.png", with_prop: "prop.png" },
+  } as unknown as Parameters<typeof planFrames>[2];
+  const boardScript = AdaptedScriptSchema.parse({
+    ...script,
+    shots: [
+      { ...script.shots[0], treatment: "character_talking", footageId: null },
+      { ...script.shots[1], treatment: "screen_fill", footageId: "draft" },
+      { ...script.shots[2], treatment: "device_closeup", footageId: "draft" },
+    ],
+  });
+  const plans = planFrames(boardScript, spec, locked, (id) => `f/${id}.jpg`);
+  t.check("product footage that fills the frame is not generated", plans[1].mode === "footage");
+  const talk = plans[0].mode === "generate" ? plans[0] : null;
+  t.check("a talking shot uses the front view and the source composition", talk?.refs.map((r) => `${r.role}:${r.key}`).join() === "character:front.png,composition:k0");
+  const close = plans[2].mode === "generate" ? plans[2] : null;
+  t.check("a device close-up shows the real footage on screen", close?.refs[close.refs.length - 1]?.key === "f/draft.jpg" && /screen in image 2/.test(close?.prompt ?? ""), close?.prompt);
+  t.check("prompts never let the composition ref leak its person", /Do not copy its person/.test(talk?.prompt ?? ""));
+  const html = boardHtml({ ...boardScript, angle: "<b>x</b>" }, (id) => (id === "s0" ? "s0.png" : null));
+  t.check("the board escapes text and marks missing stills", html.includes("&lt;b&gt;x&lt;/b&gt;") && html.includes('src="s0.png"') && html.includes("no still"));
 
   t.finish("recreation");
 };

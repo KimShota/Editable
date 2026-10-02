@@ -10,7 +10,10 @@ import { extractFrame } from "../pipeline/shotDetect";
 import { getStorage } from "../storage";
 import { BrandIntakeSchema } from "../brand/intake/schemas";
 import { LockedCharacterSchema } from "../character/schemas";
+import { googleImageCostEntry } from "../cost/ledger";
+import { GEMINI_IMAGE_MODEL, generateImage } from "../pipeline/generation/geminiImage";
 import { adapt, assembleScript } from "./adapt";
+import { boardHtml, type FramePlan, planFrames } from "./storyboard";
 import { assembleSpec, decompose, type Keyframe, keyframeTimes, type SourceMeta, sourceIdFromUrl } from "./decompose";
 import { type AdaptedScript, AdaptedScriptSchema, ProductFootageSchema, type RecreationSpec, RecreationSpecSchema } from "./schemas";
 
@@ -32,9 +35,10 @@ import { type AdaptedScript, AdaptedScriptSchema, ProductFootageSchema, type Rec
  *   npm run recreate -- show   --brand <slug> [--source <id>]
  *   npm run recreate -- adapt  --brand <slug> [--source <id> [--keep 0,3]] [--cta WORD] [--direction "…"]
  *   npm run recreate -- script --brand <slug> [--source <id>]     (print adapted scripts)
+ *   npm run recreate -- storyboard --brand <slug> --source <id> [--shots s0,s3] [--redo] [--set "…"]
  */
 
-const USAGE = "usage: npm run recreate -- <ingest|spec|show|adapt|script> --brand <slug> [options]  (see cli.ts)";
+const USAGE = "usage: npm run recreate -- <ingest|spec|show|adapt|script|storyboard> --brand <slug> [options]  (see cli.ts)";
 
 const option = (args: string[], name: string): string | undefined => {
   const i = args.indexOf(name);
@@ -63,6 +67,7 @@ const keys = (brand: string) => {
     intake: `brands/${brand}/intake.json`,
     character: `brands/${brand}/character/character.json`,
     footage: `brands/${brand}/product/footage.json`,
+    board: (id: string) => `brands/${brand}/storyboards/${id}`,
   };
 };
 
@@ -208,6 +213,68 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
     for (const id of await sourceIds(brand, option(args, "--source"))) {
       if (await storage.exists(k.script(id))) printScript(AdaptedScriptSchema.parse(await readJson(k.script(id), "script")));
     }
+  },
+
+  storyboard: async (args) => {
+    const brand = required(args, "--brand");
+    const id = required(args, "--source");
+    const k = keys(brand);
+    const dir = k.board(id);
+    const script = AdaptedScriptSchema.parse(await readJson(k.script(id), "adapted script (run adapt first)"));
+    const spec = RecreationSpecSchema.parse(await readJson(k.spec(id), "spec"));
+    const character = LockedCharacterSchema.parse(await readJson(k.character, "locked character"));
+    const footage = ProductFootageSchema.parse(await readJson(k.footage, "product footage"));
+    const only = option(args, "--shots")?.split(",");
+    const redo = args.includes("--redo");
+
+    // One frame from the middle of every footage clip the script uses.
+    const footageKey = (clipId: string) => `${dir}/footage/${clipId}.jpg`;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "katalab-board-"));
+    try {
+      for (const clipId of new Set(script.shots.flatMap((s) => (s.footageId ? [s.footageId] : [])))) {
+        if (await storage.exists(footageKey(clipId))) continue;
+        const clip = footage.clips.find((c) => c.id === clipId)!;
+        const out = path.join(tmp, `${clipId}.jpg`);
+        if (!extractFrame(await storage.localPath(clip.key), (clip.startSec + clip.endSec) / 2, out, 1600)) throw new Error(`could not extract a frame of ${clipId}`);
+        await storage.putFile(footageKey(clipId), out);
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+
+    const plans = planFrames(script, spec, character, footageKey, option(args, "--set"));
+    const stillKey = (shotId: string) => `${dir}/${shotId}.png`;
+    const todo: Extract<FramePlan, { mode: "generate" }>[] = [];
+    for (const p of plans) {
+      if (p.mode !== "generate" || (only && !only.includes(p.shotId))) continue;
+      if (!redo && (await storage.exists(stillKey(p.shotId)))) continue;
+      todo.push(p);
+    }
+    console.log(`${todo.length} still(s) to generate (${plans.filter((p) => p.mode === "footage").length} shots use footage frames)`);
+
+    // A few at a time; one failed shot is reported, not fatal.
+    const failed: string[] = [];
+    const run = async (p: (typeof todo)[number]) => {
+      try {
+        const refPaths = await Promise.all(p.refs.map((r) => storage.localPath(r.key)));
+        const bytes = await generateImage(p.prompt, refPaths, refPaths.length, { aspectRatio: "9:16", imageSize: "2K" });
+        await consoleSink(googleImageCostEntry(GEMINI_IMAGE_MODEL, 1, "storyboard_frame", { ref: `${brand}/${id}/${p.shotId}` }));
+        await storage.putBuffer(stillKey(p.shotId), bytes);
+        console.log(`  ✔ ${p.shotId}`);
+      } catch (err) {
+        failed.push(p.shotId);
+        console.log(`  ✘ ${p.shotId}: ${err instanceof Error ? err.message.slice(0, 300) : err}`);
+      }
+    };
+    for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map(run));
+
+    const images = new Map<string, string>();
+    for (const p of plans) {
+      if (p.mode === "footage") images.set(p.shotId, `footage/${p.footageId}.jpg`);
+      else if (p.mode === "generate" && (await storage.exists(stillKey(p.shotId)))) images.set(p.shotId, `${p.shotId}.png`);
+    }
+    await storage.putBuffer(`${dir}/board.html`, Buffer.from(boardHtml(script, (shotId) => images.get(shotId) ?? null)));
+    console.log(`board: ${await storage.localPath(`${dir}/board.html`)}${failed.length ? `\nfailed: ${failed.join(",")} (rerun with --shots ${failed.join(",")})` : ""}`);
   },
 };
 
