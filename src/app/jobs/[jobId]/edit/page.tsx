@@ -3,6 +3,7 @@ import path from "node:path";
 import { notFound, redirect } from "next/navigation";
 import { jobExists, jobDir, readJobManifest } from "../../../lib/jobs";
 import { loadFormat } from "@backend/pipeline/loader";
+import { AI_VIDEO_FORMAT } from "@backend/production/format";
 import { artifactsDir } from "@backend/pipeline/paths";
 import { stageAssets } from "@backend/pipeline/render";
 import { readOrMigrateEdl } from "@backend/pipeline/orchestrate";
@@ -18,7 +19,8 @@ export default async function EditPage({ params }: { params: Promise<{ jobId: st
   }
 
   const manifest = readJobManifest(jobId);
-  const format = loadFormat(manifest.format);
+  // An AI video has no template behind it: its edl.json is the whole video.
+  const formatName = manifest.format === AI_VIDEO_FORMAT ? "AI video" : loadFormat(manifest.format).name;
   // Migration-safe: backfills clip ids via one reassemble if this edl.json
   // predates the timeline-ops schema, then edl.json is the source of
   // truth from here on — the editor never re-derives from the format again.
@@ -29,7 +31,7 @@ export default async function EditPage({ params }: { params: Promise<{ jobId: st
 
   return (
     <div className="fixed inset-0 z-10">
-      <Editor jobId={jobId} formatName={format.name} initialEdl={edl} />
+      <Editor jobId={jobId} formatName={formatName} initialEdl={edl} />
     </div>
   );
 }

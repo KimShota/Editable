@@ -6,7 +6,7 @@ import path from "node:path";
 import { LockedCharacterSchema } from "../character/schemas";
 import { consoleSink, googleImageCostEntry } from "../cost/ledger";
 import { GEMINI_IMAGE_MODEL, generateImage } from "../pipeline/generation/geminiImage";
-import { artifactsDir } from "../pipeline/paths";
+import { artifactsDir, repoRoot } from "../pipeline/paths";
 import { render } from "../pipeline/render";
 import { EdlSchema } from "../pipeline/schemas";
 import { AdaptedScriptSchema, ProductFootageSchema, RecreationSpecSchema } from "../recreation/schemas";
@@ -32,6 +32,7 @@ import {
   voiceSegment,
 } from "./clips";
 import { compileEdl, type MadeClip, type VoiceFile } from "./edl";
+import { AI_VIDEO_FORMAT } from "./format";
 import { estimateUsd, generate, seedanceUsd, uploadFile, waitFor, download } from "./higgsfield";
 import { buildTimeline, type Timeline } from "./timeline";
 
@@ -44,7 +45,8 @@ import { buildTimeline, type Timeline } from "./timeline";
  *   npm run produce -- clips  --brand <slug> --source <id> [--shots s0,s3] [--redo | --regenerate | --new-stills] [--dry]
  *       --redo rebuilds clips from what the providers already returned (free);
  *       --regenerate pays for new generations; --new-stills also redraws green-screen stills
- *   npm run produce -- render --brand <slug> --source <id>
+ *   npm run produce -- render --brand <slug> --source <id> [--discard-edits]
+ *       also makes the video a project the app's editor opens (jobs/<brand>-<source>)
  *   npm run produce -- all    --brand <slug> --source <id> [--dry]
  *
  *   voice/line-<i>.tts.mp3/.json each line as ElevenLabs spoke it, with word timings
@@ -368,7 +370,27 @@ const clips = async (c: Ctx, args: string[]) => {
 
 // ── render ─────────────────────────────────────────────────────────────
 
-const renderVideo = async (c: Ctx) => {
+/**
+ * Makes the video a project in the app: jobs/<jobId>/job.json (format
+ * AI_VIDEO_FORMAT, so the editor and the render route take the EDL as the
+ * whole video) and a readable name. Unowned jobs are admin-only (see
+ * middleware.ts), which is right for the founder-run pilot.
+ */
+const publishToEditor = (c: Ctx) => {
+  const dir = path.join(repoRoot, "jobs", c.jobId);
+  fs.mkdirSync(dir, { recursive: true });
+  const manifest = path.join(dir, "job.json");
+  if (!fs.existsSync(manifest)) {
+    fs.writeFileSync(manifest, JSON.stringify({ format: AI_VIDEO_FORMAT, bindings: {}, lexicon: [], language: c.script.language }, null, 2));
+  }
+  const sidecar = path.join(dir, "project.json");
+  if (!fs.existsSync(sidecar)) {
+    const hook = c.script.lines[0].text.split(/\s+/).slice(0, 6).join(" ");
+    fs.writeFileSync(sidecar, JSON.stringify({ name: `${c.brand} · ${hook}…` }, null, 2));
+  }
+};
+
+const renderVideo = async (c: Ctx, args: string[]) => {
   const timeline = (await readJson(c.k.timeline, "timeline")) as Timeline;
   const records = (await readJson(c.k.clips, "clips")) as Record<string, ClipRecord>;
   const prefix = `jobs/${c.jobId}`;
@@ -384,13 +406,28 @@ const renderVideo = async (c: Ctx) => {
     voiceFiles.set(l.index, { src: `${prefix}/voice/line-${l.index}.mp3`, file: await storage.localPath(c.k.line(l.index)), durationSec: v.durationSec });
   }
   const edl = EdlSchema.parse(compileEdl({ jobId: c.jobId, script: c.script, spec: c.spec, timeline, clips: made, voice: voiceFiles }));
-  await writeJson(c.k.edl, edl);
+  for (const d of edl.diagnostics) console.log(`  ! ${d}`);
+
+  // The editor saves its edits to artifacts/<jobId>/edl.json. If that file
+  // is no longer the one this command last produced, someone edited the
+  // video: keep their edits unless told otherwise.
   const dir = artifactsDir(c.jobId);
+  const editorEdl = path.join(dir, "edl.json");
+  if (fs.existsSync(editorEdl) && (await storage.exists(c.k.edl)) && !args.includes("--discard-edits")) {
+    const produced = fs.readFileSync(await storage.localPath(c.k.edl), "utf8");
+    if (fs.readFileSync(editorEdl, "utf8") !== produced) {
+      throw new Error(`the video was edited in the editor (${editorEdl}); rerun with --discard-edits to replace those edits`);
+    }
+  }
+  const json = JSON.stringify(edl, null, 2);
+  await storage.putBuffer(c.k.edl, Buffer.from(json));
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, "edl.json"), JSON.stringify(edl, null, 2));
+  fs.writeFileSync(editorEdl, json);
+  publishToEditor(c);
   const out = render(edl, dir);
   await storage.putFile(c.k.final, out);
   console.log(`\n✔ ${await storage.localPath(c.k.final)} (${edl.durationSec.toFixed(1)}s)`);
+  console.log(`  editor: /jobs/${c.jobId}/edit (admin account)`);
 };
 
 const main = async () => {
@@ -404,7 +441,7 @@ const main = async () => {
   if (!(tempo >= 0.8 && tempo <= 1.6)) throw new Error("--tempo must be between 0.8 and 1.6");
   if (command === "voice" || command === "all") await voice(c, args.includes("--redo") && command === "voice", tempo);
   if (command === "clips" || command === "all") await clips(c, args);
-  if (command === "render" || (command === "all" && !args.includes("--dry"))) await renderVideo(c);
+  if (command === "render" || (command === "all" && !args.includes("--dry"))) await renderVideo(c, args);
 };
 
 main().catch((err) => {

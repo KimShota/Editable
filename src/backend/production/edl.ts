@@ -1,6 +1,7 @@
 import type { Edl } from "../pipeline/types";
 import type { AdaptedScript, RecreationSpec } from "../recreation/schemas";
 import { FPS, HEIGHT, WIDTH } from "./clips";
+import { AI_VIDEO_FORMAT } from "./format";
 import type { Timeline } from "./timeline";
 
 /**
@@ -137,7 +138,7 @@ export const compileEdl = (args: {
 
   return {
     jobId,
-    formatId: `recreation:${script.sourceId}`,
+    formatId: AI_VIDEO_FORMAT,
     fps: FPS,
     width: WIDTH,
     height: HEIGHT,

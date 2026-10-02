@@ -13,6 +13,7 @@ import {
 } from "./schemas";
 import { intake } from "./intake";
 import { loadFormat } from "./loader";
+import { AI_VIDEO_FORMAT } from "../production/format";
 import { applyInserts, generate } from "./generate";
 import { GeneratorChoice } from "./generation";
 import { transcribe } from "./transcribe";
@@ -173,6 +174,17 @@ const main = async () => {
     }
     return schema.parse(JSON.parse(fs.readFileSync(file, "utf8")));
   };
+
+  // An AI video (production/edl.ts) has no format to re-derive from: its
+  // edl.json, as edited in the editor, is rendered as it is.
+  const manifestFile = path.join(args.job, "job.json");
+  if (fs.existsSync(manifestFile) && JSON.parse(fs.readFileSync(manifestFile, "utf8")).format === AI_VIDEO_FORMAT) {
+    if (args.only !== "render") throw new Error(`job "${jobId}" is an AI video: only --only render applies (make it with npm run produce)`);
+    const edl = read("edl", EdlSchema);
+    const outPath = render(edl, dir);
+    console.log(`\n✔ rendered ${path.relative(process.cwd(), outPath)} (${edl.durationSec.toFixed(2)}s, ${edl.width}x${edl.height}@${edl.fps}fps)`);
+    return;
+  }
 
   const wants = (stage: Stage) => !args.only || args.only === stage;
   const stop = (stage: Stage) => args.only === stage || args.stopAfter === stage;
