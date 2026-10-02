@@ -8,8 +8,11 @@ import { VideoAnalysisSchema } from "../analysis/schemas";
 import { consoleSink } from "../cost/ledger";
 import { extractFrame } from "../pipeline/shotDetect";
 import { getStorage } from "../storage";
+import { BrandIntakeSchema } from "../brand/intake/schemas";
+import { LockedCharacterSchema } from "../character/schemas";
+import { adapt, assembleScript } from "./adapt";
 import { assembleSpec, decompose, type Keyframe, keyframeTimes, type SourceMeta, sourceIdFromUrl } from "./decompose";
-import { type RecreationSpec, RecreationSpecSchema } from "./schemas";
+import { type AdaptedScript, AdaptedScriptSchema, ProductFootageSchema, type RecreationSpec, RecreationSpecSchema } from "./schemas";
 
 /**
  * Viral source videos → RecreationSpecs, run by hand in the pilot (M1 day 3).
@@ -20,12 +23,18 @@ import { type RecreationSpec, RecreationSpecSchema } from "./schemas";
  *   keyframes/<id>/s<i>-<k>.jpg   composition references per shot
  *   specs/<id>.json               the RecreationSpec
  *
+ * and, per brand, brands/<brand>/scripts/<id>.json: the spec rewritten for the
+ * brand's product and character (day 4), from brands/<brand>/intake.json,
+ * character/character.json and product/footage.json.
+ *
  *   npm run recreate -- ingest --brand <slug> --url <url> [--url <url> …]
  *   npm run recreate -- spec   --brand <slug> [--source <id>]     (all downloaded sources when omitted)
  *   npm run recreate -- show   --brand <slug> [--source <id>]
+ *   npm run recreate -- adapt  --brand <slug> [--source <id> [--keep 0,3]] [--cta WORD] [--direction "…"]
+ *   npm run recreate -- script --brand <slug> [--source <id>]     (print adapted scripts)
  */
 
-const USAGE = "usage: npm run recreate -- <ingest|spec|show> --brand <slug> [options]  (see cli.ts)";
+const USAGE = "usage: npm run recreate -- <ingest|spec|show|adapt|script> --brand <slug> [options]  (see cli.ts)";
 
 const option = (args: string[], name: string): string | undefined => {
   const i = args.indexOf(name);
@@ -50,6 +59,10 @@ const keys = (brand: string) => {
     analysis: (id: string) => `${root}/analysis/${id}.json`,
     keyframe: (id: string, shot: number, k: number) => `${root}/keyframes/${id}/s${shot}-${k}.jpg`,
     spec: (id: string) => `${root}/specs/${id}.json`,
+    script: (id: string) => `brands/${brand}/scripts/${id}.json`,
+    intake: `brands/${brand}/intake.json`,
+    character: `brands/${brand}/character/character.json`,
+    footage: `brands/${brand}/product/footage.json`,
   };
 };
 
@@ -72,6 +85,11 @@ const readMeta = async (brand: string, id: string): Promise<SourceMeta> => {
     comments: num(info.comment_count),
     views: num(info.view_count),
   };
+};
+
+const readJson = async (key: string, what: string): Promise<unknown> => {
+  if (!(await storage.exists(key))) throw new Error(`no ${what} at ${key}`);
+  return JSON.parse(fs.readFileSync(await storage.localPath(key), "utf8"));
 };
 
 const commands: Record<string, (args: string[]) => Promise<void>> = {
@@ -159,6 +177,49 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
       printSpec(RecreationSpecSchema.parse(JSON.parse(fs.readFileSync(await storage.localPath(k.spec(id)), "utf8"))));
     }
   },
+
+  adapt: async (args) => {
+    const brand = required(args, "--brand");
+    const k = keys(brand);
+    const only = option(args, "--source");
+    const keep = option(args, "--keep")?.split(",").map(Number);
+    if (keep && !only) throw new Error("--keep needs --source: line indices differ per source");
+    const intake = BrandIntakeSchema.parse(await readJson(k.intake, "brand intake"));
+    const character = LockedCharacterSchema.parse(await readJson(k.character, "locked character"));
+    const footage = ProductFootageSchema.parse(await readJson(k.footage, "product footage"));
+    for (const id of await sourceIds(brand, only)) {
+      if (!(await storage.exists(k.spec(id)))) {
+        console.log(`\n${id}: no spec yet, run spec first`);
+        continue;
+      }
+      const spec = RecreationSpecSchema.parse(await readJson(k.spec(id), "spec"));
+      const opts = { keep, cta: option(args, "--cta"), direction: option(args, "--direction") };
+      const { adaptation, model } = await adapt(spec, intake, character, footage, { ...opts, costSink: consoleSink, ref: `${brand}/${id}` });
+      const script = AdaptedScriptSchema.parse(assembleScript(spec, adaptation, footage, { brand, language: intake.language, keep }, model));
+      await storage.putBuffer(k.script(id), Buffer.from(JSON.stringify(script, null, 2)));
+      printScript(script);
+      console.log(`  saved ${k.script(id)}`);
+    }
+  },
+
+  script: async (args) => {
+    const brand = required(args, "--brand");
+    const k = keys(brand);
+    for (const id of await sourceIds(brand, option(args, "--source"))) {
+      if (await storage.exists(k.script(id))) printScript(AdaptedScriptSchema.parse(await readJson(k.script(id), "script")));
+    }
+  },
+};
+
+const printScript = (s: AdaptedScript) => {
+  console.log(`\n== ${s.sourceId} → ${s.brand} · comment ${s.ctaKeyword}\nangle: ${s.angle}`);
+  for (const l of s.lines) console.log(`  [${l.index}] ${l.role.padEnd(7)} ${l.kept ? "(kept) " : ""}"${l.text}"  (${l.wordCount}/${l.sourceWordCount}w)`);
+  for (const sh of s.shots) {
+    const screen = sh.footageId ? ` ▸ footage ${sh.footageId}` : sh.otherScreen ? ` ▸ screen: ${sh.otherScreen}` : "";
+    const text = sh.textOnScreen.map((t) => `"${t.text}"`).join(" ");
+    console.log(`  ${sh.shotId.padEnd(4)} ${sh.treatment.padEnd(21)} ${sh.action}${screen}${text ? `  ${text}` : ""}`);
+  }
+  console.log(`  caption: ${s.postCaption} ${s.hashtags.map((h) => `#${h}`).join(" ")}`);
 };
 
 const printSpec = (s: RecreationSpec) => {

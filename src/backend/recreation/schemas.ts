@@ -118,3 +118,91 @@ export const RecreationSpecSchema = z.object({
   model: z.string(),
 });
 export type RecreationSpec = z.infer<typeof RecreationSpecSchema>;
+
+/**
+ * Real product footage a brand's videos may show, cut into labelled moments.
+ * Any shot that shows the product's UI must point at one of these: the UI is
+ * never generated, because a video model would invent screens the product
+ * doesn't have. Kept at storage key brands/<slug>/product/footage.json.
+ */
+export const ProductFootageSchema = z.object({
+  clips: z.array(
+    z.object({
+      id: z.string(),
+      key: z.string().describe("storage key of the video file"),
+      startSec: z.number(),
+      endSec: z.number(),
+      shows: z.string(),
+    }),
+  ),
+  source: z.string().optional(),
+});
+export type ProductFootage = z.infer<typeof ProductFootageSchema>;
+
+export const ShotTreatmentSchema = z
+  .enum(["character_talking", "character_with_device", "device_closeup", "screen_fill", "broll", "text_card"])
+  .describe(
+    "character_talking: the brand character speaks to camera. character_with_device: the character holds or uses the device, its screen visible. " +
+      "device_closeup: close-up of the device screen with a hand on it (the 'finger on the tablet' shot). screen_fill: the screen recording fills the frame. " +
+      "broll: an atmosphere or illustration shot with no one speaking to camera. text_card: text on a plain background.",
+  );
+
+/** What Claude returns when it rewrites one source video for a brand. */
+export const AdaptationSchema = z.object({
+  angle: z.string().describe("The idea of the adapted video in one sentence."),
+  ctaKeyword: z.string().describe("The single word viewers comment, in capitals."),
+  lines: z
+    .array(z.object({ index: z.number().int(), text: z.string() }))
+    .describe("Exactly one rewritten line per source line, same index, same order."),
+  shots: z
+    .array(
+      z.object({
+        shotId: z.string(),
+        treatment: ShotTreatmentSchema,
+        action: z.string().describe("What the viewer sees in this shot, one sentence, concrete enough to generate or composite."),
+        footageId: z.string().nullable().describe("The product footage clip shown on the device screen, or null when the product UI is not on screen."),
+        otherScreen: z
+          .string()
+          .nullable()
+          .describe("A screen that is NOT the product (e.g. an empty ChatGPT chat, a full inbox), described in a few words; null when none."),
+        textOnScreen: z.array(TextOnScreenSchema),
+      }),
+    )
+    .describe("Exactly one entry per source shot, same shotId, same order."),
+  postCaption: z.string().describe("The caption posted with the video, 1-3 short sentences."),
+  hashtags: z.array(z.string()).describe("Up to 5 hashtags, without #."),
+});
+export type Adaptation = z.infer<typeof AdaptationSchema>;
+
+/** A source video rewritten for a brand: the script the shot pipeline renders. */
+export const AdaptedScriptSchema = z.object({
+  sourceId: z.string(),
+  brand: z.string(),
+  language: z.string(),
+  angle: z.string(),
+  ctaKeyword: z.string(),
+  lines: z.array(
+    z.object({
+      index: z.number().int(),
+      text: z.string(),
+      role: DecompositionSchema.shape.speechLines.element.shape.role,
+      sourceText: z.string(),
+      kept: z.boolean().describe("true when the line is the source line verbatim, by request"),
+      shotIds: z.array(z.string()),
+      wordCount: z.number().int(),
+      sourceWordCount: z.number().int(),
+    }),
+  ),
+  shots: z.array(
+    AdaptationSchema.shape.shots.element.extend({
+      sourceStartSec: z.number(),
+      sourceEndSec: z.number(),
+      sourceKind: ShotKindSchema,
+    }),
+  ),
+  postCaption: z.string(),
+  hashtags: z.array(z.string()),
+  createdAt: z.string(),
+  model: z.string(),
+});
+export type AdaptedScript = z.infer<typeof AdaptedScriptSchema>;
