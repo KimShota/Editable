@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "../../_components/ui";
+import { Button } from "../../../_components/ui";
 
 export function ResendVerificationButton() {
   const [busy, setBusy] = useState(false);

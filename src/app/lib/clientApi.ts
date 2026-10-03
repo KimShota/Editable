@@ -4,7 +4,7 @@
  *  handle. */
 export type ApiResult<T = Record<string, unknown>> = { ok: true; data: T } | { ok: false; status: number; error: string };
 
-export const sendJson = async <T = Record<string, unknown>>(url: string, body: unknown, method: "POST" | "PUT" = "POST"): Promise<ApiResult<T>> => {
+export const sendJson = async <T = Record<string, unknown>>(url: string, body: unknown, method: "POST" | "PUT" | "PATCH" | "DELETE" = "POST"): Promise<ApiResult<T>> => {
   try {
     const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const data = (await res.json().catch(() => ({}))) as T & { error?: string };

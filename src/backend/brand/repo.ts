@@ -8,6 +8,7 @@ import type { Storage } from "../storage";
 import { readJsonIfExists, writeJson } from "../storageJson";
 import { type BrandRef, findBrandForViewer, listBrandsForViewer, type Viewer } from "./access";
 import { type BrandIntake, BrandIntakeSchema } from "./intake/schemas";
+import { addProductAsset, getSettings, listProductAssets, type ProductAsset, removeProductAsset, type Settings, updateSettings } from "./settings";
 import { brandKeys, characterKeys, productionKeys, recreationKeys } from "./keys";
 
 /**
@@ -158,6 +159,35 @@ export class BrandRepo {
   async getVoiceAuditions(slug: string): Promise<VoiceAudition[]> {
     const raw = await readJsonIfExists(this.storage, characterKeys(slug).voicePreviews);
     return raw === null ? [] : VoiceAuditionsSchema.parse(raw);
+  }
+
+  // ---- what the customer can change about their brand ----------------------
+
+  getSettings(slug: string): Promise<Settings> {
+    return getSettings(this.query, slug);
+  }
+
+  updateSettings(slug: string, patch: unknown): Promise<Settings> {
+    return updateSettings(this.query, this.storage, slug, patch);
+  }
+
+  listProductAssets(slug: string): Promise<ProductAsset[]> {
+    return listProductAssets(this.query, slug);
+  }
+
+  addProductAsset(slug: string, input: { kind: string; bytes: Buffer }): Promise<ProductAsset> {
+    return addProductAsset(this.query, this.storage, slug, input);
+  }
+
+  removeProductAsset(slug: string, assetId: string): Promise<boolean> {
+    return removeProductAsset(this.query, this.storage, slug, assetId);
+  }
+
+  /** The workspace a brand belongs to. */
+  async getWorkspace(slug: string): Promise<{ id: string; name: string }> {
+    const rows = await this.query(`select w.id, w.name from workspaces w join brands b on b.workspace_id = w.id where b.slug = $1`, [slug]);
+    if (rows.length === 0) throw new BrandAccessError(slug);
+    return { id: String(rows[0].id), name: String(rows[0].name) };
   }
 
   async getNiche(slug: string): Promise<Niche | null> {

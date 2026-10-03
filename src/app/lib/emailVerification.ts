@@ -1,6 +1,7 @@
 import "server-only";
 import { randomBytes, createHash } from "node:crypto";
-import { sql } from "./db";
+import { claimInvites } from "@backend/brand/members";
+import { query, sql } from "./db";
 import { sendVerificationEmail } from "./email";
 
 /**
@@ -50,5 +51,7 @@ export const consumeVerificationToken = async (token: string): Promise<VerifyRes
     return { ok: false, error: "this verification link has expired — request a new one from your account page" };
   }
   await sql`update users set email_verified_at = now() where id = ${row.user_id}`;
+  // The address is proven now: any workspace that invited it can have them.
+  await claimInvites(query, row.user_id).catch((err) => console.error("claiming workspace invites failed", err));
   return { ok: true };
 };

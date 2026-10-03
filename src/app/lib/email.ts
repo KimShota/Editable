@@ -28,22 +28,6 @@ const resend = (): Resend => {
  *  verified in the Resend dashboard (Domains). */
 const fromAddress = (): string => process.env.RESEND_FROM_EMAIL ?? "Katalab <onboarding@resend.dev>";
 
-export const sendVerificationEmail = async (to: string, verifyUrl: string): Promise<void> => {
-  const { error } = await resend().emails.send({
-    from: fromAddress(),
-    to,
-    subject: "Confirm your Katalab account",
-    html: `
-      <p>Click below to confirm your email and start your free trial:</p>
-      <p><a href="${verifyUrl}">${verifyUrl}</a></p>
-      <p>This link expires in 24 hours. If you didn't sign up for Katalab, you can ignore this email.</p>
-    `,
-  });
-  if (error) {
-    throw new Error(`Resend rejected the verification email: ${error.message}`);
-  }
-};
-
 type Message = { to: string; subject: string; html: string };
 
 /** Sends through Resend, or in the test environment (KATALAB_STUB_PROVIDERS=1)
@@ -59,6 +43,18 @@ const deliver = async (message: Message): Promise<void> => {
   if (error) throw new Error(`Resend rejected the email to ${message.to}: ${error.message}`);
 };
 
+export const sendVerificationEmail = async (to: string, verifyUrl: string): Promise<void> => {
+  await deliver({
+    to,
+    subject: "Confirm your Katalab account",
+    html: `
+      <p>Click below to confirm your email address:</p>
+      <p><a href="${escapeHtml(verifyUrl)}">${escapeHtml(verifyUrl)}</a></p>
+      <p>This link expires in 24 hours. If you didn't sign up for Katalab, you can ignore this email.</p>
+    `,
+  });
+};
+
 const escapeHtml = (text: string): string => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** One email per batch, not per video: the founder just released N videos to review. */
@@ -71,6 +67,33 @@ export const sendVideosReadyEmail = async (to: string, brandName: string, count:
       <p>${count} ${noun} ready for you to review.</p>
       <p>Open the calendar, watch each one, and approve it or tell us what is off.</p>
       <p><a href="${escapeHtml(link)}">Review your videos</a></p>
+    `,
+  });
+};
+
+/** An invitation to join a brand's workspace. Signup is open, so the link is
+ *  the signup page: when the invited address is verified they are in. */
+export const sendInviteEmail = async (to: string, brandName: string, link: string): Promise<void> => {
+  await deliver({
+    to,
+    subject: `You are invited to ${brandName} on Katalab`,
+    html: `
+      <p>You have been invited to review and approve the videos for ${escapeHtml(brandName)}.</p>
+      <p>Create your account with this email address, confirm it, and the brand will be there when you sign in.</p>
+      <p><a href="${escapeHtml(link)}">Create your account</a></p>
+    `,
+  });
+};
+
+/** The first 14 days are planned and waiting for the customer to read and approve. */
+export const sendPlanReadyEmail = async (to: string, brandName: string, link: string): Promise<void> => {
+  await deliver({
+    to,
+    subject: `Your plan for ${brandName} is ready to review`,
+    html: `
+      <p>Your first 14 days of videos for ${escapeHtml(brandName)} are planned.</p>
+      <p>Read each script, change what you like, and approve the ones you want made. Nothing is created until you do.</p>
+      <p><a href="${escapeHtml(link)}">Review your plan</a></p>
     `,
   });
 };

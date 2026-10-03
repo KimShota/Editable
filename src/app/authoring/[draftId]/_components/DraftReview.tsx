@@ -84,7 +84,7 @@ export function DraftReview({ draftId }: { draftId: string }) {
           <pre className="mb-4 max-h-64 overflow-auto rounded-lg bg-black/30 p-3 text-xs whitespace-pre-wrap text-[color:var(--ink-dim)]">
             {resp.error}
           </pre>
-          <Button variant="secondary" onClick={() => (window.location.href = "/reverse-engineer")}>
+          <Button variant="secondary" onClick={() => (window.location.href = "/admin/reverse-engineer")}>
             Try another reel
           </Button>
         </Card>

@@ -15,6 +15,11 @@ import { stubDeps } from "../jobs/stubs";
 import { buildProposalText, pickAlternates, type PoolSource, type ProposeInput, proposalProblems } from "../plan/propose";
 import { parseViralUrl } from "../recreation/viralUrl";
 import { linkBrand } from "../brand/link";
+import { cancelInvite, claimInvites, inviteToWorkspace, listPendingInvites } from "../brand/members";
+import { addProductAsset, getSettings, listProductAssets, removeProductAsset, updateSettings } from "../brand/settings";
+import { checkUpload, MAX_IMAGE_BYTES, sniff, UploadError } from "../brand/uploads";
+import { averageCost, brandLedger, costCsv, readVideoCosts, summarizeCosts, TARGET_USD_PER_VIDEO } from "../brand/costs";
+import { sampleAnalytics } from "../plan/sampleAnalytics";
 import { cardHref, layoutCycle, summarizeCycle } from "../plan/calendar";
 import { addDays, dateOfDay, daysBetween, formatDate, todayIn, weekdayIndex } from "../plan/dates";
 import { BrandAccessError, BrandRepo } from "../brand/repo";
@@ -175,6 +180,55 @@ const main = async () => {
     t.check("a repeated hook is refused", nicheProblems({ angles: [angle("A", ["Same.", " same. "]), angle("B"), angle("C")] }).some((p) => /repeats a hook/.test(p)));
     t.check("an empty title or reason is refused", nicheProblems({ angles: [{ ...angle("A"), title: "  " }, { ...angle("B"), whyItFits: "" }, angle("C")] }).length >= 2);
     t.check("an angle's id comes from its title", withIds({ angles: [angle("Mac shortcuts you did not know"), angle("What's new?!"), angle("日本語のタイトル")] }).map((a) => a.id).slice(0, 2).join() === "mac-shortcuts-you-did-not-know,whats-new");
+  }
+
+  console.log("what an upload really is");
+  {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypisom"), Buffer.alloc(16)]);
+    const webp = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBPVP8 ")]);
+    t.check("a PNG is a PNG", sniff(png)?.mime === "image/png");
+    t.check("a JPEG, a GIF and a WebP are recognised", sniff(Buffer.from([0xff, 0xd8, 0xff, 0xe0]))?.ext === "jpg" && sniff(Buffer.from("GIF89a"))?.ext === "gif" && sniff(webp)?.ext === "webp");
+    t.check("an MP4 (and a MOV) and a WebM are recognised as video", sniff(mp4)?.family === "video" && sniff(Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0]))?.mime === "video/webm");
+    t.check("an SVG, an HTML page, a script and an executable are not accepted, whatever they are called", [Buffer.from("<svg xmlns=\"http://www.w3.org/2000/svg\"/>"), Buffer.from("<!doctype html><script>"), Buffer.from("#!/bin/sh\n"), Buffer.from("MZ\u0090\u0000")].every((b) => sniff(b) === null));
+    t.check("a RIFF file that is not WebP (a WAV) is not accepted", sniff(Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVEfmt ")])) === null);
+    t.check("a photo and a logo must be pictures; a screen recording must be a video", checkUpload("photo", png.length, png).sniffed.family === "image" && checkUpload("logo", png.length, png).kind === "logo" && checkUpload("screen_recording", 5000, mp4).sniffed.family === "video");
+    const rejects = (what: string, fn: () => unknown, pattern: RegExp) => t.throws(what, fn, pattern);
+    rejects("a video is refused as a photo", () => checkUpload("photo", 5000, mp4), /picture, not a video/);
+    rejects("a picture is refused as a screen recording", () => checkUpload("screen_recording", png.length, png), /must be a video/);
+    rejects("an unknown kind is refused", () => checkUpload("avatar", png.length, png), /Say what this is/);
+    rejects("an empty file is refused", () => checkUpload("photo", 0, Buffer.alloc(0)), /empty/);
+    rejects("an unsupported file is refused with what to use instead", () => checkUpload("photo", 100, Buffer.from("hello world!!!!")), /not supported/);
+    rejects("a picture over the limit is refused as too large", () => checkUpload("photo", MAX_IMAGE_BYTES + 1, png), /too large/);
+    t.check("…with a 413 status", (() => { try { checkUpload("photo", MAX_IMAGE_BYTES + 1, png); return false; } catch (e) { return e instanceof UploadError && e.status === 413; } })());
+  }
+
+  console.log("costs");
+  {
+    const entries = [{ provider: "seedance", operation: "clip", usd: 4 }, { provider: "elevenlabs", operation: "voice", usd: 0.3 }, { provider: "seedance", operation: "clip", usd: 2 }, { provider: "google", operation: "still", usd: 0.134 }];
+    const sum = summarizeCosts(entries);
+    t.check("the total is the sum of every paid call", Math.abs(sum.total - 6.434) < 1e-9);
+    t.check("calls are grouped by provider and operation, biggest first", sum.lines[0].provider === "seedance" && sum.lines[0].calls === 2 && Math.abs(sum.lines[0].usd - 6) < 1e-9 && sum.lines.length === 3);
+    t.check("no calls is a zero total, not an error", summarizeCosts([]).total === 0 && summarizeCosts([]).lines.length === 0);
+    t.check("a brand with no produced video has no average", averageCost([]).average === null && !averageCost([]).overTarget);
+    t.check("an average over the $3 target is flagged, one under is not", averageCost([2, 3, 4.5]).overTarget === true && averageCost([1, 2]).overTarget === false && TARGET_USD_PER_VIDEO === 3);
+    const csv = costCsv([{ cardId: "c1", day: 1, breakdown: sum }, { cardId: "=cmd|' /C calc'!A0", day: 2, breakdown: summarizeCosts([{ provider: "a,b", operation: 'say "hi"', usd: 1 }]) }]);
+    t.check("the CSV has a header, a row per call group, and a total", csv.startsWith("video,day,provider,operation,calls,usd\n") && csv.trim().split("\n").length === 1 + 3 + 1 + 1 && /total,,,,\d+,7\.4340/.test(csv));
+    t.check("a cell that would run as a spreadsheet formula is neutralised", csv.includes("'=cmd") && !/(^|,)=cmd/m.test(csv));
+    t.check("commas and quotes in a cell are quoted", csv.includes('"a,b"') && csv.includes('"say ""hi"""'));
+  }
+
+  console.log("sample analytics (demo mode only)");
+  {
+    const cards = Array.from({ length: 10 }, (_, i) => ({ id: `card-${i}`, day: i + 1, sourceId: `src-${i % 3}`, hook: `Hook ${i}`, angle: "angle" }));
+    const a = sampleAnalytics(cards);
+    t.check("it is deterministic: the same cards give the same numbers", JSON.stringify(a) === JSON.stringify(sampleAnalytics(cards)));
+    t.check("it shows at most a week of videos, earliest days first", a.videos.length === 7 && a.videos.every((v, i) => v.day === i + 1));
+    t.check("the totals add up", a.totalViews7d === a.videos.reduce((s, v) => s + v.views7d, 0) && a.baselineViews7d === Math.round(a.totalViews7d / 7));
+    t.check("48-hour views are always fewer than 7-day views", a.videos.every((v) => v.views48h < v.views7d));
+    t.check("formats are ranked best first and every verdict matches its number", a.formats.every((f, i) => (i === 0 || a.formats[i - 1].vsBaseline >= f.vsBaseline) && f.verdict === (f.vsBaseline >= 10 ? "winner" : f.vsBaseline <= -10 ? "loser" : "steady")));
+    t.check("the next plan is 70 winners and 30 exploration", a.nextPlan.winners === 70 && a.nextPlan.exploration === 30);
+    t.check("no cards gives empty, finite numbers", (() => { const e = sampleAnalytics([]); return e.videos.length === 0 && e.totalViews7d === 0 && e.avgEngagement === 0 && e.formats.length === 0; })());
   }
 
   console.log("plan dates");
@@ -551,6 +605,94 @@ const main = async () => {
     t.check("a pick made before a plan exists is kept for it", (await repo.getNiche("nichecase"))!.chosenAngleId === early[2].id && (await repo.getPlan("nichecase")) === null);
     await runN({ slug: "nichecase" });
     t.check("proposing again keeps the pick, because that angle is still proposed", (await repo.getNiche("nichecase"))!.chosenAngleId === early[2].id);
+
+    console.log("workspace members and invitations");
+    {
+      const pending = async (w: string) => (await listPendingInvites(query, w)).map((i) => i.email);
+      const mk = async (email: string, opts: { verified?: boolean; admin?: boolean } = {}) =>
+        String((await query(`insert into users (email, email_norm, password_hash, is_admin, email_verified_at) values ($1, $1, 'x', $2, ${opts.verified ? "now()" : "null"}) returning id`, [email, opts.admin ?? false]))[0].id);
+      const workspace = String((await query(`insert into workspaces (name) values ('Invite Co') returning id`))[0].id);
+      const members = async () => (await query(`select u.email from workspace_members m join users u on u.id = m.user_id where m.workspace_id = $1 order by u.email`, [workspace])).map((r) => String(r.email));
+
+      await mk("verified@x.test", { verified: true });
+      t.check("a verified account joins at once", (await inviteToWorkspace(query, workspace, "Verified@X.test ")).status === "added" && (await members()).join() === "verified@x.test");
+      t.check("inviting the same person again says they are already in", (await inviteToWorkspace(query, workspace, "verified@x.test")).status === "already_member");
+      t.check("an address with no account is kept as a pending invitation", (await inviteToWorkspace(query, workspace, "New@X.test")).status === "invited" && (await pending(workspace)).join() === "new@x.test");
+      t.check("inviting a pending address again changes nothing", (await inviteToWorkspace(query, workspace, "new@x.test")).status === "invited" && (await pending(workspace)).length === 1);
+      await t.rejects("something that is not an email is refused", () => inviteToWorkspace(query, workspace, "not an email"), /not an email address/);
+      const fresh = await mk("new@x.test"); // signs up with the invited address, unverified
+      t.check("signing up does NOT claim the invitation: the address is not proven yet", (await claimInvites(query, fresh)) === 0 && !(await members()).includes("new@x.test") && (await pending(workspace)).length === 1);
+      await query(`update users set email_verified_at = now() where id = $1`, [fresh]);
+      t.check("verifying the address claims it", (await claimInvites(query, fresh)) === 1 && (await members()).includes("new@x.test") && (await pending(workspace)).length === 0);
+      t.check("claiming twice joins no one twice", (await claimInvites(query, fresh)) === 0);
+      const unverified = await mk("later@x.test");
+      t.check("an existing but unverified account waits too, rather than joining", (await inviteToWorkspace(query, workspace, "later@x.test")).status === "invited" && !(await members()).includes("later@x.test"));
+      t.check("a person cannot claim an invitation sent to someone else's address", (await claimInvites(query, await mk("other@x.test", { verified: true }))) === 0);
+      await query(`update users set email_verified_at = now() where id = $1`, [unverified]);
+      await claimInvites(query, unverified);
+      t.check("…and the right person still can, after verifying", (await members()).includes("later@x.test"));
+      await mk("boss@x.test", { admin: true });
+      t.check("an admin account (made by tool, never email-verified) counts as proven", (await inviteToWorkspace(query, workspace, "boss@x.test")).status === "added");
+      await inviteToWorkspace(query, workspace, "typo@x.test");
+      t.check("an invitation can be cancelled", (await cancelInvite(query, workspace, "TYPO@x.test")) && !(await pending(workspace)).includes("typo@x.test") && !(await cancelInvite(query, workspace, "typo@x.test")));
+      t.check("the migration made the table and its index", Number((await query(`select count(*)::int as n from pg_indexes where tablename = 'workspace_invites'`))[0].n) >= 2);
+    }
+
+    console.log("brand settings");
+    {
+      const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+      const s0 = await getSettings(query, "planco");
+      t.check("settings read what the brand was created with", s0.brand.name === "Crunch" && s0.brand.language === "en" && s0.brand.postTime === "18:00" && s0.brand.timezone === "UTC" && s0.product.type === "physical" && s0.product.features.join() === "crunchy" && s0.kit.primaryColor === "#ff6600" && s0.kit.secondaryColor === null);
+      const bad = (what: string, patch: unknown, pattern: RegExp) => t.rejects(`refused: ${what}`, () => updateSettings(query, storage, "planco", patch), pattern);
+      await bad("an unsupported language", { brand: { language: "fr" } }, /./);
+      await bad("a post time that is not a time", { brand: { postTime: "25:00" } }, /Use a time like 18:00/);
+      await bad("an unknown time zone", { brand: { timezone: "Mars/Base" } }, /not a known time zone/);
+      await bad("an empty product name", { product: { name: "  " } }, /needs a name/);
+      await bad("a color that is not hex", { kit: { primaryColor: "orange" } }, /Use a color like #2563eb/);
+      await bad("a web address with no scheme", { product: { url: "crunch.example" } }, /full web address/);
+      await bad("more than 12 features", { product: { features: Array.from({ length: 13 }, (_, i) => `f${i}`) } }, /At most 12 features/);
+      t.check("a refused patch changed nothing", JSON.stringify(await getSettings(query, "planco")) === JSON.stringify(s0));
+
+      const s1 = await updateSettings(query, storage, "planco", { brand: { language: "ja", postTime: "07:30", timezone: "Asia/Tokyo" } });
+      t.check("language, post time and time zone are saved", s1.brand.language === "ja" && s1.brand.postTime === "07:30" && s1.brand.timezone === "Asia/Tokyo");
+      const s2 = await updateSettings(query, storage, "planco", { product: { name: "Crunch Max", oneLiner: "A louder snack.", type: "digital", features: ["crunchy", "loud"], url: "https://crunch.example/max" } });
+      t.check("a product edit is saved", s2.product.name === "Crunch Max" && s2.product.type === "digital" && s2.product.features.join() === "crunchy,loud" && s2.product.url === "https://crunch.example/max");
+      t.check("renaming the product renames the brand (it is the product being promoted)", s2.brand.name === "Crunch Max" && (await repo.getBrand("planco")).name === "Crunch Max");
+      const intakeFile = JSON.parse(fs.readFileSync(await storage.localPath("brands/planco/intake.json"), "utf8")) as { intake: { products: { name: string; features: string[]; type: string }[] } };
+      t.check("intake.json (read by the script writer) is kept in step, in its original wrapper", intakeFile.intake.products[0].name === "Crunch Max" && intakeFile.intake.products[0].features.join() === "crunchy,loud" && intakeFile.intake.products[0].type === "digital");
+      t.check("an empty url clears it", (await updateSettings(query, storage, "planco", { product: { url: "" } })).product.url === null);
+      t.check("a partial patch leaves everything else alone", (await getSettings(query, "planco")).product.name === "Crunch Max" && (await getSettings(query, "planco")).brand.language === "ja");
+      const s3 = await updateSettings(query, storage, "planco", { kit: { primaryColor: "#112233", headingFont: "Inter" } });
+      t.check("brand kit colors and fonts are saved", s3.kit.primaryColor === "#112233" && s3.kit.headingFont === "Inter");
+      t.check("a color can be cleared with null, others stay", (await updateSettings(query, storage, "planco", { kit: { primaryColor: null } })).kit.primaryColor === null && (await getSettings(query, "planco")).kit.headingFont === "Inter");
+      t.check("an empty patch is allowed and changes nothing", JSON.stringify(await updateSettings(query, storage, "planco", {})) === JSON.stringify(await getSettings(query, "planco")));
+      await t.rejects("settings for a brand that does not exist are refused", () => getSettings(query, "ghost"), /no brand/);
+
+      const photo = await addProductAsset(query, storage, "planco", { kind: "photo", bytes: png });
+      t.check("an uploaded photo is stored under the brand and recorded", !!photo.mediaKey && photo.mediaKey.startsWith("brands/planco/product/uploads/") && photo.mediaKey.endsWith(".png") && (await storage.exists(photo.mediaKey)));
+      t.check("it is listed with the others", (await listProductAssets(query, "planco")).some((a) => a.id === photo.id && a.kind === "photo"));
+      const logo = await addProductAsset(query, storage, "planco", { kind: "logo", bytes: png });
+      t.check("a logo becomes the brand kit's logo", (await getSettings(query, "planco")).kit.logoKey === logo.mediaKey);
+      await t.rejects("a file that is not a picture is refused, and nothing is stored", () => addProductAsset(query, storage, "planco", { kind: "photo", bytes: Buffer.from("not an image at all") }), /not supported/);
+      const before = (await storage.list("brands/planco/product/uploads")).length;
+      t.check("…nothing was written for the refused file", before === 2);
+      t.check("removing a logo deletes the file and clears the kit's logo", (await removeProductAsset(query, storage, "planco", logo.id)) && !(await storage.exists(logo.mediaKey!)) && (await getSettings(query, "planco")).kit.logoKey === null);
+      t.check("an asset of another brand cannot be removed through this one", !(await removeProductAsset(query, storage, "acme", photo.id)) && (await storage.exists(photo.mediaKey!)));
+      t.check("removing something that is not there is false, not an error", !(await removeProductAsset(query, storage, "planco", "00000000-0000-0000-0000-000000000000")));
+    }
+
+    console.log("cost logs and the ledger");
+    {
+      await storage.putBuffer("brands/planco/videos/costed/costs.jsonl", Buffer.from(`${JSON.stringify({ provider: "seedance", operation: "clip", usd: 1.5 })}\n${JSON.stringify({ provider: "elevenlabs", operation: "voice", usd: 0.25 })}\n{"provider":"half"`));
+      const got = await readVideoCosts(storage, "planco", "costed");
+      t.check("a video's cost log is read, ignoring a half-written last line", got.length === 2 && summarizeCosts(got).total === 1.75);
+      t.check("a video with no cost log has no entries", (await readVideoCosts(storage, "planco", "never-made")).length === 0);
+      const brandId = String((await query(`select id from brands where slug = 'planco'`))[0].id);
+      await query(`insert into cost_ledger (brand_id, provider, model, operation, usd) values ($1, 'anthropic', 'm', 'plan_propose', 0.05), ($1, 'anthropic', 'm', 'plan_propose', 0.03), ($1, 'google', 'g', 'storyboard_frame', 0.134)`, [brandId]);
+      const ledger = await brandLedger(query, "planco");
+      t.check("setup and planning spend comes from the ledger, grouped", ledger.lines.length === 2 && Math.abs(ledger.total - 0.214) < 1e-9 && ledger.lines.find((l) => l.operation === "plan_propose")!.calls === 2);
+      t.check("another brand's spend is not included", (await brandLedger(query, "acme")).total === 0);
+    }
 
     console.log("task progress on the queue");
     const q = new WorkQueue(query);

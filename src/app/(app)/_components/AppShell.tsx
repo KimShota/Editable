@@ -47,11 +47,40 @@ const NAV: NavItem[] = [
       </>,
     ),
   },
+  {
+    href: "/analytics",
+    label: "Analytics",
+    icon: icon(
+      <>
+        <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </>,
+    ),
+  },
+  {
+    href: "/brand",
+    label: "Brand",
+    icon: icon(
+      <>
+        <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        <circle cx="12" cy="12" r="2.6" stroke="currentColor" strokeWidth="1.8" />
+      </>,
+    ),
+  },
 ];
 
 /** Extra links in the account menu at the bottom (Workspace, and Admin for
  *  admins). Filled in by the slices that build those pages. */
 const MENU: (NavItem & { adminOnly?: boolean })[] = [
+  {
+    href: "/workspace",
+    label: "Workspace",
+    icon: icon(
+      <>
+        <circle cx="9" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M3.5 19c.6-3.2 2.9-5 5.5-5s4.9 1.8 5.5 5M16 6.5a3 3 0 0 1 0 5.8M17.5 14.2c1.9.6 3.2 2.3 3.6 4.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </>,
+    ),
+  },
   {
     href: "/admin/production",
     label: "Admin",

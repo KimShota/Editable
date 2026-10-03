@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     customer: customerId,
     client_reference_id: user.id,
     line_items: [{ price: premiumPriceId(), quantity: 1 }],
-    success_url: `${origin}/account?upgraded=1`,
+    success_url: `${origin}/workspace?upgraded=1`,
     cancel_url: `${origin}/pricing`,
   });
 
