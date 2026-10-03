@@ -26,7 +26,7 @@ export function SignupForm() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "signup failed");
-      router.push("/projects");
+      router.push("/calendar");
       router.refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -38,9 +38,11 @@ export function SignupForm() {
     <Card className="p-6">
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <div>
-          <label className="mb-2 block text-sm font-medium text-[color:var(--ink)]">Email</label>
+          <label htmlFor="signup-email" className="mb-2 block text-sm font-medium text-[color:var(--ink)]">Email</label>
           <input
+            id="signup-email"
             type="email"
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@somewhere.com"
@@ -49,9 +51,11 @@ export function SignupForm() {
           />
         </div>
         <div>
-          <label className="mb-2 block text-sm font-medium text-[color:var(--ink)]">Password</label>
+          <label htmlFor="signup-password" className="mb-2 block text-sm font-medium text-[color:var(--ink)]">Password</label>
           <input
+            id="signup-password"
             type="password"
+            autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="at least 8 characters"

@@ -5,7 +5,7 @@ import { sql } from "./db";
  * Session token verification, deliberately WITHOUT `server-only`: unlike
  * auth.ts (which guards password hashing/signup — real secrets, never
  * needed outside a Server Component/Route Handler), this module is also
- * imported by src/middleware.ts. Middleware isn't compiled as part of the
+ * imported by src/proxy.ts (formerly middleware.ts). The proxy isn't compiled as part of the
  * app router's react-server graph, so `server-only`'s guard (which throws
  * unless the "react-server" export condition is active) can't be trusted
  * to resolve to its no-op branch there — safer to just not depend on it

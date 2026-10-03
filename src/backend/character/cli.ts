@@ -2,6 +2,7 @@ import "dotenv/config";
 import { type BrandIntake, BrandIntakeSchema } from "../brand/intake/schemas";
 import { consoleSink } from "../cost/ledger";
 import { getStorage } from "../storage";
+import { characterKeys } from "../brand/keys";
 import { generateMascotConcepts } from "./concepts";
 import { buildGrid } from "./grid";
 import { designVoice, saveDesignedVoice, textToSpeech } from "../voice/elevenlabs";
@@ -51,26 +52,7 @@ const readJson = async <T>(key: string, parse: (x: unknown) => T): Promise<T> =>
 };
 const writeJson = (key: string, value: unknown) => storage.putBuffer(key, Buffer.from(JSON.stringify(value, null, 2)));
 
-const keys = (brand: string) => {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(brand)) throw new Error(`--brand must be a lowercase slug, got "${brand}"`);
-  const root = `brands/${brand}`;
-  return {
-    intake: `${root}/intake.json`,
-    concepts: `${root}/character/concepts.json`,
-    candidate: (name: string) => {
-      if (!/^c\d+-[vr]\d+$/.test(name)) throw new Error(`candidate names look like c1-v0 or c1-r2, got "${name}"`);
-      return `${root}/character/candidates/${name}.png`;
-    },
-    candidatesDir: `${root}/character/candidates`,
-    candidatesGrid: `${root}/character/candidates-grid.png`,
-    sheetView: (view: string) => `${root}/character/sheet/${view}.png`,
-    sheetGrid: `${root}/character/sheet-grid.png`,
-    character: `${root}/character/character.json`,
-    voicePreviews: `${root}/character/voice/previews.json`,
-    voicePreview: (name: string) => `${root}/character/voice/${name}.mp3`,
-    voiceSample: `${root}/character/voice/sample.mp3`,
-  };
-};
+const keys = characterKeys;
 
 const conceptIndexOf = (candidate: string): number => Number(candidate.match(/^c(\d+)-/)![1]);
 

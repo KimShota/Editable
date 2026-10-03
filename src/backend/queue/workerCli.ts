@@ -3,6 +3,7 @@ import os from "node:os";
 import { query } from "../../app/lib/db";
 import { createAnalysisHandlers } from "../analysis/handler";
 import { ClaudeSemanticProvider } from "../analysis/semantic";
+import { createJobHandlers } from "../jobs/registry";
 import { getStorage } from "../storage";
 import { runWorker } from "./worker";
 import { WorkQueue } from "./workQueue";
@@ -32,11 +33,15 @@ const main = async (): Promise<void> => {
     });
   }
 
-  const handlers = createAnalysisHandlers({
-    query,
-    storage: getStorage(),
-    analyzeOptions: { semantic: process.env.ANALYSIS_SEMANTIC === "1" ? new ClaudeSemanticProvider() : undefined },
-  });
+  const handlers = {
+    ...createAnalysisHandlers({
+      query,
+      storage: getStorage(),
+      analyzeOptions: { semantic: process.env.ANALYSIS_SEMANTIC === "1" ? new ClaudeSemanticProvider() : undefined },
+    }),
+    // What the app starts: ingest, plan, storyboard, produce … (jobs/registry.ts).
+    ...createJobHandlers(query, getStorage()),
+  };
 
   console.log(`worker ${workerId} up; handling: ${Object.keys(handlers).join(", ")}`);
   await runWorker({

@@ -8,6 +8,22 @@ const nextConfig = {
   // A stray lockfile above this repo can make Next guess the wrong
   // workspace root; pin it explicitly.
   turbopack: { root: __dirname },
+  // Browser tests run their own dev server beside the one a developer already
+  // has open, and Next allows one dev server per build folder, so tests set
+  // NEXT_DIST_DIR=.next-test. Unset, nothing changes.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+  // The film-your-own Katalab screens are retired in favour of the AI-video
+  // app (plan/ui-ux-full-flow.md §2.5). Their code stays on disk; these
+  // routes just land on the calendar. Not permanent (308): the old pages may
+  // come back in some form, and a browser must not cache the decision.
+  async redirects() {
+    return [
+      { source: "/projects", destination: "/calendar", permanent: false },
+      { source: "/templates", destination: "/calendar", permanent: false },
+      { source: "/library", destination: "/calendar", permanent: false },
+      { source: "/jobs/:jobId/resources", destination: "/calendar", permanent: false },
+    ];
+  },
   async rewrites() {
     return {
       // In production Next snapshots public/'s file list ONCE at server
@@ -62,7 +78,7 @@ const nextConfig = {
     ];
   },
   experimental: {
-    // Every request now passes through src/middleware.ts (added for the
+    // Every request now passes through src/proxy.ts (the renamed middleware.ts, added for the
     // Vercel waitlist gate), and Next caps a request body read inside
     // middleware at 10MB by default — silently truncating any raw video
     // upload (api/jobs/[jobId]/assets) past that, which breaks the

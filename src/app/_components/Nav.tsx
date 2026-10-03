@@ -5,13 +5,9 @@ import { getQuotaStatus, QuotaStatus } from "../lib/quota";
 import { LogoutButton } from "./LogoutButton";
 import { Pill } from "./ui";
 
-const LINKS = [
-  { href: "/projects", label: "Projects" },
-  { href: "/templates", label: "Templates" },
-  { href: "/reverse-engineer", label: "Reverse-engineer", adminOnly: true },
-  { href: "/library", label: "Library" },
+const LINKS: { href: string; label: string; adminOnly?: boolean; authOnly?: boolean }[] = [
+  { href: "/calendar", label: "Open app", authOnly: true },
   { href: "/pricing", label: "Pricing" },
-  { href: "/account", label: "Account", authOnly: true },
 ];
 
 export async function Nav() {

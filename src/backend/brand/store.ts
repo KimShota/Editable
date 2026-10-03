@@ -26,7 +26,7 @@ export type CreatedBrand = { brandId: string; productId: string };
  */
 export const createBrandFromIntake = async (
   query: QueryFn,
-  input: { workspaceId: string; websiteUrl: string; intake: BrandIntake; productIndex?: number },
+  input: { workspaceId: string; websiteUrl: string; intake: BrandIntake; productIndex?: number; slug?: string },
 ): Promise<CreatedBrand> => {
   const { intake } = input;
   const productIndex = input.productIndex ?? intake.recommendedProductIndex;
@@ -34,11 +34,11 @@ export const createBrandFromIntake = async (
   if (!product) throw new Error(`brand: intake has no product at index ${productIndex} (it lists ${intake.products.length})`);
 
   const [brand] = await query(
-    `insert into brands (workspace_id, name, website_url, language, audience, tone, intake)
-     values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+    `insert into brands (workspace_id, name, website_url, language, audience, tone, intake, slug)
+     values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
     // The brand is the product being promoted, not the parent company: a
     // group like Select, Inc. gets one brand per product it markets.
-    [input.workspaceId, product.name, input.websiteUrl, intake.language, product.audience || intake.audience, intake.tone, JSON.stringify(intake)],
+    [input.workspaceId, product.name, input.websiteUrl, intake.language, product.audience || intake.audience, intake.tone, JSON.stringify(intake), input.slug ?? null],
   );
   const brandId = String(brand.id);
 

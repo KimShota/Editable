@@ -153,6 +153,9 @@ export class LocalStorage implements Storage {
   }
 }
 
+/** Where local objects live: STORAGE_ROOT, or `storage/` in the repo. */
+export const storageRoot = (): string => path.resolve(process.env.STORAGE_ROOT || path.join(repoRoot, "storage"));
+
 let cached: Storage | undefined;
 
 /** The process-wide storage. STORAGE_DRIVER selects the backend ("local" is
@@ -163,6 +166,6 @@ export const getStorage = (): Storage => {
   if (driver !== "local") {
     throw new Error(`storage: unknown STORAGE_DRIVER "${driver}" — only "local" is implemented (Phase 1)`);
   }
-  cached = new LocalStorage(path.resolve(process.env.STORAGE_ROOT || path.join(repoRoot, "storage")));
+  cached = new LocalStorage(storageRoot());
   return cached;
 };

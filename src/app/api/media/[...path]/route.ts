@@ -4,6 +4,9 @@ import { Readable } from "node:stream";
 import { NextRequest, NextResponse } from "next/server";
 import { publicDir, repoRoot } from "@backend/pipeline/paths";
 import { ensureMovCompatTranscode } from "@backend/pipeline/previewMedia";
+import { isBrandSlug } from "@backend/brand/keys";
+import { storageRoot } from "@backend/storage";
+import { hasUnsafeSegment, isStorageKeySegment } from "../../../lib/mediaPaths";
 
 /**
  * Generic file streamer for content that lives outside public/ (which Next
@@ -17,7 +20,11 @@ import { ensureMovCompatTranscode } from "@backend/pipeline/previewMedia";
  * <video>/<img>/<audio> src here.
  *
  * URL shape: /api/media/<root>/<...rest>, root ∈ out | jobs | library | authoring | formats
- * | public-jobs.
+ * | public-jobs | brands.
+ *
+ * `brands` is storage/brands/<slug>/… (a brand's character sheet, source
+ * videos, storyboards, finished video). The proxy gates it by workspace
+ * membership; see BRAND_MEDIA_EXTENSIONS for what it serves.
  *
  * `public-jobs` is distinct from `jobs`: `jobs` resolves under repoRoot/jobs
  * (a job's original, unstaged files), while `public-jobs` resolves under
@@ -29,7 +36,14 @@ import { ensureMovCompatTranscode } from "@backend/pipeline/previewMedia";
  * rewrite's own comment for why the snapshot goes stale.
  */
 
-const ALLOWED_ROOTS = new Set(["out", "jobs", "library", "authoring", "formats", "public-jobs"]);
+const ALLOWED_ROOTS = new Set(["out", "jobs", "library", "authoring", "formats", "public-jobs", "brands"]);
+
+/** The `brands` root is storage/brands/<slug>/…, which also holds files a
+ *  customer must never fetch even from their own brand: costs.jsonl (what a
+ *  video cost us), *.request.json (provider request bodies), plan.json. The
+ *  proxy only checks that the viewer may open the brand, so this route
+ *  serves media file types and nothing else from it. */
+const BRAND_MEDIA_EXTENSIONS = new Set([".mp4", ".webm", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp3", ".wav", ".m4a", ".ogg"]);
 
 const CONTENT_TYPES: Record<string, string> = {
   ".mp4": "video/mp4",
@@ -150,9 +164,21 @@ export async function GET(
   if (!root || !ALLOWED_ROOTS.has(root) || rest.length === 0) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  // The proxy authorises from the raw url; these are the decoded segments. A
+  // segment such as "..%2Fother" would hop into a sibling's folder while still
+  // inside the root, past the check below. See lib/mediaPaths.ts.
+  if (hasUnsafeSegment(rest)) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  if (root === "brands" && (!isBrandSlug(rest[0]) || !rest.every(isStorageKeySegment))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
-  const rootDir = root === "public-jobs" ? path.join(publicDir, "jobs") : path.join(repoRoot, root);
+  const rootDir = root === "public-jobs" ? path.join(publicDir, "jobs") : root === "brands" ? path.join(storageRoot(), "brands") : path.join(repoRoot, root);
   const resolved = path.join(rootDir, ...rest);
+  if (root === "brands" && !BRAND_MEDIA_EXTENSIONS.has(path.extname(resolved).toLowerCase())) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   // Reject any traversal outside the resolved root, however it got encoded.
   if (!resolved.startsWith(rootDir + path.sep) && resolved !== rootDir) {

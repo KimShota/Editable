@@ -1,15 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser, SESSION_COOKIE } from "./app/lib/session";
-import { sql } from "./app/lib/db";
+import { query, sql } from "./app/lib/db";
+import { brandSlugForVideoJob, findBrandForViewer } from "./backend/brand/access";
+import { isBrandSlug } from "./backend/brand/keys";
+import { safeDecode } from "./app/lib/mediaPaths";
 
 /**
- * Runs in the Node.js runtime (not Edge) — needed for the plain node:crypto
- * + @neondatabase/serverless calls in session.ts/db.ts, and consistent with
- * this app's actual deploy target (a persistent Node server, not Vercel
- * Edge Functions; see the friends-alpha deploy plan). Next 16 supports this
- * natively via this export, no next.config flag required.
+ * The request proxy (Next 16 renamed this file convention from
+ * `middleware`; see node_modules/next/dist/docs/01-app/03-api-reference/
+ * 03-file-conventions/proxy.md). It runs in the Node.js runtime by default,
+ * which the plain node:crypto + @neondatabase/serverless calls in
+ * session.ts/db.ts need, and which matches this app's actual deploy target
+ * (a persistent Node server, not Vercel Edge Functions; see the
+ * friends-alpha deploy plan). Setting a `runtime` export here would throw.
+ *
+ * This file was `src/middleware.ts`: comments elsewhere in the repo that say
+ * "middleware.ts" mean this file.
  */
-export const runtime = "nodejs";
 
 /**
  * Accounts + job ownership. Invite-gated signup
@@ -49,7 +56,7 @@ const PUBLIC_EXACT = new Set(["/", "/login", "/signup", "/pricing"]);
 // signature check (see that route) is the auth boundary, not this gate.
 const PUBLIC_PREFIXES = ["/api/auth/", "/api/billing/webhook"];
 
-const ADMIN_PREFIXES = ["/authoring", "/api/authoring", "/reverse-engineer", "/api/media/authoring"];
+const ADMIN_PREFIXES = ["/authoring", "/api/authoring", "/reverse-engineer", "/api/media/authoring", "/admin", "/api/admin"];
 
 const isApiPath = (pathname: string): boolean => pathname.startsWith("/api/");
 
@@ -120,6 +127,60 @@ const jobOwnerId = async (jobId: string): Promise<string | null> => {
   return ownerId;
 };
 
+/** Extracts the brand slug from a URL that names one:
+ *  /api/media/brands/<slug>/... (that brand's character sheet, storyboards,
+ *  source videos, finished video) and /api/brands/<slug>/... (its API).
+ *
+ *  Returns null when the URL names no brand, and "" when it names something
+ *  that is not a valid slug (so the caller denies it). The segment is
+ *  URL-decoded first: the route handler decodes it, so authorising the raw
+ *  text would authorise something other than what gets served. */
+const brandSlugFromPath = (pathname: string): string | null => {
+  const match = /^\/api\/(?:media\/)?brands\/([^/]+)\//.exec(pathname);
+  if (!match) return null;
+  const decoded = safeDecode(match[1]);
+  return decoded !== null && isBrandSlug(decoded) ? decoded : "";
+};
+
+/**
+ * Whether a user may open a brand (workspace membership; see
+ * backend/brand/access.ts). Cached in-process like the session and job-owner
+ * lookups above, for the same reason (this runs on every image and video
+ * range request of a brand page). A positive hit lasts 30s, so removing a
+ * member takes effect within that; a miss lasts 5s so a member added a
+ * moment ago isn't locked out.
+ */
+const brandAccessCache = new Map<string, { ok: boolean; expiresAt: number }>();
+const BRAND_ACCESS_HIT_TTL_MS = 30_000;
+const BRAND_ACCESS_MISS_TTL_MS = 5_000;
+
+const canOpenBrand = async (user: { id: string; isAdmin: boolean }, slug: string): Promise<boolean> => {
+  const cacheKey = `${user.id}:${slug}`;
+  const cached = brandAccessCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.ok;
+  let ok = false;
+  try {
+    ok = (await findBrandForViewer(query, user, slug)) !== null;
+  } catch (err) {
+    // Fail closed. The usual cause is a database that has not had the brand
+    // migrations applied yet (brands.slug, migration 014): that must deny the
+    // brand's files, not turn every request that reaches this check into a 500.
+    console.error("proxy: brand access lookup failed; denying", err);
+  }
+  brandAccessCache.set(cacheKey, { ok, expiresAt: Date.now() + (ok ? BRAND_ACCESS_HIT_TTL_MS : BRAND_ACCESS_MISS_TTL_MS) });
+  return ok;
+};
+
+/** The brand a video job belongs to, or null. Also fails closed. */
+const videoJobBrand = async (jobId: string): Promise<string | null> => {
+  try {
+    return await brandSlugForVideoJob(query, jobId);
+  } catch (err) {
+    console.error("proxy: video job brand lookup failed; denying", err);
+    return null;
+  }
+};
+
 const loginRedirect = (req: NextRequest): NextResponse => {
   const url = req.nextUrl.clone();
   url.pathname = "/login";
@@ -132,7 +193,7 @@ const notFound = (req: NextRequest): NextResponse =>
     ? NextResponse.json({ error: "not found" }, { status: 404 })
     : new NextResponse("Not found", { status: 404 });
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (PUBLIC_EXACT.has(pathname) || PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
@@ -153,8 +214,16 @@ export async function middleware(req: NextRequest) {
     if (jobId) {
       const ownerId = await jobOwnerId(jobId);
       if (ownerId !== user.id) {
-        return notFound(req);
+        // An AI video (job id "<brand slug>-<card id>") has no owner row: it
+        // belongs to its brand, so the brand's members may open it.
+        const slug = ownerId === null ? await videoJobBrand(jobId) : null;
+        if (!slug || !(await canOpenBrand(user, slug))) return notFound(req);
       }
+    }
+
+    const brandSlug = brandSlugFromPath(pathname);
+    if (brandSlug !== null && (brandSlug === "" || !(await canOpenBrand(user, brandSlug)))) {
+      return notFound(req);
     }
 
     const libraryUserId = libraryUserIdFromPath(pathname);

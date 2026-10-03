@@ -21,6 +21,7 @@ public/formats
 
 # Next.js app
 .next
+.next-test
 next-env.d.ts
 tsconfig.tsbuildinfo
 
@@ -31,8 +32,9 @@ jobs/*
 !jobs/five-codes-demo
 /library
 
-# remove plan folder from git
-plan
+# remove plan folder from git (root-anchored: an unanchored `plan` also ignored
+# every source directory named plan, e.g. src/backend/plan and src/app/(app)/plan)
+/plan
 
 # Claude Code local-only state
 .claude/settings.local.json

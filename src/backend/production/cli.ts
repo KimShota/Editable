@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { productionKeys } from "../brand/keys";
 import { LockedCharacterSchema } from "../character/schemas";
 import { consoleSink, type CostSink, googleImageCostEntry } from "../cost/ledger";
 import { GEMINI_IMAGE_MODEL, generateImage } from "../pipeline/generation/geminiImage";
@@ -11,6 +12,7 @@ import { render, stageAssets } from "../pipeline/render";
 import { EdlSchema } from "../pipeline/schemas";
 import { AdaptedScriptSchema, ProductFootageSchema, RecreationSpecSchema } from "../recreation/schemas";
 import { DEFAULT_SET, framePrompt, planFrames } from "../recreation/storyboard";
+import { sourceIdForCard } from "../plan/store";
 import { getStorage } from "../storage";
 import { textToSpeechTimed, type TimedWord } from "../voice/elevenlabs";
 import {
@@ -46,7 +48,7 @@ import { buildTimeline, type Timeline } from "./timeline";
  * in the pilot. Every step caches its output under
  * brands/<brand>/videos/<source>/ and is safe to rerun; --redo regenerates.
  *
- *   npm run produce -- voice  --brand <slug> --source <id> [--tempo 1.25] [--redo]
+ *   npm run produce -- voice  --brand <slug> --source <id> | --card <id> [--tempo 1.25] [--redo]
  *   npm run produce -- clips  --brand <slug> --source <id> [--shots s0,s3] [--redo | --regenerate | --new-stills] [--dry]
  *       --redo rebuilds clips from what the providers already returned (free);
  *       --regenerate pays for new generations; --new-stills also redraws green-screen stills.
@@ -116,33 +118,18 @@ const stamp = () => (lastStamp = Math.max(Date.now(), lastStamp + 1));
 
 const context = async (args: string[]) => {
   const brand = required(args, "--brand");
-  const id = required(args, "--source");
+  // A video is keyed by its plan card (--card); --source names the viral
+  // source and, when no --card is given, is its own card. With only --card,
+  // the source is looked up in the plan.
+  const id = option(args, "--card") ?? required(args, "--source");
+  const sourceId = option(args, "--source") ?? (await sourceIdForCard(storage, brand, id));
   if (!/^[a-z0-9][a-z0-9-]*$/.test(brand)) throw new Error(`--brand must be a lowercase slug, got "${brand}"`);
-  const root = `brands/${brand}/videos/${id}`;
-  const k = {
-    root,
-    tts: (i: number) => `${root}/voice/line-${i}.tts.mp3`,
-    ttsWords: (i: number) => `${root}/voice/line-${i}.tts.json`,
-    line: (i: number) => `${root}/voice/line-${i}.mp3`,
-    lineWords: (i: number) => `${root}/voice/line-${i}.json`,
-    track: `${root}/voice/track.wav`,
-    timeline: `${root}/timeline.json`,
-    green: (shot: string) => `${root}/stills/${shot}-green.png`,
-    raw: (shot: string) => `${root}/clips/${shot}.raw.mp4`,
-    request: (shot: string) => `${root}/clips/${shot}.request.json`,
-    clip: (shot: string) => `${root}/clips/${shot}.mp4`,
-    take: (shot: string) => `${root}/clips/${shot}.v${stamp()}.mp4`,
-    clips: `${root}/clips.json`,
-    costs: `${root}/costs.jsonl`,
-    edl: `${root}/edl.json`,
-    final: `${root}/final.mp4`,
-    still: (shot: string) => `brands/${brand}/storyboards/${id}/${shot}.png`,
-  };
+  const k = productionKeys(brand, id, stamp);
   const script = AdaptedScriptSchema.parse(await readJson(`brands/${brand}/scripts/${id}.json`, "adapted script"));
-  const spec = RecreationSpecSchema.parse(await readJson(`brands/${brand}/sources/specs/${id}.json`, "spec"));
+  const spec = RecreationSpecSchema.parse(await readJson(`brands/${brand}/sources/specs/${sourceId}.json`, "spec"));
   const character = LockedCharacterSchema.parse(await readJson(`brands/${brand}/character/character.json`, "locked character"));
   const footage = ProductFootageSchema.parse(await readJson(`brands/${brand}/product/footage.json`, "product footage"));
-  return { brand, id, k, script, spec, character, footage, cost: costLog(k.costs), jobId: `${brand}-${id}`, ref: (s: string) => `${brand}/${id}/${s}` };
+  return { brand, id, sourceId, k, script, spec, character, footage, cost: costLog(k.costs), jobId: `${brand}-${id}`, ref: (s: string) => `${brand}/${id}/${s}` };
 };
 type Ctx = Awaited<ReturnType<typeof context>>;
 
@@ -562,7 +549,7 @@ const publishToEditor = (c: Ctx) => {
     fs.writeFileSync(manifest, JSON.stringify({ format: AI_VIDEO_FORMAT, bindings: {}, lexicon: [], language: c.script.language }, null, 2));
   }
   // Which brand video this job is, for the editor's per-clip Regenerate.
-  fs.writeFileSync(path.join(dir, "ai-video.json"), JSON.stringify({ brand: c.brand, source: c.id }, null, 2));
+  fs.writeFileSync(path.join(dir, "ai-video.json"), JSON.stringify({ brand: c.brand, source: c.id, card: c.id, sourceId: c.sourceId }, null, 2));
   const sidecar = path.join(dir, "project.json");
   if (!fs.existsSync(sidecar)) {
     const hook = c.script.lines[0].text.split(/\s+/).slice(0, 6).join(" ");
@@ -645,8 +632,10 @@ const clipContext = async (args: string[]) => {
   const clipId = required(args, "--clip");
   const metaFile = path.join(repoRoot, "jobs", jobId, "ai-video.json");
   if (!fs.existsSync(metaFile)) throw new Error(`${jobId} is not an AI video`);
-  const meta = JSON.parse(fs.readFileSync(metaFile, "utf8")) as { brand: string; source: string };
-  const c = await context(["--brand", meta.brand, "--source", meta.source]);
+  // `source` is the card id in files written before cards existed (a card
+  // is its own source then); `card` is set on newer ones.
+  const meta = JSON.parse(fs.readFileSync(metaFile, "utf8")) as { brand: string; source: string; card?: string; sourceId?: string };
+  const c = await context(["--brand", meta.brand, "--card", meta.card ?? meta.source, ...(meta.sourceId ? ["--source", meta.sourceId] : [])]);
   const editorEdl = path.join(artifactsDir(jobId), "edl.json");
   const edl = EdlSchema.parse(JSON.parse(fs.readFileSync(editorEdl, "utf8")));
   const segment = edl.video.find((v) => v.id === clipId);

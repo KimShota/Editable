@@ -62,6 +62,42 @@ const toJob = (row: Record<string, unknown>): QueueJob => ({
   maxAttempts: Number(row.max_attempts),
 });
 
+/** What a handler reports while it works. `done`/`total` are optional: a
+ *  stage with no countable steps just has a message. */
+export type TaskProgress = { stage: string; done?: number; total?: number; message?: string };
+
+export type TaskStatus = "queued" | "running" | "done" | "failed";
+
+/** A job as the UI sees it. `error` is only set once the job has failed for
+ *  good; a retry in progress shows as queued. */
+export type TaskView = {
+  id: number;
+  kind: string;
+  payload: unknown;
+  status: TaskStatus;
+  progress: TaskProgress | null;
+  result: unknown;
+  error: string | null;
+  attempts: number;
+  maxAttempts: number;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
+const toTaskView = (row: Record<string, unknown>): TaskView => ({
+  id: Number(row.id),
+  kind: String(row.kind),
+  payload: row.payload,
+  status: String(row.status) as TaskStatus,
+  progress: (row.progress as TaskProgress | null) ?? null,
+  result: row.result ?? null,
+  error: String(row.status) === "failed" ? String(row.last_error ?? "failed") : null,
+  attempts: Number(row.attempts),
+  maxAttempts: Number(row.max_attempts),
+  createdAt: new Date(String(row.created_at)).toISOString(),
+  finishedAt: row.finished_at ? new Date(String(row.finished_at)).toISOString() : null,
+});
+
 export class WorkQueue {
   constructor(private readonly query: QueryFn) {}
 
@@ -163,6 +199,48 @@ export class WorkQueue {
       [Math.round(lockTimeoutSec)],
     );
     return rows.length;
+  }
+
+  /** Records what a running job is doing. Only the worker that holds the
+   *  job may write it, so a reclaimed job's old run cannot overwrite the new
+   *  run's progress. Returns false if this worker no longer holds the job. */
+  async setProgress(job: QueueJob, workerId: string, progress: TaskProgress): Promise<boolean> {
+    const rows = await this.query(
+      `update work_queue set progress = $3::jsonb
+        where id = $1 and locked_by = $2 and status = 'running' returning id`,
+      [job.id, workerId, JSON.stringify(progress)],
+    );
+    return rows.length > 0;
+  }
+
+  /** One job's state for the UI, or null if there is no such job. */
+  async getTask(id: number): Promise<TaskView | null> {
+    const rows = await this.query(
+      `select id, kind, payload, status, progress, result, last_error, attempts, max_attempts, created_at, finished_at
+         from work_queue where id = $1`,
+      [id],
+    );
+    return rows.length > 0 ? toTaskView(rows[0]) : null;
+  }
+
+  /** Jobs of the given kinds that are queued or running, or (with
+   *  `includeRecent`) finished in the last `recentMinutes`. Filtered by the
+   *  payload's brand slug (and card id, if given): how a page recovers its
+   *  spinners after a reload. */
+  async listTasks(filter: { slug: string; kinds?: string[]; cardId?: string; includeRecentMinutes?: number }): Promise<TaskView[]> {
+    const rows = await this.query(
+      `select id, kind, payload, status, progress, result, last_error, attempts, max_attempts, created_at, finished_at
+         from work_queue
+        where payload->>'slug' = $1
+          and ($2::text[] is null or kind = any($2::text[]))
+          and ($3::text is null or payload->>'cardId' = $3)
+          and (status in ('queued', 'running')
+               or ($4::int > 0 and finished_at > now() - ($4::int * interval '1 minute')))
+        order by id desc
+        limit 200`,
+      [filter.slug, filter.kinds ?? null, filter.cardId ?? null, filter.includeRecentMinutes ?? 0],
+    );
+    return rows.map(toTaskView);
   }
 
   /** Counts by status, for a health check or the CLI. */

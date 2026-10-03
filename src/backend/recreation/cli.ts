@@ -1,21 +1,12 @@
 import "dotenv/config";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { analyzeVideoFile } from "../analysis/analyzer";
-import { VideoAnalysisSchema } from "../analysis/schemas";
 import { consoleSink } from "../cost/ledger";
-import { extractFrame } from "../pipeline/shotDetect";
 import { getStorage } from "../storage";
-import { BrandIntakeSchema } from "../brand/intake/schemas";
-import { LockedCharacterSchema } from "../character/schemas";
-import { googleImageCostEntry } from "../cost/ledger";
-import { GEMINI_IMAGE_MODEL, generateImage } from "../pipeline/generation/geminiImage";
-import { adapt, assembleScript } from "./adapt";
-import { boardHtml, type FramePlan, planFrames } from "./storyboard";
-import { assembleSpec, decompose, type Keyframe, keyframeTimes, type SourceMeta, sourceIdFromUrl } from "./decompose";
-import { type AdaptedScript, AdaptedScriptSchema, ProductFootageSchema, type RecreationSpec, RecreationSpecSchema } from "./schemas";
+import { recreationKeys } from "../brand/keys";
+import { sourceIdForCard } from "../plan/store";
+import { sourceIdFromUrl } from "./decompose";
+import { adaptCard, buildSpec, ingestSource, storyboardCard } from "./ops";
+import { type AdaptedScript, AdaptedScriptSchema, type RecreationSpec, RecreationSpecSchema } from "./schemas";
 
 /**
  * Viral source videos → RecreationSpecs, run by hand in the pilot (M1 day 3).
@@ -33,9 +24,9 @@ import { type AdaptedScript, AdaptedScriptSchema, ProductFootageSchema, type Rec
  *   npm run recreate -- ingest --brand <slug> --url <url> [--url <url> …]
  *   npm run recreate -- spec   --brand <slug> [--source <id>]     (all downloaded sources when omitted)
  *   npm run recreate -- show   --brand <slug> [--source <id>]
- *   npm run recreate -- adapt  --brand <slug> [--source <id> [--keep 0,3]] [--cta WORD] [--direction "…"]
+ *   npm run recreate -- adapt  --brand <slug> [--source <id> | --card <id>] [--keep 0,3] [--cta WORD] [--direction "…"]
  *   npm run recreate -- script --brand <slug> [--source <id>]     (print adapted scripts)
- *   npm run recreate -- storyboard --brand <slug> --source <id> [--shots s0,s3] [--redo] [--set "…"]
+ *   npm run recreate -- storyboard --brand <slug> --source <id> | --card <id> [--shots s0,s3] [--redo] [--set "…"]
  */
 
 const USAGE = "usage: npm run recreate -- <ingest|spec|show|adapt|script|storyboard> --brand <slug> [options]  (see cli.ts)";
@@ -53,43 +44,12 @@ const required = (args: string[], name: string): string => {
 
 const storage = getStorage();
 
-const keys = (brand: string) => {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(brand)) throw new Error(`--brand must be a lowercase slug, got "${brand}"`);
-  const root = `brands/${brand}/sources`;
-  return {
-    root,
-    video: (id: string) => `${root}/${id}.mp4`,
-    info: (id: string) => `${root}/${id}.info.json`,
-    analysis: (id: string) => `${root}/analysis/${id}.json`,
-    keyframe: (id: string, shot: number, k: number) => `${root}/keyframes/${id}/s${shot}-${k}.jpg`,
-    spec: (id: string) => `${root}/specs/${id}.json`,
-    script: (id: string) => `brands/${brand}/scripts/${id}.json`,
-    intake: `brands/${brand}/intake.json`,
-    character: `brands/${brand}/character/character.json`,
-    footage: `brands/${brand}/product/footage.json`,
-    board: (id: string) => `brands/${brand}/storyboards/${id}`,
-  };
-};
+const keys = recreationKeys;
 
 const sourceIds = async (brand: string, only?: string): Promise<string[]> => {
   if (only) return [only];
   const k = keys(brand);
   return (await storage.list(k.root)).filter((f) => /\/[^/]+\.mp4$/.test(f) && !f.includes("/keyframes/")).map((f) => f.split("/").pop()!.replace(/\.mp4$/, ""));
-};
-
-const readMeta = async (brand: string, id: string): Promise<SourceMeta> => {
-  const k = keys(brand);
-  if (!(await storage.exists(k.info(id)))) return { sourceId: id, url: null, creator: null, likes: null, comments: null, views: null };
-  const info = JSON.parse(fs.readFileSync(await storage.localPath(k.info(id)), "utf8")) as Record<string, unknown>;
-  const num = (v: unknown) => (typeof v === "number" ? v : null);
-  return {
-    sourceId: id,
-    url: (info.webpage_url as string) ?? null,
-    creator: (info.uploader as string) || (info.channel as string) || null,
-    likes: num(info.like_count),
-    comments: num(info.comment_count),
-    views: num(info.view_count),
-  };
 };
 
 const readJson = async (key: string, what: string): Promise<unknown> => {
@@ -100,74 +60,25 @@ const readJson = async (key: string, what: string): Promise<unknown> => {
 const commands: Record<string, (args: string[]) => Promise<void>> = {
   ingest: async (args) => {
     const brand = required(args, "--brand");
-    const k = keys(brand);
     const urls = options(args, "--url");
     if (urls.length === 0) throw new Error(`missing --url\n${USAGE}`);
     for (const url of urls) {
-      const id = sourceIdFromUrl(url);
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "katalab-ingest-"));
       try {
-        // Same yt-dlp invocation as authoring/ingest.ts, plus the info JSON
-        // for the creator and engagement numbers.
-        const ytArgs = ["-q", "--no-warnings", "-f", "mp4/best", "--no-playlist", "--merge-output-format", "mp4", "--write-info-json", "-o", path.join(dir, "v.%(ext)s"), url];
-        const cookies = process.env.EDITABLE_YTDLP_COOKIES_BROWSER;
-        if (cookies) ytArgs.unshift("--cookies-from-browser", cookies);
-        execFileSync("yt-dlp", ytArgs, { stdio: ["ignore", "ignore", "pipe"] });
-        await storage.putFile(k.video(id), path.join(dir, "v.mp4"));
-        if (fs.existsSync(path.join(dir, "v.info.json"))) await storage.putFile(k.info(id), path.join(dir, "v.info.json"));
-        console.log(`  ✔ ${id}  ${await storage.localPath(k.video(id))}`);
+        const id = await ingestSource(storage, brand, url);
+        console.log(`  ✔ ${id}  ${await storage.localPath(keys(brand).video(id))}`);
       } catch (err) {
-        console.log(`  ✘ ${id}: ${(err as { stderr?: Buffer }).stderr?.toString().slice(-500) ?? err}`);
-      } finally {
-        fs.rmSync(dir, { recursive: true, force: true });
+        console.log(`  ✘ ${sourceIdFromUrl(url)}: ${err instanceof Error ? err.message : err}`);
       }
     }
   },
 
   spec: async (args) => {
     const brand = required(args, "--brand");
-    const k = keys(brand);
     for (const id of await sourceIds(brand, option(args, "--source"))) {
       console.log(`\n${id}`);
-      if (!(await storage.exists(k.video(id)))) throw new Error(`no source video ${k.video(id)}: run ingest first`);
-      const videoPath = await storage.localPath(k.video(id));
-
-      // Measure (cached on disk).
-      let analysis;
-      if (await storage.exists(k.analysis(id))) {
-        analysis = VideoAnalysisSchema.parse(JSON.parse(fs.readFileSync(await storage.localPath(k.analysis(id)), "utf8")).analysis);
-      } else {
-        const result = await analyzeVideoFile(videoPath);
-        await storage.putBuffer(k.analysis(id), Buffer.from(JSON.stringify(result, null, 2)));
-        analysis = result.analysis;
-      }
-      console.log(`  measured: ${analysis.shots.length} shots, ${analysis.transcript?.words.length ?? 0} words`);
-
-      // Keyframes per shot, kept: day 4's storyboards use them for composition.
-      const keyframes: Keyframe[] = [];
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "katalab-keyframes-"));
-      try {
-        for (const [i, s] of analysis.shots.entries()) {
-          for (const [j, atSec] of keyframeTimes(s.startSec, s.endSec).entries()) {
-            const key = k.keyframe(id, i, j);
-            if (!(await storage.exists(key))) {
-              const out = path.join(tmp, `s${i}-${j}.jpg`);
-              if (!extractFrame(videoPath, atSec, out, 720)) continue;
-              await storage.putFile(key, out);
-            }
-            keyframes.push({ shotIndex: i, atSec, path: await storage.localPath(key), key });
-          }
-        }
-      } finally {
-        fs.rmSync(tmp, { recursive: true, force: true });
-      }
-      console.log(`  keyframes: ${keyframes.length}`);
-
-      const { decomposition, model } = await decompose(analysis, keyframes, { costSink: consoleSink, ref: `${brand}/${id}` });
-      const spec = RecreationSpecSchema.parse(assembleSpec(analysis, decomposition, keyframes, await readMeta(brand, id), model));
-      await storage.putBuffer(k.spec(id), Buffer.from(JSON.stringify(spec, null, 2)));
+      const spec = await buildSpec({ storage, costSink: consoleSink, report: (p) => console.log(`  ${p.stage}${p.message ? `: ${p.message}` : ""}`) }, brand, id);
       printSpec(spec);
-      console.log(`  saved ${k.spec(id)}`);
+      console.log(`  saved ${keys(brand).spec(id)}`);
     }
   },
 
@@ -186,22 +97,20 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
   adapt: async (args) => {
     const brand = required(args, "--brand");
     const k = keys(brand);
-    const only = option(args, "--source");
+    // --card <id> adapts one plan card: its spec comes from the card's source
+    // and its script is saved under the card id (defaults to the source id,
+    // so plain --source keeps working).
+    const cardArg = option(args, "--card");
+    const only = cardArg ?? option(args, "--source");
     const keep = option(args, "--keep")?.split(",").map(Number);
-    if (keep && !only) throw new Error("--keep needs --source: line indices differ per source");
-    const intake = BrandIntakeSchema.parse(await readJson(k.intake, "brand intake"));
-    const character = LockedCharacterSchema.parse(await readJson(k.character, "locked character"));
-    const footage = ProductFootageSchema.parse(await readJson(k.footage, "product footage"));
+    if (keep && !only) throw new Error("--keep needs --source or --card: line indices differ per source");
     for (const id of await sourceIds(brand, only)) {
-      if (!(await storage.exists(k.spec(id)))) {
-        console.log(`\n${id}: no spec yet, run spec first`);
+      const sourceId = cardArg ? await sourceIdForCard(storage, brand, id) : id;
+      if (!(await storage.exists(k.spec(sourceId)))) {
+        console.log(`\n${sourceId}: no spec yet, run spec first`);
         continue;
       }
-      const spec = RecreationSpecSchema.parse(await readJson(k.spec(id), "spec"));
-      const opts = { keep, cta: option(args, "--cta"), direction: option(args, "--direction") };
-      const { adaptation, model } = await adapt(spec, intake, character, footage, { ...opts, costSink: consoleSink, ref: `${brand}/${id}` });
-      const script = AdaptedScriptSchema.parse(assembleScript(spec, adaptation, footage, { brand, language: intake.language, keep }, model));
-      await storage.putBuffer(k.script(id), Buffer.from(JSON.stringify(script, null, 2)));
+      const script = await adaptCard({ storage, costSink: consoleSink }, brand, id, sourceId, { keep, cta: option(args, "--cta"), direction: option(args, "--direction") });
       printScript(script);
       console.log(`  saved ${k.script(id)}`);
     }
@@ -217,64 +126,21 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
 
   storyboard: async (args) => {
     const brand = required(args, "--brand");
-    const id = required(args, "--source");
-    const k = keys(brand);
-    const dir = k.board(id);
-    const script = AdaptedScriptSchema.parse(await readJson(k.script(id), "adapted script (run adapt first)"));
-    const spec = RecreationSpecSchema.parse(await readJson(k.spec(id), "spec"));
-    const character = LockedCharacterSchema.parse(await readJson(k.character, "locked character"));
-    const footage = ProductFootageSchema.parse(await readJson(k.footage, "product footage"));
+    // --card <id> (or --source <id>, which is its own card): the storyboard is
+    // keyed by the card, the spec by the card's source.
+    const id = option(args, "--card") ?? required(args, "--source");
+    const sourceId = await sourceIdForCard(storage, brand, id);
     const only = option(args, "--shots")?.split(",");
-    const redo = args.includes("--redo");
-
-    // One frame from the middle of every footage clip the script uses.
-    const footageKey = (clipId: string) => `${dir}/footage/${clipId}.jpg`;
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "katalab-board-"));
-    try {
-      for (const clipId of new Set(script.shots.flatMap((s) => (s.footageId ? [s.footageId] : [])))) {
-        if (await storage.exists(footageKey(clipId))) continue;
-        const clip = footage.clips.find((c) => c.id === clipId)!;
-        const out = path.join(tmp, `${clipId}.jpg`);
-        if (!extractFrame(await storage.localPath(clip.key), (clip.startSec + clip.endSec) / 2, out, 1600)) throw new Error(`could not extract a frame of ${clipId}`);
-        await storage.putFile(footageKey(clipId), out);
-      }
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-
-    const plans = planFrames(script, spec, character, footageKey, option(args, "--set"));
-    const stillKey = (shotId: string) => `${dir}/${shotId}.png`;
-    const todo: Extract<FramePlan, { mode: "generate" }>[] = [];
-    for (const p of plans) {
-      if (p.mode !== "generate" || (only && !only.includes(p.shotId))) continue;
-      if (!redo && (await storage.exists(stillKey(p.shotId)))) continue;
-      todo.push(p);
-    }
-    console.log(`${todo.length} still(s) to generate (${plans.filter((p) => p.mode === "footage").length} shots use footage frames)`);
-
-    // A few at a time; one failed shot is reported, not fatal.
-    const failed: string[] = [];
-    const run = async (p: (typeof todo)[number]) => {
-      try {
-        const refPaths = await Promise.all(p.refs.map((r) => storage.localPath(r.key)));
-        const bytes = await generateImage(p.prompt, refPaths, refPaths.length, { aspectRatio: "9:16", imageSize: "2K" });
-        await consoleSink(googleImageCostEntry(GEMINI_IMAGE_MODEL, 1, "storyboard_frame", { ref: `${brand}/${id}/${p.shotId}` }));
-        await storage.putBuffer(stillKey(p.shotId), bytes);
-        console.log(`  ✔ ${p.shotId}`);
-      } catch (err) {
-        failed.push(p.shotId);
-        console.log(`  ✘ ${p.shotId}: ${err instanceof Error ? err.message.slice(0, 300) : err}`);
-      }
-    };
-    for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map(run));
-
-    const images = new Map<string, string>();
-    for (const p of plans) {
-      if (p.mode === "footage") images.set(p.shotId, `footage/${p.footageId}.jpg`);
-      else if (p.mode === "generate" && (await storage.exists(stillKey(p.shotId)))) images.set(p.shotId, `${p.shotId}.png`);
-    }
-    await storage.putBuffer(`${dir}/board.html`, Buffer.from(boardHtml(script, (shotId) => images.get(shotId) ?? null)));
-    console.log(`board: ${await storage.localPath(`${dir}/board.html`)}${failed.length ? `\nfailed: ${failed.join(",")} (rerun with --shots ${failed.join(",")})` : ""}`);
+    const result = await storyboardCard(
+      { storage, costSink: consoleSink, report: (p) => p.message && console.log(`  ${p.stage}: ${p.message}${p.total ? ` (${p.done}/${p.total})` : ""}`) },
+      brand,
+      id,
+      sourceId,
+      { shots: only, redo: args.includes("--redo"), set: option(args, "--set") },
+    );
+    console.log(`${result.generated.length} still(s) generated (${result.footageShots} shots use footage frames)`);
+    for (const f of result.failed) console.log(`  ✘ ${f}`);
+    console.log(`board: ${await storage.localPath(result.boardKey)}${result.failed.length ? `\nfailed: ${result.failed.map((f) => f.split(":")[0]).join(",")} (rerun with --shots ${result.failed.map((f) => f.split(":")[0]).join(",")})` : ""}`);
   },
 };
 

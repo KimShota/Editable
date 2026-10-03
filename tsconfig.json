@@ -35,9 +35,13 @@
   },
   "include": [
     "src",
+    "tests",
+    "playwright.config.ts",
     "next-env.d.ts",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".next-test/types/**/*.ts",
+    ".next-test/dev/types/**/*.ts"
   ],
   "exclude": [
     "remotion.config.ts",

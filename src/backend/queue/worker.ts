@@ -1,4 +1,4 @@
-import { QueueJob, WorkQueue } from "./workQueue";
+import { QueueJob, TaskProgress, WorkQueue } from "./workQueue";
 
 /**
  * The worker loop over a WorkQueue. Kept apart from the SQL (workQueue.ts)
@@ -7,7 +7,20 @@ import { QueueJob, WorkQueue } from "./workQueue";
  * a future dedicated worker box runs the same code.
  */
 
-export type JobHandler = (job: QueueJob) => Promise<unknown>;
+/** What the worker hands a handler besides the job itself. */
+export type JobContext = {
+  /** Shows what the job is doing (read by /api/tasks/<id>). Never throws and
+   *  never fails the job: progress is a courtesy, not part of the work. */
+  report: (progress: TaskProgress) => void;
+};
+
+/** For a handler called outside the worker (a check, a CLI): progress goes
+ *  nowhere. Handlers write `const { report } = ctx ?? NO_CONTEXT`. */
+export const NO_CONTEXT: JobContext = { report: () => {} };
+
+/** `ctx` is optional so a handler can also be called directly with just a
+ *  job, as the checks do. */
+export type JobHandler = (job: QueueJob, ctx?: JobContext) => Promise<unknown>;
 
 export type WorkerOptions = {
   queue: WorkQueue;
@@ -46,7 +59,12 @@ export const runOnce = async (opts: WorkerOptions): Promise<boolean> => {
 
   const startedAt = Date.now();
   try {
-    const result = await handlers[job.kind](job);
+    const ctx: JobContext = {
+      report: (progress) => {
+        queue.setProgress(job, workerId, progress).catch((err) => log(`job ${job.id}: progress write failed: ${err}`));
+      },
+    };
+    const result = await handlers[job.kind](job, ctx);
     const held = await queue.complete(job, workerId, result);
     log(
       held

@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
+    "@playwright/test": "^1.63.0",
     "@remotion/eslint-config-flat": "4.0.482",
     "@types/node": "^26.1.1",
     "@types/react": "19.2.7",
@@ -72,7 +73,13 @@
     "lint": "eslint src && tsc",
     "app:dev": "NODE_OPTIONS=--max-old-space-size=4096 next dev -p 3100",
     "app:build": "next build",
-    "app:start": "next start -p 3100"
+    "app:start": "next start -p 3100",
+    "test:ui-data": "tsx src/backend/tools/uiDataChecks.ts",
+    "plan": "tsx src/backend/plan/cli.ts",
+    "brand:link": "tsx src/backend/tools/brandLink.ts",
+    "app:demo": "tsx src/backend/tools/appDemo.ts",
+    "test:db-server": "tsx src/backend/tools/testDbServer.ts",
+    "test:e2e": "playwright test"
   },
   "sideEffects": [
     "*.css"
