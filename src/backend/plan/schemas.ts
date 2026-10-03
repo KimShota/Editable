@@ -70,6 +70,10 @@ export const PlanSchema = z.object({
 });
 export type Plan = z.infer<typeof PlanSchema>;
 
+/** True for an http or https address. Never throws, so it is safe to chain after `.url()`, whose
+ *  failure does not stop later checks from running. */
+export const isWebAddress = (u: string): boolean => URL.canParse(u) && /^https?:$/i.test(new URL(u).protocol);
+
 /** The caption and posting state of one produced video:
  *  `videos/<cardId>/post.json`. Kept apart from plan.json so editing a
  *  caption never contends with a status change. */
@@ -79,7 +83,8 @@ export const PostDetailsSchema = z.object({
   /** Platforms the customer plans to post to. Auto-posting is a shell in
    *  Phase 1, so this is a note for the manual flow. */
   platforms: z.array(z.enum(["tiktok", "instagram", "youtube"])).default([]),
-  postedUrls: z.array(z.string().url()).default([]),
+  // Shown to people as links, so only web addresses: a javascript: or data: URL must never be stored.
+  postedUrls: z.array(z.string().url().refine(isWebAddress, "must be an http or https address")).default([]),
   postedAt: z.string().optional(),
 });
 export type PostDetails = z.infer<typeof PostDetailsSchema>;

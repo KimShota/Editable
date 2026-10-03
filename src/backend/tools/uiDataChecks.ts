@@ -384,6 +384,10 @@ const main = async () => {
     t.check("post details persist", (await repo.getPostDetails("shogunai", "a")).postedUrls[0] === "https://tiktok.com/@x/video/1");
     await t.rejects("post details for a card not in the plan are refused", () => repo.savePostDetails("shogunai", "ghost", { caption: "", hashtags: [], platforms: [], postedUrls: [] }), /no card ghost/);
     await t.rejects("a bad posted URL is refused", () => repo.savePostDetails("shogunai", "a", { caption: "", hashtags: [], platforms: [], postedUrls: ["not a url"] }));
+    for (const bad of ["javascript:alert(1)", "data:text/html,<script>1</script>", "vbscript:x", "ftp://x.test/a"]) {
+      await t.rejects(`a posted link using ${bad.split(":")[0]}: is refused`, () => repo.savePostDetails("shogunai", "a", { caption: "", hashtags: [], platforms: [], postedUrls: [bad] }), /http or https/);
+    }
+    t.check("an uppercase HTTPS link is accepted", (await repo.savePostDetails("shogunai", "a", { caption: "", hashtags: [], platforms: [], postedUrls: ["HTTPS://tiktok.com/@x/video/2"] }), true));
 
     t.check("a card with no video has no final and no cost", await repo.getVideo("shogunai", "b").then((v) => !v.hasFinal && v.costUsd === 0 && v.finalKey === null));
     await storage.putBuffer("brands/shogunai/videos/a/final.mp4", Buffer.from("mp4"));

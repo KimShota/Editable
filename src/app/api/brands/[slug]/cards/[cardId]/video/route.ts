@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isVideoVisible } from "@backend/plan/status";
 import { productionKeys } from "@backend/brand/keys";
-import { PostDetailsSchema } from "@backend/plan/schemas";
+import { isWebAddress, PostDetailsSchema } from "@backend/plan/schemas";
 import { brandRoute, ConflictError, readJsonBody } from "../../../../../../lib/brandApi";
 import { brandRepo } from "../../../../../../lib/brandRepo";
 
@@ -24,7 +24,7 @@ const Body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("approve") }),
   z.object({ action: z.literal("unapprove") }),
   z.object({ action: z.literal("not_right"), reason: z.enum(REASONS), note: z.string().trim().max(500).optional() }),
-  z.object({ action: z.literal("mark_posted"), urls: z.array(z.string().trim().url("Paste the full link, starting with https://")).min(1, "Paste at least one link").max(3) }),
+  z.object({ action: z.literal("mark_posted"), urls: z.array(z.string().trim().url("Paste the full link, starting with https://").refine(isWebAddress, "Paste the full link, starting with https://")).min(1, "Paste at least one link").max(3) }),
 ]);
 
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string; cardId: string }> }) {
@@ -49,8 +49,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
       case "mark_posted": {
         if (card.status !== "ready") throw new ConflictError("Approve the video before marking it as posted.");
         const details = await brandRepo.getPostDetails(slug, cardId);
+        // Validate before changing the status, so a bad link cannot leave a video marked posted with nothing saved.
+        const posted = PostDetailsSchema.parse({ ...details, postedUrls: body.urls, postedAt: new Date().toISOString() });
         await brandRepo.transitionCard(slug, cardId, "posted", actor);
-        await brandRepo.savePostDetails(slug, cardId, PostDetailsSchema.parse({ ...details, postedUrls: body.urls, postedAt: new Date().toISOString() }));
+        await brandRepo.savePostDetails(slug, cardId, posted);
         break;
       }
     }

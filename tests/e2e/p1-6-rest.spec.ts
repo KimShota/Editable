@@ -285,6 +285,21 @@ test.describe("workspace", () => {
   });
 });
 
+test.describe("posted links", () => {
+  test("only web addresses are accepted, and a refused link leaves the video unposted", async ({ page }) => {
+    await as(page, "member");
+    const mark = (urls: string[]) => page.request.post(`/api/brands/acme/cards/${CARDS.ready}/video`, { data: { action: "mark_posted", urls }, failOnStatusCode: false });
+    for (const bad of ["javascript:alert(document.cookie)", "data:text/html,<script>1</script>", "ftp://x.test/a"]) {
+      const res = await mark([bad]);
+      expect(res.status(), bad).toBe(400);
+      expect((await res.json()).error).toContain("starting with https://");
+    }
+    await page.goto("/calendar");
+    await expect(page.locator(`[data-card-id="${CARDS.ready}"]`).getByText("Ready to post", { exact: true })).toBeVisible(); // still ready, not posted
+    expect((await mark(["https://www.tiktok.com/@a/video/1"])).ok()).toBe(true);
+  });
+});
+
 test.describe("analytics", () => {
   test("a customer sees the real layout with honest empty states, and no sample numbers", async ({ page }, info) => {
     await as(page, "member");
