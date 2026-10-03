@@ -12,7 +12,8 @@ export const metadata: Metadata = { title: "Calendar · Katalab" };
  * approve-all and manual posting replace this body (plan/ui-ux-full-flow.md
  * §6). Reading goes through brandRepo like every screen.
  */
-export default async function CalendarPage() {
+export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
+  const sentBack = (await searchParams)["sent-back"] === "1";
   const user = (await getRequestUser())!;
   const { active } = await getActiveBrand(user);
 
@@ -39,6 +40,11 @@ export default async function CalendarPage() {
   return (
     <Container>
       <PageHeader kicker={active.name} title="Calendar" subtitle={`Cycle ${plan.cycleId} · starts ${formatDate(plan.startsOn, { weekday: true })}`} />
+      {sentBack && (
+        <p role="status" className="mb-6 rounded-xl bg-[color:var(--st-queued-bg)] px-4 py-3 text-sm text-[color:var(--st-queued-fg)]">
+          Thank you. We will look at that video and send you a new version.
+        </p>
+      )}
       <ol className="flex flex-col gap-3">
         {cards.map((card) => (
           <li key={card.id} data-card-id={card.id} className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl border border-[color:var(--card-border)] bg-[color:var(--card)] px-5 py-4">

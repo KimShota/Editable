@@ -104,10 +104,18 @@ export function Editor({
   formatName,
   initialEdl,
   aiVideo = false,
+  backHref,
+  subtitle,
 }: {
   jobId: string;
   formatName: string;
   initialEdl: Edl;
+  /** Where the arrow in the top bar goes; the old template flow's resources
+   *  page when omitted. */
+  backHref?: string;
+  /** Shown under the title instead of the job id (which means nothing to a
+   *  customer reviewing a brand video). */
+  subtitle?: string;
   /** Made by the production pipeline: every main-track clip gets a
    *  Regenerate button (a new AI take of that shot). */
   aiVideo?: boolean;
@@ -584,7 +592,7 @@ export function Editor({
       <div className="flex h-14 shrink-0 items-center justify-between border-b border-[color:var(--ed-border)] px-4">
         <div className="flex items-center gap-3">
           <Link
-            href={`/jobs/${jobId}/resources`}
+            href={backHref ?? `/jobs/${jobId}/resources`}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--ed-ink-dim)] transition-colors hover:bg-[color:var(--ed-raised)] hover:text-[color:var(--ed-ink)]"
           >
             <ArrowLeftIcon className="h-4 w-4" />
@@ -594,7 +602,7 @@ export function Editor({
             <p className="font-[family-name:var(--ed-font-display)] text-sm font-semibold text-[color:var(--ed-ink)]">
               {formatName}
             </p>
-            <p className="font-mono text-[10px] tracking-wide text-[color:var(--ed-ink-faint)]">{jobId}</p>
+            <p className="font-mono text-[10px] tracking-wide text-[color:var(--ed-ink-faint)]">{subtitle ?? jobId}</p>
           </div>
           <div className="h-5 w-px bg-[color:var(--ed-border-strong)]" />
           <div className="flex items-center gap-1">
@@ -618,7 +626,7 @@ export function Editor({
         </div>
 
         <div className="flex items-center gap-3">
-          {quota && !quota.unlimited && (
+          {!aiVideo && quota && !quota.unlimited && (
             <span className="flex items-center gap-1.5 rounded-full border border-[color:var(--ed-border)] px-2.5 py-1 text-[11px] text-[color:var(--ed-ink-dim)]">
               {quota.remaining} video{quota.remaining === 1 ? "" : "s"} left today
             </span>

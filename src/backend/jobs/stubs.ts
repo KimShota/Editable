@@ -5,6 +5,7 @@ import { parseViralUrl } from "../recreation/viralUrl";
 import { type Proposal, type ProposerFactory, proposalProblems } from "../plan/propose";
 import { writeJson } from "../storageJson";
 import type { JobDeps, RecreationOps } from "./deps";
+import { stubProduction } from "./stubProduction";
 
 /**
  * The paid parts of the recreation pipeline, replaced by deterministic
@@ -91,4 +92,4 @@ export const stubProposer: ProposerFactory = () => async (input): Promise<Propos
   return { cards };
 };
 
-export const stubDeps = (base: Pick<JobDeps, "query" | "storage" | "costSinkFor">): JobDeps => ({ ...base, ops: stubOps(), proposer: stubProposer });
+export const stubDeps = (base: Pick<JobDeps, "query" | "storage" | "costSinkFor">): JobDeps => ({ ...base, ops: stubOps(), proposer: stubProposer, production: stubProduction(base.storage) });

@@ -53,7 +53,7 @@ const NAV: NavItem[] = [
  *  admins). Filled in by the slices that build those pages. */
 const MENU: (NavItem & { adminOnly?: boolean })[] = [
   {
-    href: "/admin/sources",
+    href: "/admin/production",
     label: "Admin",
     adminOnly: true,
     icon: icon(
@@ -64,7 +64,9 @@ const MENU: (NavItem & { adminOnly?: boolean })[] = [
   },
 ];
 
-const isActive = (pathname: string, href: string): boolean => pathname === href || pathname.startsWith(`${href}/`);
+const isActive = (pathname: string, href: string): boolean =>
+  // Admin is one menu entry for several screens (production, review, viral videos).
+  href === "/admin/production" ? pathname === "/admin" || pathname.startsWith("/admin/") : pathname === href || pathname.startsWith(`${href}/`);
 
 const linkClass = (active: boolean): string =>
   `flex items-center gap-3 rounded-xl px-3 py-2.5 font-[family-name:var(--font-display)] text-[14px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--accent)] ${

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useAiVideoSource } from "./AiVideoSource";
 import { PlusIcon, RegenerateIcon } from "./Icons";
 
 /**
@@ -14,6 +15,52 @@ import { PlusIcon, RegenerateIcon } from "./Icons";
 
 type TakeView = { id: string; src: string; inSec: number; createdAt: string; origin: "original" | "regenerated" | "retry"; label?: string; request?: string };
 type TakesResponse = { shotId: string; regenerable: boolean; currentTakeId: string | null; takes: TakeView[] };
+
+/**
+ * The original shot beside the take that is on the timeline, both muted and
+ * looping, so what the AI made can be judged against what it was asked to
+ * recreate. The original is the viral video held to this shot's span.
+ */
+function SideBySide({ sourceUrl, span, takeSrc, takeInSec }: { sourceUrl: string; span: { startSec: number; endSec: number }; takeSrc: string; takeInSec: number }) {
+  const original = useLoop(span.startSec, span.endSec);
+  const generated = useLoop(takeInSec, takeInSec + Math.max(0.5, span.endSec - span.startSec));
+  const tile = "aspect-[9/16] w-full rounded-lg border border-[color:var(--ed-border)] bg-black object-cover";
+  return (
+    <div data-testid="side-by-side" className="grid grid-cols-2 gap-2">
+      <figure className="flex flex-col gap-1">
+        <video ref={original} src={sourceUrl} muted playsInline autoPlay preload="metadata" aria-label="The original shot" className={tile} />
+        <figcaption className="text-[11px] text-[color:var(--ed-ink-dim)]">Original</figcaption>
+      </figure>
+      <figure className="flex flex-col gap-1">
+        <video ref={generated} src={takeSrc} muted playsInline autoPlay preload="metadata" aria-label="The take in use" className={tile} />
+        <figcaption className="text-[11px] text-[color:var(--ed-ink-dim)]">In use</figcaption>
+      </figure>
+    </div>
+  );
+}
+
+/** Plays a video between two times, over and over. */
+function useLoop(startSec: number, endSec: number) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    const begin = () => {
+      v.currentTime = startSec;
+    };
+    const tick = () => {
+      if (v.currentTime >= endSec || v.currentTime < startSec - 0.1) v.currentTime = startSec;
+    };
+    v.addEventListener("loadedmetadata", begin);
+    v.addEventListener("timeupdate", tick);
+    if (v.readyState >= 1) begin();
+    return () => {
+      v.removeEventListener("loadedmetadata", begin);
+      v.removeEventListener("timeupdate", tick);
+    };
+  }, [startSec, endSec]);
+  return ref;
+}
 
 export function ClipTakes({
   jobId,
@@ -33,6 +80,7 @@ export function ClipTakes({
 }) {
   const [data, setData] = useState<TakesResponse | null>(null);
   const [failed, setFailed] = useState(false);
+  const source = useAiVideoSource();
 
   useEffect(() => {
     let cancelled = false;
@@ -55,8 +103,12 @@ export function ClipTakes({
   if (failed) return null;
   if (!data) return <p className="text-xs text-[color:var(--ed-ink-faint)]">Loading takes…</p>;
 
+  const span = source?.shots[data.shotId];
+  const inUse = data.takes.find((t) => t.id === data.currentTakeId);
+
   return (
     <div className="flex flex-col gap-2">
+      {source && span && inUse && <SideBySide sourceUrl={source.videoUrl} span={span} takeSrc={`/${inUse.src}`} takeInSec={inUse.inSec} />}
       <p className="text-xs font-medium text-[color:var(--ed-ink-dim)]">
         Takes <span className="text-[color:var(--ed-ink-faint)]">({data.takes.length})</span>
       </p>

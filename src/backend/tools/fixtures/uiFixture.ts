@@ -4,6 +4,8 @@ import { hashPassword } from "../../../app/lib/password";
 import type { QueryFn } from "../../../app/lib/db";
 import { linkBrand } from "../../brand/link";
 import { LocalStorage, type Storage } from "../../storage";
+import { writeStubVideo } from "../../jobs/stubProduction";
+import { repoRoot } from "../../pipeline/paths";
 import { fixtureScript, fixtureSpec } from "./specFixture";
 
 /**
@@ -102,7 +104,8 @@ export const seedUiFixture = async (query: QueryFn, storageRoot: string): Promis
 
   // Media a customer may fetch…
   await storage.putBuffer(`brands/acme/character/sheet/front.png`, PNG);
-  await storage.putBuffer(`brands/acme/videos/${c.ready}/final.mp4`, Buffer.alloc(4096, 1));
+  // The cards a video exists for: real (tiny) videos and editor jobs, made by the stub producer.
+  for (const id of [c.inReview, c.review, c.ready]) await writeStubVideo(storage, "acme", id);
   // …and files a customer must never fetch, even from their own brand.
   await storage.putBuffer(`brands/acme/videos/${c.ready}/costs.jsonl`, Buffer.from(`${JSON.stringify({ usd: 12.34, provider: "higgsfield" })}\n`));
   await storage.putBuffer(`brands/acme/videos/${c.ready}/clips/s0.request.json`, Buffer.from(JSON.stringify({ prompt: "secret prompt" })));
@@ -120,8 +123,21 @@ const seedSource = async (storage: Storage, slug: string, sourceId: string): Pro
   await storage.putBuffer(`brands/${slug}/sources/specs/${sourceId}.json`, Buffer.from(JSON.stringify(spec)));
 };
 
+/** The stub producer also publishes editor jobs outside storage/ (jobs/,
+ *  artifacts/, public/jobs/, out/). Brands named acme, rival and planco
+ *  exist only in tests, so everything under their prefixes can go. */
+export const cleanFixtureJobs = (): void => {
+  const mine = (name: string) => /^(acme|rival|planco)-/.test(name);
+  for (const base of ["jobs", "artifacts", "public/jobs", "out"]) {
+    const dir = path.join(repoRoot, base);
+    if (!fs.existsSync(dir)) continue;
+    for (const entry of fs.readdirSync(dir).filter(mine)) fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
+  }
+};
+
 /** Wipes and recreates the fixture's storage directory. */
 export const resetStorage = (storageRoot: string): void => {
+  cleanFixtureJobs();
   fs.rmSync(storageRoot, { recursive: true, force: true });
   fs.mkdirSync(path.join(storageRoot, "brands"), { recursive: true });
 };

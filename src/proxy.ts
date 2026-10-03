@@ -3,6 +3,9 @@ import { getSessionUser, SESSION_COOKIE } from "./app/lib/session";
 import { query, sql } from "./app/lib/db";
 import { brandSlugForVideoJob, findBrandForViewer } from "./backend/brand/access";
 import { isBrandSlug } from "./backend/brand/keys";
+import { isVideoVisible } from "./backend/plan/status";
+import { readPlan } from "./backend/plan/store";
+import { getStorage } from "./backend/storage";
 import { safeDecode } from "./app/lib/mediaPaths";
 
 /**
@@ -171,6 +174,41 @@ const canOpenBrand = async (user: { id: string; isAdmin: boolean }, slug: string
   return ok;
 };
 
+/**
+ * Whether this user may see a card's produced video. Customers only see one
+ * after the founder has sent it through the review gate (plan/status.ts); the
+ * card ids are visible in their plan, so without this a hidden video's files
+ * could be fetched by URL. Reads plan.json (a few seconds of cache) and fails
+ * closed.
+ */
+const videoVisibilityCache = new Map<string, { visible: boolean; expiresAt: number }>();
+const VIDEO_VISIBILITY_TTL_MS = 3_000;
+
+const canSeeVideo = async (user: { isAdmin: boolean }, slug: string, cardId: string): Promise<boolean> => {
+  if (user.isAdmin) return true;
+  const cacheKey = `${slug}:${cardId}`;
+  const cached = videoVisibilityCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.visible;
+  let visible = false;
+  try {
+    const card = (await readPlan(getStorage(), slug))?.cards.find((c) => c.id === cardId);
+    visible = card ? isVideoVisible(card.status, false) : false;
+  } catch (err) {
+    console.error("proxy: video visibility lookup failed; denying", err);
+  }
+  videoVisibilityCache.set(cacheKey, { visible, expiresAt: Date.now() + VIDEO_VISIBILITY_TTL_MS });
+  return visible;
+};
+
+/** /api/media/brands/<slug>/videos/<cardId>/…: a card's produced files. */
+const brandVideoFromPath = (pathname: string): { slug: string; cardId: string } | null => {
+  const m = /^\/api\/media\/brands\/([^/]+)\/videos\/([^/]+)\//.exec(pathname);
+  if (!m) return null;
+  const slug = safeDecode(m[1]);
+  const cardId = safeDecode(m[2]);
+  return slug && cardId && isBrandSlug(slug) ? { slug, cardId } : null;
+};
+
 /** The brand a video job belongs to, or null. Also fails closed. */
 const videoJobBrand = async (jobId: string): Promise<string | null> => {
   try {
@@ -218,8 +256,13 @@ export async function proxy(req: NextRequest) {
         // belongs to its brand, so the brand's members may open it.
         const slug = ownerId === null ? await videoJobBrand(jobId) : null;
         if (!slug || !(await canOpenBrand(user, slug))) return notFound(req);
+        // …and only once the founder has sent that video to them.
+        if (!(await canSeeVideo(user, slug, jobId.slice(slug.length + 1)))) return notFound(req);
       }
     }
+
+    const video = brandVideoFromPath(pathname);
+    if (video && !(await canSeeVideo(user, video.slug, video.cardId))) return notFound(req);
 
     const brandSlug = brandSlugFromPath(pathname);
     if (brandSlug !== null && (brandSlug === "" || !(await canOpenBrand(user, brandSlug)))) {

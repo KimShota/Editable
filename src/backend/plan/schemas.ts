@@ -47,6 +47,8 @@ export const CardSchema = z.object({
   alternates: z.array(z.object({ sourceId: z.string().min(1), angle: z.string() })).default([]),
   /** From `video.estimate` (produce clips --dry): what releasing it costs. */
   estimateUsd: z.number().nonnegative().optional(),
+  /** The most it can cost if every allowed retry is used (production/retry.ts). */
+  estimateMaxUsd: z.number().nonnegative().optional(),
   thumbsDown: z.object({ reason: z.string(), note: z.string().optional(), at: z.string() }).optional(),
   /** Status transitions, newest last, capped (see MAX_HISTORY). */
   history: z

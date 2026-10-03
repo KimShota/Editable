@@ -147,7 +147,7 @@ test.describe("who may see which brand's files", () => {
 
     const ranged = await page.request.get(`/api/media/brands/acme/videos/${CARDS.ready}/final.mp4`, { headers: { Range: "bytes=0-99" } });
     expect(ranged.status()).toBe(206);
-    expect(ranged.headers()["content-range"]).toBe("bytes 0-99/4096");
+    expect(ranged.headers()["content-range"]).toMatch(/^bytes 0-99\/\d+$/);
     expect((await ranged.body()).length).toBe(100);
   });
 

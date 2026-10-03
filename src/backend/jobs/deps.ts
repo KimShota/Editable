@@ -28,11 +28,29 @@ export type RecreationOps = {
   storyboardCard: (ctx: OpContext, slug: string, cardId: string, sourceId: string, opts?: StoryboardOptions) => Promise<StoryboardResult>;
 };
 
+/** Making and remaking the video itself. The real implementation runs the
+ *  `produce` CLI (production/cli.ts) as a child process of the worker: that
+ *  pipeline spends real money, so it stays the one proven code path instead
+ *  of being re-plumbed, and the queue gives it durability, one attempt, and
+ *  live progress read from its output. */
+export type ProductionOps = {
+  /** What producing a card would cost, without paying for any clip. */
+  estimate: (ctx: OpContext, slug: string, cardId: string) => Promise<{ usd: number; maxUsd: number }>;
+  /** Voice, clips and render: leaves a video the editor can open. `flagged`
+   *  names shots that only passed on their last retry (a QC warning). */
+  produce: (ctx: OpContext, slug: string, cardId: string) => Promise<{ flagged: string[] }>;
+  /** What one new take of a clip would cost. */
+  regenEstimate: (jobId: string, clipId: string, planId?: string) => Promise<{ usd: number }>;
+  /** One new take of a clip, kept beside the others. */
+  regenerate: (ctx: OpContext, jobId: string, clipId: string, planId?: string) => Promise<void>;
+};
+
 export type JobDeps = {
   query: QueryFn;
   storage: Storage;
   ops: RecreationOps;
   proposer: ProposerFactory;
+  production: ProductionOps;
   /** Records paid calls against the brand in cost_ledger. */
   costSinkFor: (slug: string) => CostSink;
 };

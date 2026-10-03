@@ -72,7 +72,7 @@ export const transitionCardInPlan = (
   cardId: string,
   to: CardStatus,
   actor: Actor,
-  patch: Partial<Pick<Card, "lowConfidence" | "estimateUsd" | "thumbsDown">> = {},
+  patch: Partial<Pick<Card, "lowConfidence" | "estimateUsd" | "estimateMaxUsd" | "thumbsDown">> = {},
 ): Promise<Plan> =>
   updatePlan(storage, slug, (plan) => {
     // A move for a card that is not in the plan is a bug in the caller, not

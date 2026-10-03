@@ -4,6 +4,10 @@ import path from "node:path";
 import { hasUnsafeSegment, isStorageKeySegment, safeDecode } from "../../app/lib/mediaPaths";
 import { brandCostSink } from "../jobs/deps";
 import { createPlanHandlers, directionFor } from "../jobs/planJobs";
+import { createVideoHandlers } from "../jobs/videoJobs";
+import { readTakes } from "../production/takes";
+import { artifactsDir, repoRoot } from "../pipeline/paths";
+import { EdlSchema } from "../pipeline/schemas";
 import { stubDeps } from "../jobs/stubs";
 import { buildProposalText, pickAlternates, type PoolSource, type ProposeInput, proposalProblems } from "../plan/propose";
 import { parseViralUrl } from "../recreation/viralUrl";
@@ -12,7 +16,7 @@ import { addDays, dateOfDay, daysBetween, formatDate, todayIn, weekdayIndex } fr
 import { BrandAccessError, BrandRepo } from "../brand/repo";
 import { assertBrandSlug, brandKeys, parseVideoJobId, productionKeys, recreationKeys, videoJobId } from "../brand/keys";
 import { type Card, CARD_STATUSES, PlanSchema } from "../plan/schemas";
-import { allowedNext, canTransition, isEditable, MAX_HISTORY, statusLabel, TransitionError, transitionCard } from "../plan/status";
+import { allowedNext, canTransition, isEditable, isVideoVisible, MAX_HISTORY, statusLabel, TransitionError, transitionCard } from "../plan/status";
 import { planFromFiles } from "../plan/seed";
 import { findCard, sourceIdForCard } from "../plan/store";
 import { runOnce, NO_CONTEXT } from "../queue/worker";
@@ -166,6 +170,11 @@ const main = async () => {
   t.throws("a malformed date is rejected", () => addDays("10/09/2026", 1), /YYYY-MM-DD/);
   t.throws("a date that does not exist is rejected", () => addDays("2026-02-31", 1), /not a real date/);
   t.check("todayIn uses the given time zone, not the server's", todayIn("Asia/Tokyo", new Date("2026-10-09T20:00:00Z")) === "2026-10-10" && todayIn("America/New_York", new Date("2026-10-09T20:00:00Z")) === "2026-10-09");
+
+  console.log("who may see a produced video");
+  for (const st of CARD_STATUSES) t.check(`customer visibility of a ${st} video`, isVideoVisible(st, false) === ["needs_review", "ready", "posted"].includes(st));
+  t.check("an admin sees every video", CARD_STATUSES.every((st) => isVideoVisible(st, true)));
+  t.check("the review gate hides a video that is still with the founder", !isVideoVisible("internal_review", false) && !isVideoVisible("generating", false) && !isVideoVisible("failed", false));
 
   console.log("plan schema");
   t.check("a plan with no niche or history parses with defaults", (() => {
@@ -409,6 +418,64 @@ const main = async () => {
     const planB = (await repo.getPlan("planco"))!;
     t.check("planning with days already taken fills only the free ones", filled.added === 11 && planB.cards.length === 14 && planB.cards.slice(0, 3).every((c, i) => c.id === planA.cards[i].id));
     t.check("the existing cards, their status and the start date are untouched", planB.cards[0].status === "approved" && planB.startsOn === planA.startsOn);
+
+    console.log("video jobs with the stub producer");
+    const vh = createVideoHandlers(deps);
+    const runV = (kind: string, payload: Record<string, unknown>) => vh[kind]({ id: 1, kind, payload, attempts: 1, maxAttempts: 1 });
+    const vcards = (await repo.getPlan("planco"))!.cards;
+    const target = vcards[1]; // has a script and a storyboard from above
+    const jobDirOf = (id: string) => path.join(repoRoot, "jobs", `planco-${id}`);
+    try {
+      const est = (await runV("video.estimate", { slug: "planco", cardId: target.id })) as { usd: number; maxUsd: number };
+      const priced = await repo.getCard("planco", target.id);
+      t.check("an estimate is stored on the card, with its ceiling", est.usd === 12.5 && priced!.estimateUsd === 12.5 && priced!.estimateMaxUsd === 18);
+      await t.rejects("an estimate needs a script", () => runV("video.estimate", { slug: "planco", cardId: vcards[5].id }), /no script yet/);
+
+      await t.rejects("a draft is never produced", () => runV("video.produce", { slug: "planco", cardId: target.id }), /is draft, not queued/);
+      await repo.transitionCard("planco", target.id, "approved", "customer");
+      await t.rejects("an approved card the founder has not released is not produced either", () => runV("video.produce", { slug: "planco", cardId: target.id }), /is approved, not queued/);
+      await repo.transitionCard("planco", target.id, "queued", "admin");
+      const made = (await runV("video.produce", { slug: "planco", cardId: target.id })) as { flagged: string[] };
+      const after = (await repo.getCard("planco", target.id))!;
+      t.check("a released card ends at internal review, not at the customer", after.status === "internal_review" && made.flagged.length === 0 && !after.lowConfidence);
+      t.check("the status history shows queued, generating, internal review", after.history.slice(-3).map((h) => h.to).join() === "queued,generating,internal_review");
+      t.check("the finished video is stored with its cost log", (await repo.getVideo("planco", target.id)).hasFinal && (await repo.getVideo("planco", target.id)).costUsd > 0);
+      const edl = EdlSchema.parse(JSON.parse(fs.readFileSync(path.join(artifactsDir(`planco-${target.id}`), "edl.json"), "utf8")));
+      t.check("an EDL the editor can open is written, one segment per shot", edl.video.length === 3 && edl.durationSec === 6 && Object.keys(edl.assets).length === 3);
+      t.check("every clip file in the EDL exists", Object.values(edl.assets).every((f) => fs.existsSync(f) && fs.statSync(f).size > 500));
+      t.check("the editor's job folder says which brand video it is", JSON.parse(fs.readFileSync(path.join(jobDirOf(target.id), "ai-video.json"), "utf8")).brand === "planco");
+      t.check("each shot has its first take", Object.keys(readTakes(`planco-${target.id}`)).length === 3 && Object.values(readTakes(`planco-${target.id}`)).every((x) => x.takes.length === 1));
+
+      const clipId = edl.video[0].id;
+      await runV("clip.regenerate", { slug: "planco", cardId: target.id, clipId });
+      t.check("regenerating a clip adds a take and keeps the old one", readTakes(`planco-${target.id}`)[edl.video[0].blockId].takes.length === 2);
+      await t.rejects("regenerating needs a real card", () => runV("clip.regenerate", { slug: "planco", cardId: "ghost", clipId }), /no card ghost/);
+      await t.rejects("a hostile clip id is refused", () => runV("clip.regenerate", { slug: "planco", cardId: target.id, clipId: "../../etc" }));
+
+      // A run that fails leaves the card failed, with the reason, and is not retried.
+      const broken = vcards[6];
+      await repo.transitionCard("planco", broken.id, "approved", "customer");
+      await repo.transitionCard("planco", broken.id, "queued", "admin");
+      await t.rejects("a run that fails reports why", () => runV("video.produce", { slug: "planco", cardId: broken.id }), /ENOENT|no adapted script|adapted script/);
+      t.check("…and the card is marked failed, not left generating", (await repo.getCard("planco", broken.id))!.status === "failed");
+      t.check("a failed card can be released again by the founder only", canTransition("failed", "queued", "admin") && !canTransition("failed", "queued", "customer"));
+
+      // A shot that only passed on its last retry flags the card.
+      await run("card.adapt", { slug: "planco", cardId: vcards[7].id });
+      await repo.updatePlan("planco", (p) => ({ ...p, cards: p.cards.map((c) => (c.id === vcards[7].id ? { ...c, id: `${c.id}-flag` } : c)) }));
+      const flagId = `${vcards[7].id}-flag`;
+      await storage.putBuffer(`brands/planco/scripts/${flagId}.json`, fs.readFileSync(await storage.localPath(`brands/planco/scripts/${vcards[7].id}.json`)));
+      await repo.transitionCard("planco", flagId, "approved", "customer");
+      await repo.transitionCard("planco", flagId, "queued", "admin");
+      await runV("video.produce", { slug: "planco", cardId: flagId });
+      t.check("a shot that passed only on its last retry raises the low-confidence flag", (await repo.getCard("planco", flagId))!.lowConfidence === true);
+    } finally {
+      for (const entry of fs.readdirSync(path.join(repoRoot, "jobs")).filter((n) => n.startsWith("planco-"))) fs.rmSync(path.join(repoRoot, "jobs", entry), { recursive: true, force: true });
+      for (const base of ["artifacts", "public/jobs"]) {
+        const dir = path.join(repoRoot, base);
+        if (fs.existsSync(dir)) for (const entry of fs.readdirSync(dir).filter((n) => n.startsWith("planco-"))) fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
+      }
+    }
 
     console.log("task progress on the queue");
     const q = new WorkQueue(query);

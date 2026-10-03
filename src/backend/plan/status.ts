@@ -82,6 +82,14 @@ export const transitionCard = (card: Card, to: CardStatus, actor: Actor, now: Da
  *  approved: after that the founder may already be paying to generate it. */
 export const isEditable = (status: CardStatus): boolean => status === "draft";
 
+/** A produced video is shown to a customer only once the founder has sent
+ *  it through the review gate (and from then on). Before that it may be
+ *  half-made or wrong; after posting it is still theirs to open. Admins see
+ *  every video. One rule, used by the page, the API and the request proxy. */
+export const CUSTOMER_VIDEO_STATUSES: readonly CardStatus[] = ["needs_review", "ready", "posted"];
+
+export const isVideoVisible = (status: CardStatus, isAdmin: boolean): boolean => isAdmin || CUSTOMER_VIDEO_STATUSES.includes(status);
+
 /** What a status is called to the person looking at it. The customer never
  *  sees the internal review gate or a failed run: to them the video is
  *  still being made. */

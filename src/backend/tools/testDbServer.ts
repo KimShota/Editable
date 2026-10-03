@@ -2,7 +2,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { FIXTURE, resetStorage, seedUiFixture } from "./fixtures/uiFixture";
+import { cleanFixtureJobs, FIXTURE, resetStorage, seedUiFixture } from "./fixtures/uiFixture";
 import { makeTestDb } from "./testDb";
 
 /**
@@ -81,6 +81,7 @@ const main = async () => {
     server.close();
     void current.db.close().finally(() => {
       fs.rmSync(storageRoot, { recursive: true, force: true });
+      cleanFixtureJobs(); // the editor jobs the stub producer published outside storage/
       process.exit(0);
     });
   };

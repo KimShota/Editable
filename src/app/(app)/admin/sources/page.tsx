@@ -9,6 +9,7 @@ import { Container, EmptyState, PageHeader } from "../../../_components/ui";
 import { TaskProgress } from "../../../_components/TaskProgress";
 import { AddSourceForm } from "../../plan/_components/AddSourceForm";
 import { LiveRefresh } from "../../plan/_components/LiveRefresh";
+import { AdminTabs } from "../_components/AdminTabs";
 
 export const metadata: Metadata = { title: "Viral videos · Katalab" };
 
@@ -39,6 +40,7 @@ export default async function AdminSourcesPage() {
     <Container>
       <LiveRefresh active={live.length > 0} />
       <PageHeader kicker={active.name} title="Viral videos" subtitle={`${sources.length} in the pool. Each one is a format your character can recreate.`} />
+      <AdminTabs />
 
       {live.length > 0 && (
         <div className="mb-8 flex flex-col gap-3">
