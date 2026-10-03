@@ -110,6 +110,19 @@ export const footageClip = (clip: ProductFootage["clips"][number], footagePath: 
 export const textCardClip = (shotSec: number, output: string, color = "black"): void =>
   ffmpeg(["-f", "lavfi", "-i", `color=c=${color}:s=${WIDTH}x${HEIGHT}:r=${FPS}:d=${(shotSec + 0.5).toFixed(2)}`, "-c:v", "libx264", "-pix_fmt", "yuv420p", output]);
 
+/** A still as a clip, with a slow 5% push-in so it doesn't read as frozen: the
+ *  free fallback for a shot whose generations all failed. Drawn at twice the
+ *  size before zooming, so the push-in moves smoothly instead of in pixel steps. */
+export const stillClip = (still: string, shotSec: number, output: string): void => {
+  const frames = Math.ceil((shotSec + 0.5) * FPS);
+  ffmpeg([
+    "-loop", "1", "-framerate", String(FPS), "-t", (frames / FPS).toFixed(3), "-i", still,
+    "-vf", `scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=increase,crop=${WIDTH}:${HEIGHT},scale=${WIDTH * 2}:${HEIGHT * 2},` +
+      `zoompan=z='1+0.05*on/${frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${WIDTH}x${HEIGHT}:fps=${FPS}`,
+    "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", output,
+  ]);
+};
+
 /** Word start times in a file's speech, from whisper.cpp (the same binary and
  *  models the transcribe stage uses). */
 const wordStarts = (file: string, model: string): { word: string; atSec: number }[] => {

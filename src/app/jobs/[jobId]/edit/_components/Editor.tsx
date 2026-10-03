@@ -227,6 +227,8 @@ export function Editor({
     const sources = new Set<string>();
     for (const v of edl.video) sources.add(v.src);
     for (const seg of edl.video) if (seg.fgSrc) sources.add(seg.fgSrc);
+    // Voice lines go through the same proxy (EdlVideo's voiceovers).
+    for (const v of edl.voiceovers) sources.add(v.src);
     for (const o of edl.overlays) {
       if (
         (o.component === "VideoOverlay" || o.component === "CutawayOverlay") &&
@@ -244,7 +246,7 @@ export function Editor({
         warmedPreviewSources.current.delete(src);
       });
     }
-  }, [jobId, edl.video, edl.overlays]);
+  }, [jobId, edl.video, edl.overlays, edl.voiceovers]);
 
   // Refreshed on mount, right before the Export panel (where Render lives)
   // opens, and right after a render attempt is actually recorded (see

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { LockedCharacterSchema } from "../character/schemas";
-import { consoleSink, googleImageCostEntry } from "../cost/ledger";
+import { consoleSink, type CostSink, googleImageCostEntry } from "../cost/ledger";
 import { GEMINI_IMAGE_MODEL, generateImage } from "../pipeline/generation/geminiImage";
 import { artifactsDir, repoRoot } from "../pipeline/paths";
 import { render, stageAssets } from "../pipeline/render";
@@ -25,6 +25,7 @@ import {
   planClip,
   requestSeconds,
   speechAlign,
+  stillClip,
   whisperModel,
   TALKING_MODEL,
   talkingPrompt,
@@ -35,6 +36,7 @@ import { compileEdl, type MadeClip, swapShotClip, type VoiceFile } from "./edl";
 import { AI_VIDEO_FORMAT } from "./format";
 import { addTake } from "./takes";
 import { estimateUsd, generate, seedanceUsd, uploadFile, waitFor, download } from "./higgsfield";
+import { clipProblem, GREEN_STILL_ATTEMPTS, MIN_GREEN_FRACTION, pickBest, type Quality, RETRY_CAP, usable, worstCaseUsd } from "./retry";
 import { buildTimeline, type Timeline } from "./timeline";
 
 /**
@@ -45,7 +47,9 @@ import { buildTimeline, type Timeline } from "./timeline";
  *   npm run produce -- voice  --brand <slug> --source <id> [--tempo 1.25] [--redo]
  *   npm run produce -- clips  --brand <slug> --source <id> [--shots s0,s3] [--redo | --regenerate | --new-stills] [--dry]
  *       --redo rebuilds clips from what the providers already returned (free);
- *       --regenerate pays for new generations; --new-stills also redraws green-screen stills
+ *       --regenerate pays for new generations; --new-stills also redraws green-screen stills.
+ *       A generation that fails its check is retried up to its kind's cap (retry.ts); a shot
+ *       that runs out keeps its best attempt or a free fallback and is flagged, never failed
  *   npm run produce -- render --brand <slug> --source <id> [--discard-edits]
  *       also makes the video a project the app's editor opens (jobs/<brand>-<source>)
  *   npm run produce -- regen-clip --job <jobId> --clip <clipId> [--dry]
@@ -57,9 +61,10 @@ import { buildTimeline, type Timeline } from "./timeline";
  *   voice/track.wav              all lines at their timeline positions
  *   timeline.json                where every line and shot sits
  *   stills/<shot>-green.png      green-screen stills for shots that show the product
- *   clips/<shot>.raw.mp4         what the provider returned
- *   clips/<shot>.mp4             the shot, normalized (and composited)
- *   clips.json                   per shot: kind, file, length, lip-sync offset
+ *   clips/<shot>.raw.mp4         what the provider returned (the kept attempt)
+ *   clips/<shot>.v<n>.mp4        every attempt at the shot, normalized (and composited)
+ *   clips.json                   per shot: kind, file, length, lip-sync offset, flag, other attempts
+ *   costs.jsonl                  every paid call for this video, one JSON line each
  *   edl.json, final.mp4          the editable timeline and its render
  */
 
@@ -83,6 +88,27 @@ const readJson = async (key: string, what: string): Promise<unknown> => {
 };
 const writeJson = (key: string, value: unknown) => storage.putBuffer(key, Buffer.from(JSON.stringify(value, null, 2)));
 
+/** Every paid call is printed and appended to the video's costs.jsonl, so the
+ *  cost per video (retries and re-takes included) is read, not rebuilt. */
+const costLog = (key: string): CostSink => {
+  let queue = Promise.resolve();
+  return (entry) => {
+    void consoleSink(entry);
+    // One append at a time: shots are made in parallel.
+    queue = queue
+      .then(async () => {
+        const before = (await storage.exists(key)) ? fs.readFileSync(await storage.localPath(key), "utf8") : "";
+        await storage.putBuffer(key, Buffer.from(`${before}${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`));
+      })
+      .catch((err) => console.warn(`cost log: ${err instanceof Error ? err.message : err}`));
+    return queue;
+  };
+};
+
+let lastStamp = 0;
+/** Date.now(), but never the same twice: every take is its own file. */
+const stamp = () => (lastStamp = Math.max(Date.now(), lastStamp + 1));
+
 const context = async (args: string[]) => {
   const brand = required(args, "--brand");
   const id = required(args, "--source");
@@ -100,8 +126,9 @@ const context = async (args: string[]) => {
     raw: (shot: string) => `${root}/clips/${shot}.raw.mp4`,
     request: (shot: string) => `${root}/clips/${shot}.request.json`,
     clip: (shot: string) => `${root}/clips/${shot}.mp4`,
-    take: (shot: string) => `${root}/clips/${shot}.v${Date.now()}.mp4`,
+    take: (shot: string) => `${root}/clips/${shot}.v${stamp()}.mp4`,
     clips: `${root}/clips.json`,
+    costs: `${root}/costs.jsonl`,
     edl: `${root}/edl.json`,
     final: `${root}/final.mp4`,
     still: (shot: string) => `brands/${brand}/storyboards/${id}/${shot}.png`,
@@ -110,7 +137,7 @@ const context = async (args: string[]) => {
   const spec = RecreationSpecSchema.parse(await readJson(`brands/${brand}/sources/specs/${id}.json`, "spec"));
   const character = LockedCharacterSchema.parse(await readJson(`brands/${brand}/character/character.json`, "locked character"));
   const footage = ProductFootageSchema.parse(await readJson(`brands/${brand}/product/footage.json`, "product footage"));
-  return { brand, id, k, script, spec, character, footage, jobId: `${brand}-${id}`, ref: (s: string) => `${brand}/${id}/${s}` };
+  return { brand, id, k, script, spec, character, footage, cost: costLog(k.costs), jobId: `${brand}-${id}`, ref: (s: string) => `${brand}/${id}/${s}` };
 };
 type Ctx = Awaited<ReturnType<typeof context>>;
 
@@ -140,7 +167,7 @@ const voice = async (c: Ctx, redo: boolean, tempo: number): Promise<Timeline> =>
     await Promise.all(
       lines.slice(i, i + 2).map(async (l) => {
         if (!redo && (await storage.exists(c.k.ttsWords(l.index)))) return;
-        const { audio, words } = await textToSpeechTimed(voiceId, l.text, { costSink: consoleSink, ref: c.ref(`line-${l.index}`) });
+        const { audio, words } = await textToSpeechTimed(voiceId, l.text, { costSink: c.cost, ref: c.ref(`line-${l.index}`) });
         await storage.putBuffer(c.k.tts(l.index), audio);
         await writeJson(c.k.ttsWords(l.index), { text: l.text, words });
         console.log(`  ✔ line ${l.index} voiced`);
@@ -181,7 +208,16 @@ const voice = async (c: Ctx, redo: boolean, tempo: number): Promise<Timeline> =>
 
 // ── clips ──────────────────────────────────────────────────────────────
 
-type ClipRecord = { kind: ClipKind; key: string; durationSec: number; inSec: number; rate?: number; lipSyncDriftSec?: number };
+type ClipFile = { key: string; durationSec: number; inSec: number; rate?: number };
+type ClipRecord = ClipFile & {
+  kind: ClipKind;
+  lipSyncDriftSec?: number;
+  cleanUntilSec?: number;
+  /** Why this shot needs a look in the editor (a failed check, a fallback). */
+  flag?: string;
+  /** The shot's other attempts from the same run, kept as takes. */
+  others?: ClipFile[];
+};
 
 /** Submit-or-resume: a request id saved before polling means a rerun after a
  *  crash waits for the same generation instead of paying for another. */
@@ -198,7 +234,7 @@ const generateOnce = async (c: Ctx, shot: string, endpoint: string, input: Recor
     }
   }
   const bytes = await generate(endpoint, input, {
-    costSink: consoleSink,
+    costSink: c.cost,
     ref: c.ref(shot),
     operation,
     onSubmitted: async (requestId) => {
@@ -216,123 +252,237 @@ const greenFraction = (file: string): number => {
   return green / (raw.length / 3);
 };
 
-const greenStill = async (c: Ctx, shot: Ctx["script"]["shots"][number]): Promise<string> => {
+/** A still whose laptop screen is chroma green, or null when no attempt
+ *  came back with enough green to key onto (the caller falls back). */
+const greenStill = async (c: Ctx, shot: Ctx["script"]["shots"][number]): Promise<string | null> => {
   if (await storage.exists(c.k.green(shot.shotId))) return storage.localPath(c.k.green(shot.shotId));
   const plan = planFrames(c.script, c.spec, c.character, () => "").find((p) => p.shotId === shot.shotId);
   if (!plan || plan.mode !== "generate") throw new Error(`${shot.shotId}: no frame plan for a green still`);
   const refs = plan.refs.filter((r) => r.role !== "screen");
   const prompt = framePrompt(shot, c.character, refs, DEFAULT_SET, { greenScreen: true });
   const refPaths = await Promise.all(refs.map((r) => storage.localPath(r.key)));
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  let best: { bytes: Buffer; green: number } | null = null;
+  for (let attempt = 1; attempt <= GREEN_STILL_ATTEMPTS; attempt++) {
     const bytes = await generateImage(prompt, refPaths, refPaths.length, { aspectRatio: "9:16", imageSize: "2K" });
-    await consoleSink(googleImageCostEntry(GEMINI_IMAGE_MODEL, 1, "green_still", { ref: c.ref(shot.shotId) }));
-    await storage.putBuffer(c.k.green(shot.shotId), bytes);
-    const file = await storage.localPath(c.k.green(shot.shotId));
-    const g = greenFraction(file);
-    if (g > 0.04) {
-      // Repaint anything the image model drew onto the green (a fake window,
-      // a cursor): the video model would animate it and the key would keep it.
-      await withTmp(async (dir) => {
-        const cleaned = path.join(dir, "clean.png");
-        execFileSync("python3", [greenscreenScript, "--clean-still", file, cleaned], { stdio: ["ignore", "ignore", "inherit"] });
-        await storage.putFile(c.k.green(shot.shotId), cleaned);
-      });
-      return storage.localPath(c.k.green(shot.shotId));
-    }
-    console.log(`  ! ${shot.shotId}: green still is only ${(g * 100).toFixed(1)}% green, retrying`);
+    await c.cost(googleImageCostEntry(GEMINI_IMAGE_MODEL, 1, "green_still", { ref: c.ref(shot.shotId) }));
+    const green = await withTmp(async (dir) => {
+      const file = path.join(dir, "still.png");
+      fs.writeFileSync(file, bytes);
+      return greenFraction(file);
+    });
+    if (!best || green > best.green) best = { bytes, green };
+    if (green >= MIN_GREEN_FRACTION) break;
+    console.log(`  ! ${shot.shotId}: green still is only ${(green * 100).toFixed(1)}% green${attempt < GREEN_STILL_ATTEMPTS ? ", retrying" : ""}`);
   }
-  throw new Error(`${shot.shotId}: could not get a green-screen still`);
+  if (!best || best.green < MIN_GREEN_FRACTION) return null;
+  await storage.putBuffer(c.k.green(shot.shotId), best.bytes);
+  const file = await storage.localPath(c.k.green(shot.shotId));
+  // Repaint anything the image model drew onto the green (a fake window,
+  // a cursor): the video model would animate it and the key would keep it.
+  await withTmp(async (dir) => {
+    const cleaned = path.join(dir, "clean.png");
+    execFileSync("python3", [greenscreenScript, "--clean-still", file, cleaned], { stdio: ["ignore", "ignore", "inherit"] });
+    await storage.putFile(c.k.green(shot.shotId), cleaned);
+  });
+  return storage.localPath(c.k.green(shot.shotId));
 };
 
-/** `regenerate` false reuses a provider's earlier output (clips/<shot>.raw.mp4)
- *  when there is one: re-cropping, re-compositing or re-aligning is free. */
+type Attempt = Quality & { problem: string | null; out: string; raw: string; durationSec: number; inSec: number; rate?: number };
+
+/** A failure as one readable line: a local tool's own last stderr line
+ *  (ffmpeg, greenscreen.py) rather than the command it ran. */
+const errorText = (err: unknown): string => {
+  const stderr = (err as { stderr?: Buffer | string } | null)?.stderr?.toString().trim().split("\n").pop();
+  return (stderr || (err instanceof Error ? err.message : String(err))).slice(0, 300);
+};
+
+/**
+ * One shot's clip. `regenerate` false reuses a provider's earlier output
+ * (clips/<shot>.raw.mp4) when there is one: re-cropping, re-compositing or
+ * re-aligning is free, and a failed check is only flagged. A paid run makes
+ * up to 1 + `retries` attempts, stopping at the first that passes its check
+ * (retry.ts), and keeps the best. With `fallback`, a shot left with no usable
+ * attempt gets a free stand-in (the product footage, or its storyboard still)
+ * and a flag instead of failing the video; without it (the editor's
+ * Regenerate, where the current take stays) it throws.
+ */
 const makeClip = async (
   c: Ctx,
   timeline: Timeline,
   shot: Ctx["script"]["shots"][number],
   kind: ClipKind,
   regenerate: boolean,
-  /** Where the finished clip goes: a new file for every take, because a
-   *  take an EDL (or the editor's undo history, or takes.json) references
-   *  must never change under it. */
-  outKey = c.k.take(shot.shotId),
+  opts: {
+    retries?: number;
+    fallback?: boolean;
+    /** Where a finished clip goes: a new file for every take, because a take
+     *  an EDL (or the editor's undo history, or takes.json) references must
+     *  never change under it. */
+    newKey?: () => string;
+  } = {},
 ): Promise<ClipRecord> => {
   const at = timeline.shots.find((s) => s.shotId === shot.shotId)!;
   const len = at.tlOutSec - at.tlInSec;
-  return withTmp(async (dir) => {
-    const out = path.join(dir, "clip.mp4");
-    let inSec = 0;
-    let rate: number | undefined;
-    let lipSyncDriftSec: number | undefined;
-    let cleanUntil = Infinity;
+  const newKey = opts.newKey ?? (() => c.k.take(shot.shotId));
+  const keep = async (file: string): Promise<string> => {
+    const key = newKey();
+    await storage.putFile(key, file);
+    return key;
+  };
+  const productClip = () => c.footage.clips.find((f) => f.id === shot.footageId)!;
 
-    if (kind === "footage") {
-      const clip = c.footage.clips.find((f) => f.id === shot.footageId)!;
-      footageClip(clip, await storage.localPath(clip.key), len, out);
-    } else if (kind === "text") {
-      textCardClip(len, out);
-    } else {
-      const raw = path.join(dir, "raw.mp4");
-      const reuse = !regenerate && (await storage.exists(c.k.raw(shot.shotId)));
-      if (reuse) fs.copyFileSync(await storage.localPath(c.k.raw(shot.shotId)), raw);
+  return withTmp(async (dir) => {
+    if (kind === "footage" || kind === "text") {
+      const out = path.join(dir, "clip.mp4");
+      if (kind === "footage") footageClip(productClip(), await storage.localPath(productClip().key), len, out);
+      else textCardClip(len, out);
+      return { kind, key: await keep(out), durationSec: durationOf(out), inSec: 0 };
+    }
+
+    const fallback = async (why: string, others: ClipFile[] = []): Promise<ClipRecord> => {
+      if (!opts.fallback) throw new Error(why);
+      const out = path.join(dir, "fallback.mp4");
+      if (kind === "green") footageClip(productClip(), await storage.localPath(productClip().key), len, out);
+      else stillClip(await storage.localPath(c.k.still(shot.shotId)), len, out);
+      const flag = `${why}; using the ${kind === "green" ? "product footage" : "storyboard still"} instead`;
+      console.log(`  ! ${shot.shotId}: ${flag}`);
+      return { kind, key: await keep(out), durationSec: durationOf(out), inSec: 0, flag, others };
+    };
+
+    const footagePath = kind === "green" ? await storage.localPath(productClip().key) : "";
+    const wav = path.join(dir, "voice.wav");
+    if (kind === "talking") voiceSegment(await storage.localPath(c.k.track), at.tlInSec, at.tlOutSec, wav, requestSeconds(kind, len));
+
+    /** Provider output → a checked clip on the output canvas. Free. */
+    const finish = (raw: string, n: number): Attempt => {
+      const out = path.join(dir, `clip-${n}.mp4`);
       if (kind === "talking") {
-        const still = await storage.localPath(c.k.still(shot.shotId));
-        const wav = path.join(dir, "voice.wav");
-        voiceSegment(await storage.localPath(c.k.track), at.tlInSec, at.tlOutSec, wav, requestSeconds(kind, len));
-        const input = {
+        let q: Quality = { lipSyncDriftSec: Infinity };
+        let inSec = 0;
+        let rate: number | undefined;
+        try {
+          const sync = speechAlign(raw, wav, whisperModel(c.script.language));
+          inSec = Math.max(0, sync.offsetSec);
+          rate = sync.rate;
+          q = { lipSyncDriftSec: sync.driftSec };
+        } catch {
+          // No words to align: the clip is kept as a last resort, flagged.
+        }
+        normalize(raw, out, 1);
+        return { ...q, problem: clipProblem(kind, len, q), out, raw, durationSec: durationOf(out), inSec, rate };
+      }
+      if (kind === "green") {
+        const comp = path.join(dir, `comp-${n}.mp4`);
+        const clip = productClip();
+        const report = execFileSync("python3", [greenscreenScript, raw, footagePath, String(clip.startSec), String(clip.endSec), comp], { stdio: ["ignore", "pipe", "pipe"] }).toString();
+        normalize(comp, out);
+        const q: Quality = { cleanUntilSec: Number(report.match(/clean_until_sec ([\d.]+)/)?.[1] ?? Infinity) };
+        return { ...q, problem: clipProblem(kind, len, q), out, raw, durationSec: Math.min(durationOf(out), q.cleanUntilSec!), inSec: 0 };
+      }
+      normalize(raw, out);
+      return { problem: null, out, raw, durationSec: durationOf(out), inSec: 0 };
+    };
+
+    const attempts: Attempt[] = [];
+    const errors: string[] = [];
+    const reuse = !regenerate && (await storage.exists(c.k.raw(shot.shotId)));
+    if (reuse) {
+      const raw = path.join(dir, "raw-0.mp4");
+      fs.copyFileSync(await storage.localPath(c.k.raw(shot.shotId)), raw);
+      try {
+        attempts.push(finish(raw, 0));
+      } catch (err) {
+        errors.push(errorText(err));
+      }
+    } else {
+      // What every attempt sends, uploaded once.
+      let input: Record<string, unknown>;
+      if (kind === "talking") {
+        input = {
           prompt: talkingPrompt(shot, c.character.concept.name),
-          image_urls: [] as string[],
-          audio_urls: [] as string[],
+          image_urls: [await uploadFile(await storage.localPath(c.k.still(shot.shotId)))],
+          audio_urls: [await uploadFile(wav)],
           duration: requestSeconds(kind, len),
           resolution: "720p",
           aspect_ratio: "9:16",
         };
-        if (!reuse) {
-          input.image_urls = [await uploadFile(still)];
-          input.audio_urls = [await uploadFile(wav)];
-          fs.writeFileSync(raw, await generateOnce(c, shot.shotId, TALKING_MODEL, input, "talking_shot"));
-        }
-        const sync = speechAlign(raw, wav, whisperModel(c.script.language));
-        inSec = Math.max(0, sync.offsetSec);
-        rate = sync.rate;
-        lipSyncDriftSec = sync.driftSec;
-        if (sync.driftSec > 0.12) console.log(`  ! ${shot.shotId}: lips drift ${sync.driftSec.toFixed(2)}s from the voice; check this shot`);
-      } else if (!reuse) {
-        const still = kind === "green" ? await greenStill(c, shot) : await storage.localPath(c.k.still(shot.shotId));
-        const input = { image_url: await uploadFile(still), prompt: animatePrompt(shot, kind), duration: requestSeconds(kind, len), sound: "off" };
-        fs.writeFileSync(raw, await generateOnce(c, shot.shotId, ANIMATE_MODEL, input, kind === "green" ? "device_shot" : "animate_shot"));
-      }
-      if (!reuse) await storage.putFile(c.k.raw(shot.shotId), raw);
-      if (kind === "green") {
-        const clip = c.footage.clips.find((f) => f.id === shot.footageId)!;
-        const comp = path.join(dir, "comp.mp4");
-        const report = execFileSync("python3", [greenscreenScript, raw, await storage.localPath(clip.key), String(clip.startSec), String(clip.endSec), comp], { stdio: ["ignore", "pipe", "inherit"] }).toString();
-        normalize(comp, out);
-        cleanUntil = Number(report.match(/clean_until_sec ([\d.]+)/)?.[1] ?? Infinity);
-        if (cleanUntil < len) console.log(`  ! ${shot.shotId}: the model drew on the screen from ${cleanUntil.toFixed(1)}s; only the clean part plays (slowed to fit)`);
       } else {
-        normalize(raw, out, kind === "talking" ? 1 : 0);
+        let still: string | null;
+        try {
+          still = kind === "green" ? await greenStill(c, shot) : await storage.localPath(c.k.still(shot.shotId));
+        } catch (err) {
+          return fallback(`no green-screen still (${errorText(err)})`);
+        }
+        if (!still) return fallback("no green-screen still came back green enough to key");
+        input = { image_url: await uploadFile(still), prompt: animatePrompt(shot, kind), duration: requestSeconds(kind, len), sound: "off" };
+      }
+      const tries = 1 + (opts.retries ?? 0);
+      for (let n = 1; n <= tries; n++) {
+        const more = n < tries ? `, retrying (${n}/${tries - 1})` : "";
+        const raw = path.join(dir, `raw-${n}.mp4`);
+        try {
+          const operation = kind === "talking" ? "talking_shot" : kind === "green" ? "device_shot" : "animate_shot";
+          fs.writeFileSync(raw, await generateOnce(c, shot.shotId, kind === "talking" ? TALKING_MODEL : ANIMATE_MODEL, input, operation));
+          const a = finish(raw, n);
+          attempts.push(a);
+          if (!a.problem) break;
+          console.log(`  ! ${shot.shotId}: ${a.problem}${more}`);
+        } catch (err) {
+          errors.push(errorText(err));
+          console.log(`  ! ${shot.shotId}: attempt ${n} failed: ${errorText(err)}${more}`);
+        }
       }
     }
-    await storage.putFile(outKey, out);
-    return { kind, key: outKey, durationSec: Math.min(durationOf(out), cleanUntil), inSec, rate, lipSyncDriftSec };
+
+    // Without a fallback to stand in, a paid clip is kept however it came out (flagged).
+    const best = pickBest(kind, attempts.filter((a) => usable(kind, len, a))) ?? (opts.fallback ? undefined : pickBest(kind, attempts));
+    const others: ClipFile[] = [];
+    for (const a of attempts) {
+      if (a !== best) others.push({ key: await keep(a.out), durationSec: a.durationSec, inSec: a.inSec, rate: a.rate });
+    }
+    if (!best) {
+      const why = attempts.length ? (attempts[attempts.length - 1].problem ?? "no usable attempt") : (errors[errors.length - 1] ?? "no clip came back");
+      return fallback(why, others);
+    }
+    if (!reuse) await storage.putFile(c.k.raw(shot.shotId), best.raw);
+    const record: ClipRecord = { kind, key: await keep(best.out), durationSec: best.durationSec, inSec: best.inSec, rate: best.rate, others };
+    if (best.lipSyncDriftSec !== undefined && Number.isFinite(best.lipSyncDriftSec)) record.lipSyncDriftSec = best.lipSyncDriftSec;
+    if (best.cleanUntilSec !== undefined && Number.isFinite(best.cleanUntilSec)) record.cleanUntilSec = best.cleanUntilSec;
+    if (best.problem) {
+      record.flag = reuse ? `${best.problem} (rerun with --regenerate --shots ${shot.shotId} to retry)` : `${best.problem}, after ${attempts.length} attempt(s)`;
+      console.log(`  ! ${shot.shotId}: keeping it: ${record.flag}`);
+    }
+    return record;
   });
 };
 
-/** What the not-yet-made clips would cost, without spending anything. */
-const estimate = async (c: Ctx, timeline: Timeline, todo: { shot: Ctx["script"]["shots"][number]; kind: ClipKind }[], newStills: boolean): Promise<number> => {
+/** What the not-yet-made clips would cost on a first pass, without spending
+ *  anything; with `retries`, also the most they can cost if every allowed
+ *  retry is used (retry.ts), so a run's ceiling is known before it starts. */
+const estimate = async (
+  c: Ctx,
+  timeline: Timeline,
+  todo: { shot: Ctx["script"]["shots"][number]; kind: ClipKind }[],
+  opts: { newStills: boolean; retries: boolean },
+): Promise<number> => {
   let total = 0;
+  let worst = 0;
   for (const { shot, kind } of todo) {
     const at = timeline.shots.find((s) => s.shotId === shot.shotId)!;
     const secs = requestSeconds(kind, at.tlOutSec - at.tlInSec);
-    let usd = 0;
-    if (kind === "talking") usd = seedanceUsd({ resolution: "720p", aspect_ratio: "9:16", duration: secs });
-    if (kind === "animate" || kind === "green") usd = await estimateUsd(ANIMATE_MODEL, { image_url: "https://example.com/x.png", prompt: "x", duration: secs, sound: "off" });
-    if (kind === "green" && (newStills || !(await storage.exists(c.k.green(shot.shotId))))) usd += 0.134;
+    let clipUsd = 0;
+    if (kind === "talking") clipUsd = seedanceUsd({ resolution: "720p", aspect_ratio: "9:16", duration: secs });
+    if (kind === "animate" || kind === "green") clipUsd = await estimateUsd(ANIMATE_MODEL, { image_url: "https://example.com/x.png", prompt: "x", duration: secs, sound: "off" });
+    const stillUsd =
+      kind === "green" && (opts.newStills || !(await storage.exists(c.k.green(shot.shotId)))) ? googleImageCostEntry(GEMINI_IMAGE_MODEL, 1, "green_still").usd : 0;
+    const usd = clipUsd + stillUsd;
+    const most = opts.retries ? worstCaseUsd(kind, clipUsd, stillUsd) : usd;
     total += usd;
-    console.log(`  ${shot.shotId.padEnd(4)} ${kind.padEnd(8)} ${(at.tlOutSec - at.tlInSec).toFixed(1).padStart(4)}s → ${secs}s  $${usd.toFixed(2)}`);
+    worst += most;
+    const ceiling = most > usd + 1e-9 ? `  (up to $${most.toFixed(2)} with retries)` : "";
+    console.log(`  ${shot.shotId.padEnd(4)} ${kind.padEnd(8)} ${(at.tlOutSec - at.tlInSec).toFixed(1).padStart(4)}s → ${secs}s  $${usd.toFixed(2)}${ceiling}`);
   }
-  console.log(`  total ≈ $${total.toFixed(2)}`);
+  console.log(`  total ≈ $${total.toFixed(2)}${opts.retries ? `, at most $${worst.toFixed(2)} if every retry is used` : ""}`);
   return total;
 };
 
@@ -357,7 +507,7 @@ const clips = async (c: Ctx, args: string[]) => {
   console.log(`${todo.length} clip(s) to make:`);
   const paid: typeof todo = [];
   for (const t of todo) if (regenerate || !(await storage.exists(c.k.raw(t.shot.shotId)))) paid.push(t);
-  await estimate(c, timeline, paid, newStills);
+  await estimate(c, timeline, paid, { newStills, retries: true });
   if (args.includes("--dry")) return;
   if (regenerate) {
     for (const { shot } of todo) {
@@ -369,9 +519,9 @@ const clips = async (c: Ctx, args: string[]) => {
   const failed: string[] = [];
   const run = async ({ shot, kind }: (typeof todo)[number]) => {
     try {
-      records[shot.shotId] = await makeClip(c, timeline, shot, kind, regenerate);
+      records[shot.shotId] = await makeClip(c, timeline, shot, kind, regenerate, { retries: RETRY_CAP[kind], fallback: true });
       await writeJson(c.k.clips, records);
-      console.log(`  ✔ ${shot.shotId} ${kind}`);
+      console.log(`  ${records[shot.shotId].flag ? "⚑" : "✔"} ${shot.shotId} ${kind}`);
     } catch (err) {
       failed.push(shot.shotId);
       console.log(`  ✘ ${shot.shotId} ${kind}: ${err instanceof Error ? err.message.slice(0, 400) : err}`);
@@ -379,6 +529,11 @@ const clips = async (c: Ctx, args: string[]) => {
   };
   // A few at a time: providers queue them anyway, and a failure stays local.
   for (let i = 0; i < todo.length; i += 4) await Promise.all(todo.slice(i, i + 4).map(run));
+  const flagged = todo.map((t) => t.shot.shotId).filter((id) => records[id]?.flag);
+  if (flagged.length) {
+    console.log(`\nshots to look at in the editor (every attempt is a take there):`);
+    for (const id of flagged) console.log(`  ⚑ ${id}: ${records[id].flag}`);
+  }
   if (failed.length) throw new Error(`clips failed: ${failed.join(",")} (rerun with --shots ${failed.join(",")})`);
 };
 
@@ -444,7 +599,20 @@ const renderVideo = async (c: Ctx, args: string[]) => {
   publishToEditor(c);
   for (const shot of c.script.shots) {
     const m = made.get(shot.shotId)!;
-    addTake(c.jobId, shot.shotId, isRegenerable(shot), { ...m, createdAt: new Date().toISOString(), origin: "original" });
+    const createdAt = new Date().toISOString();
+    addTake(c.jobId, shot.shotId, isRegenerable(shot), { ...m, createdAt, origin: "original" });
+    // The attempts a run did not keep, so any of them can still be picked.
+    for (const o of records[shot.shotId].others ?? []) {
+      addTake(c.jobId, shot.shotId, isRegenerable(shot), {
+        src: `${prefix}/clips/${path.basename(o.key)}`,
+        file: await storage.localPath(o.key),
+        durationSec: o.durationSec,
+        inSec: o.inSec,
+        rate: o.rate,
+        createdAt,
+        origin: "retry",
+      });
+    }
   }
   const out = render(edl, dir);
   await storage.putFile(c.k.final, out);
@@ -480,7 +648,7 @@ const regenClip = async (args: string[]) => {
   const timeline = (await readJson(c.k.timeline, "timeline")) as Timeline;
 
   if (args.includes("--dry")) {
-    const usd = await estimate(c, timeline, [{ shot, kind }], false);
+    const usd = await estimate(c, timeline, [{ shot, kind }], { newStills: false, retries: false });
     console.log(`estimate_usd ${usd.toFixed(2)}`);
     return;
   }
@@ -488,7 +656,10 @@ const regenClip = async (args: string[]) => {
   await storage.remove(c.k.request(shot.shotId));
   const versionKey = c.k.take(shot.shotId);
   const version = path.basename(versionKey);
-  const record = await makeClip(c, timeline, shot, kind, true, versionKey);
+  // One attempt, no fallback: its price was confirmed up front, and on
+  // failure the editor keeps the take it has. A failed check is flagged.
+  const record = await makeClip(c, timeline, shot, kind, true, { newKey: () => versionKey });
+  if (record.flag) console.log(`  ! ${shot.shotId}: ${record.flag}`);
   const records = (await readJson(c.k.clips, "clips")) as Record<string, ClipRecord>;
   records[shot.shotId] = record;
   await writeJson(c.k.clips, records);

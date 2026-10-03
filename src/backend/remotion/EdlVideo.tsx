@@ -141,6 +141,8 @@ const FgLayer: React.FC<{ src: string; srcInSec: number; srcOutSec: number; jobI
       muted
       startFrom={Math.round(srcInSec * fps)}
       endAt={Math.round(srcOutSec * fps)}
+      // Muted, so it never pauses the preview: see the note under Segment.
+      pauseWhenBuffering={!previewMode}
       style={{ width: "100%", height: "100%", objectFit: "cover" }}
       transparent
     />
@@ -204,12 +206,26 @@ const Segment: React.FC<{
           playbackRate={seg.speed}
           startFrom={Math.round(seg.srcInSec * fps)}
           endAt={Math.round(seg.srcOutSec * fps)}
+          pauseWhenBuffering={!(previewMode && seg.muted)}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
       </AbsoluteFill>
     </IncomingTransition>
   );
 };
+
+/* Why a muted segment never pauses the preview (pauseWhenBuffering above):
+ * OffthreadVideo defaults to pausing the whole Player while its element
+ * buffers, and every such pause suspends the Player's shared AudioContext.
+ * Resuming waits until the audio output clock actually moves again, which
+ * was measured at 50ms to 1.2s, with the picture frozen the whole time.
+ * Meanwhile the other <video> elements keep playing and drift past
+ * Remotion's acceptable time shift, so it re-seeks them, which buffers
+ * again: a loop that froze an AI video's preview for seconds at a cut. A
+ * muted clip has no audio to keep in sync, so letting it catch up on its
+ * own (a frame or two held during a ~20ms seek) is invisible, and breaks
+ * the loop. A segment with its own audio still pauses, as before. Export
+ * is unaffected: rendering waits for every frame regardless. */
 
 /** One overlay's own lifetime — a plain function of (frame, overlay), same
  *  requirement every other per-frame render here already meets. Needs its
@@ -378,6 +394,10 @@ export const EdlVideo: React.FC<{ edl: Edl; previewMode?: boolean }> = ({ edl, p
           from={toFrames(v.tlInSec)}
           durationInFrames={Math.max(1, toFrames(v.tlOutSec) - toFrames(v.tlInSec))}
           name={`voiceover:${v.id}`}
+          // Loaded before its line starts, like the video segments: an AI
+          // video is a dozen back-to-back voice lines, and one mounting
+          // only at its own start reaches the speaker late and gets re-seeked.
+          premountFor={previewMode ? Math.round(fps * PREVIEW_PREMOUNT_SEC) : 0}
         >
           <Audio
             src={previewMode ? previewProxySrc(edl.jobId, v.src) : staticFile(v.src)}

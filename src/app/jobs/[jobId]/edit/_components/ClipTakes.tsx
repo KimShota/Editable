@@ -12,7 +12,7 @@ import { PlusIcon, RegenerateIcon } from "./Icons";
  * changes or a generation finishes.
  */
 
-type TakeView = { id: string; src: string; inSec: number; createdAt: string; origin: "original" | "regenerated" };
+type TakeView = { id: string; src: string; inSec: number; createdAt: string; origin: "original" | "regenerated" | "retry" };
 type TakesResponse = { shotId: string; regenerable: boolean; currentTakeId: string | null; takes: TakeView[] };
 
 export function ClipTakes({

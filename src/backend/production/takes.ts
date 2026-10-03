@@ -26,7 +26,8 @@ export type Take = {
   inSec: number;
   rate?: number;
   createdAt: string;
-  origin: "original" | "regenerated";
+  /** "retry": an attempt an automatic retry replaced (production/retry.ts). */
+  origin: "original" | "regenerated" | "retry";
 };
 
 export type ShotTakes = {

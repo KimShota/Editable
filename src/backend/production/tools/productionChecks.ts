@@ -5,6 +5,7 @@ import { wordsFromAlignment } from "../../voice/elevenlabs";
 import { planClip, requestSeconds } from "../clips";
 import { captionGroups, compileEdl, type MadeClip, swapShotClip } from "../edl";
 import { seedanceUsd } from "../higgsfield";
+import { clipProblem, pickBest, RETRY_CAP, usable, worstCaseUsd } from "../retry";
 import { buildTimeline, MIN_SHOT_SEC } from "../timeline";
 
 /**
@@ -77,6 +78,25 @@ const main = () => {
   t.check("a device with a non-product screen is just animated", planClip({ ...script.shots[2], footageId: null }) === "animate");
   t.check("requests respect each model's minimum length", requestSeconds("talking", 1.2) === 4 && requestSeconds("animate", 1.2) === 3 && requestSeconds("animate", 4.9) === 6);
   t.check("seedance price follows its token formula (720p 9:16, 8s)", near(seedanceUsd({ resolution: "720p", aspect_ratio: "9:16", duration: 8 }), 3.6979, 1e-3));
+
+  // Retry caps and checks (retry.ts), on DbAJ's real numbers.
+  t.check("retries go to the shots worth paying for", RETRY_CAP.talking === 1 && RETRY_CAP.green === 2 && RETRY_CAP.animate === 0 && RETRY_CAP.footage === 0);
+  t.check("a green screen clean almost to the end passes (s6 played at 0.97x)", clipProblem("green", 4.3, { cleanUntilSec: 4.17 }) === null);
+  t.check("a green screen drawn on early is retried (s11: 0.2s of 1.2s)", clipProblem("green", 1.2, { cleanUntilSec: 0.2 }) !== null);
+  t.check("tight lips pass, drifting lips are retried", clipProblem("talking", 6.4, { lipSyncDriftSec: 0.05 }) === null && clipProblem("talking", 6.4, { lipSyncDriftSec: 0.3 }) !== null);
+  t.check("a clip whose line can't be found is retried", /could not be found/.test(clipProblem("talking", 6.4, { lipSyncDriftSec: Infinity }) ?? ""));
+  t.check("animate shots have no automatic check", clipProblem("animate", 3, {}) === null);
+  t.check("a green screen clean for a sliver is not usable (s15: 0.25s of 5.9s)", !usable("green", 5.9, { cleanUntilSec: 0.25 }) && usable("green", 5.9, { cleanUntilSec: 3 }));
+  t.check("a badly synced talking clip is still usable", usable("talking", 6.4, { lipSyncDriftSec: Infinity }));
+  const a = (problem: string | null, q: { cleanUntilSec?: number; lipSyncDriftSec?: number }, id: string) => ({ ...q, problem, id });
+  t.check("a passing attempt is kept over a failing one", pickBest("green", [a("x", { cleanUntilSec: 2 }, "1"), a(null, { cleanUntilSec: 9 }, "2")])?.id === "2");
+  t.check("with no passing attempt, the longest clean part wins", pickBest("green", [a("x", { cleanUntilSec: 1 }, "1"), a("x", { cleanUntilSec: 2 }, "2"), a("x", { cleanUntilSec: 0.5 }, "3")])?.id === "2");
+  t.check("with no passing attempt, the tightest lips win", pickBest("talking", [a("x", { lipSyncDriftSec: 0.4 }, "1"), a("x", { lipSyncDriftSec: 0.2 }, "2")])?.id === "2");
+  t.check("no attempts, nothing to keep", pickBest("talking", []) === undefined);
+  t.check(
+    "worst case = every retry used",
+    near(worstCaseUsd("talking", 3.24), 6.48, 1e-9) && near(worstCaseUsd("green", 0.215, 0.134), 0.215 * 3 + 0.134 * 3, 1e-9) && worstCaseUsd("animate", 0.21) === 0.21,
+  );
 
   t.check(
     "ElevenLabs characters group into words",
