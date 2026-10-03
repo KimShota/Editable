@@ -12,6 +12,11 @@ const nextConfig = {
   // has open, and Next allows one dev server per build folder, so tests set
   // NEXT_DIST_DIR=.next-test. Unset, nothing changes.
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  // Next's dev-mode "N" badge sits over the bottom-left corner, on top of the
+  // wizard's Back button and the sidebar's Log out, and every other corner has
+  // controls too. `npm run app:demo` and the browser tests set this to hide it;
+  // ordinary `npm run app:dev` keeps it.
+  ...(process.env.KATALAB_HIDE_DEV_INDICATOR === "1" ? { devIndicators: false } : {}),
   // The film-your-own Katalab screens are retired in favour of the AI-video
   // app (plan/ui-ux-full-flow.md §2.5). Their code stays on disk; these
   // routes just land on the calendar. Not permanent (308): the old pages may

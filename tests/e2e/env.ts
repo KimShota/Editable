@@ -35,5 +35,6 @@ export const testEnv = (): Record<string, string> => ({
   // A fixed "today" (Monday, day 4 of the fixture plan) for the calendar.
   KATALAB_NOW: "2026-10-12T12:00:00Z",
   NEXT_DIST_DIR: ".next-test",
+  KATALAB_HIDE_DEV_INDICATOR: "1",
   NODE_OPTIONS: "--max-old-space-size=4096",
 });

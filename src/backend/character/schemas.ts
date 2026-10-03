@@ -69,3 +69,18 @@ export const LockedCharacterSchema = z.object({
 });
 
 export type LockedCharacter = z.infer<typeof LockedCharacterSchema>;
+
+/** One auditioned voice (character/voice/previews.json): a library voice or a
+ *  designed one, with the mp3 of it speaking the same line. Lenient on the
+ *  fields only some kinds carry. */
+export const VoiceAuditionSchema = z
+  .object({
+    name: z.string(),
+    key: z.string(),
+    description: z.string().optional(),
+    libraryVoiceId: z.string().optional(),
+    generatedVoiceId: z.string().optional(),
+  })
+  .passthrough();
+export const VoiceAuditionsSchema = z.array(VoiceAuditionSchema);
+export type VoiceAudition = z.infer<typeof VoiceAuditionSchema>;

@@ -79,7 +79,8 @@
     "brand:link": "tsx src/backend/tools/brandLink.ts",
     "app:demo": "tsx src/backend/tools/appDemo.ts",
     "test:db-server": "tsx src/backend/tools/testDbServer.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "niche": "tsx src/backend/niche/cli.ts"
   },
   "sideEffects": [
     "*.css"

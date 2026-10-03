@@ -102,6 +102,8 @@ export const seedUiFixture = async (query: QueryFn, storageRoot: string): Promis
     await storage.putBuffer(`brands/acme/scripts/${id}.json`, Buffer.from(JSON.stringify(fixtureScript("acme", `src-${id}`, { angle: `angle for ${id}`, lines: [`Hook words for ${id}.`, `Middle words for ${id}.`, `Closing words for ${id}.`] }))));
   }
 
+  await seedCharacter(storage);
+
   // Media a customer may fetch…
   await storage.putBuffer(`brands/acme/character/sheet/front.png`, PNG);
   // The cards a video exists for: real (tiny) videos and editor jobs, made by the stub producer.
@@ -111,6 +113,50 @@ export const seedUiFixture = async (query: QueryFn, storageRoot: string): Promis
   await storage.putBuffer(`brands/acme/videos/${c.ready}/clips/s0.request.json`, Buffer.from(JSON.stringify({ prompt: "secret prompt" })));
   // Another brand's media, for the cross-brand check.
   await storage.putBuffer(`brands/rival/character/sheet/front.png`, PNG);
+};
+
+const concept = (name: string, form: string, personality: string[]) => ({
+  name,
+  form,
+  style: "photoreal",
+  oneLine: `${name} shows Acme to people who are short on time.`,
+  personality,
+  appearance: "A friendly presenter in a plain top.",
+  signatureProp: "a laptop with Acme open",
+  catchphrase: `${name} says: just try it.`,
+  voiceDescription: "Warm, quick, casual.",
+  whyItFits: "Relatable and clear.",
+  contentAngle: "Short tutorials.",
+});
+
+/** The files a finished character setup leaves: concepts, the drawings and
+ *  refinements, the locked sheet, and the voice auditions. Small stand-ins,
+ *  but the real shapes (character/schemas.ts), so the onboarding replay reads
+ *  them exactly as it reads a real brand's. */
+const seedCharacter = async (storage: Storage): Promise<void> => {
+  const root = "brands/acme/character";
+  await storage.putBuffer(`${root}/concepts.json`, Buffer.from(JSON.stringify({ concepts: [concept("Aria", "a friendly young presenter", ["warm", "quick", "playful"]), concept("Bolt", "a small robot guide", ["curious", "precise"])] })));
+  for (const name of ["c0-v0", "c0-v1", "c0-v2", "c0-r0", "c0-r1", "c1-v0", "c1-v1"]) await storage.putBuffer(`${root}/candidates/${name}.png`, PNG);
+  const views = ["front", "three_quarter", "side", "back", "happy", "surprised", "thinking", "presenting", "with_prop"];
+  for (const v of views) await storage.putBuffer(`${root}/sheet/${v}.png`, PNG);
+  for (const n of ["d0-0", "d0-1", "d0-2", "sample"]) await storage.putBuffer(`${root}/voice/${n}.mp3`, Buffer.alloc(2048, 3));
+  await storage.putBuffer(
+    `${root}/voice/previews.json`,
+    Buffer.from(JSON.stringify(["a", "b", "c"].map((id, i) => ({ name: `d0-${i}`, libraryVoiceId: `voice-${id}`, key: `${root}/voice/d0-${i}.mp3`, description: `library voice voice-${id}` })))),
+  );
+  await storage.putBuffer(
+    `${root}/character.json`,
+    Buffer.from(
+      JSON.stringify({
+        kind: "realistic",
+        concept: concept("Aria", "a friendly young presenter", ["warm", "quick", "playful"]),
+        baseImageKey: `${root}/candidates/c0-r1.png`,
+        sheet: Object.fromEntries(views.map((v) => [v, `${root}/sheet/${v}.png`])),
+        lockedAt: "2026-10-02T10:36:48.237Z",
+        voice: { provider: "elevenlabs", voiceId: "voice-b", name: "Aria (Test)", source: "library", sampleKey: `${root}/voice/sample.mp3` },
+      }),
+    ),
+  );
 };
 
 /** A downloaded viral video with its spec: what the source pool holds. */

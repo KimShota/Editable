@@ -1,5 +1,6 @@
 import type { QueryFn } from "../../app/lib/db";
 import { type CostSink, dbSink } from "../cost/ledger";
+import type { NicheProposerFactory } from "../niche/propose";
 import type { ProposerFactory } from "../plan/propose";
 import type { TaskProgress } from "../queue/workQueue";
 import type { AdaptOptions } from "../recreation/adapt";
@@ -50,6 +51,7 @@ export type JobDeps = {
   storage: Storage;
   ops: RecreationOps;
   proposer: ProposerFactory;
+  nicheProposer: NicheProposerFactory;
   production: ProductionOps;
   /** Records paid calls against the brand in cost_ledger. */
   costSinkFor: (slug: string) => CostSink;

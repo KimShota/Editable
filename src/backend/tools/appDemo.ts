@@ -33,7 +33,8 @@ const stop = (code: number) => {
 };
 
 const run = (name: string, script: string) => {
-  const proc = spawn("npm", ["run", "--silent", script], { stdio: ["ignore", "pipe", "pipe"], env: process.env });
+  // A demo should not have Next's dev badge over the Back and Log out buttons.
+  const proc = spawn("npm", ["run", "--silent", script], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, KATALAB_HIDE_DEV_INDICATOR: "1" } });
   const prefix = (stream: NodeJS.ReadableStream, out: NodeJS.WriteStream) => {
     let buffer = "";
     stream.on("data", (chunk: Buffer) => {

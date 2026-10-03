@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { QueryFn } from "../../app/lib/db";
-import { LockedCharacterSchema, type LockedCharacter } from "../character/schemas";
+import { LockedCharacterSchema, type LockedCharacter, type MascotConcept, MascotConceptsSchema, type VoiceAudition, VoiceAuditionsSchema } from "../character/schemas";
 import { type Actor, type Card, type CardStatus, type Niche, type Plan, type PostDetails, PostDetailsSchema } from "../plan/schemas";
 import { findCard, listSourceIds, readNiche, readPlan, savePlan, transitionCardInPlan, updatePlan } from "../plan/store";
 import { AdaptedScriptSchema, type AdaptedScript, RecreationSpecSchema, type RecreationSpec } from "../recreation/schemas";
@@ -134,6 +134,30 @@ export class BrandRepo {
   async getCharacter(slug: string): Promise<LockedCharacter | null> {
     const raw = await readJsonIfExists(this.storage, characterKeys(slug).character);
     return raw === null ? null : LockedCharacterSchema.parse(raw);
+  }
+
+  /** The concepts the character was designed from (onboarding step 2). */
+  async getConcepts(slug: string): Promise<MascotConcept[]> {
+    const raw = await readJsonIfExists(this.storage, characterKeys(slug).concepts);
+    return raw === null ? [] : MascotConceptsSchema.parse(raw).concepts;
+  }
+
+  /** Every candidate image drawn for the character: c<concept>-v<n> are the
+   *  first drawings, c<concept>-r<n> the refinements of one. */
+  async listCandidates(slug: string): Promise<{ name: string; key: string; concept: number; kind: "variation" | "refinement"; n: number }[]> {
+    const k = characterKeys(slug);
+    const out: { name: string; key: string; concept: number; kind: "variation" | "refinement"; n: number }[] = [];
+    for (const key of await this.storage.list(k.candidatesDir)) {
+      const m = /\/c(\d+)-([vr])(\d+)\.png$/.exec(key);
+      if (m) out.push({ name: `c${m[1]}-${m[2]}${m[3]}`, key, concept: Number(m[1]), kind: m[2] === "v" ? "variation" : "refinement", n: Number(m[3]) });
+    }
+    return out.sort((a, b) => a.concept - b.concept || (a.kind === b.kind ? a.n - b.n : a.kind === "variation" ? -1 : 1));
+  }
+
+  /** The voices auditioned for the character (onboarding step 3). */
+  async getVoiceAuditions(slug: string): Promise<VoiceAudition[]> {
+    const raw = await readJsonIfExists(this.storage, characterKeys(slug).voicePreviews);
+    return raw === null ? [] : VoiceAuditionsSchema.parse(raw);
   }
 
   async getNiche(slug: string): Promise<Niche | null> {

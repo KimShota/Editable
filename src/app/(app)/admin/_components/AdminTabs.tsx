@@ -7,6 +7,7 @@ const TABS = [
   { href: "/admin/production", label: "Production" },
   { href: "/admin/review", label: "Review" },
   { href: "/admin/sources", label: "Viral videos" },
+  { href: "/admin/demo", label: "Demo" },
 ];
 
 /** The founder's sections, shared by every admin screen. */

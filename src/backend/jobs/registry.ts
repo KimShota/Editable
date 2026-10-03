@@ -1,11 +1,13 @@
 import type { QueryFn } from "../../app/lib/db";
 import { adaptCard, buildSpec, ingestSource, storyboardCard } from "../recreation/ops";
+import { claudeNicheProposer } from "../niche/propose";
 import { claudeProposer } from "../plan/propose";
 import type { JobHandler } from "../queue/worker";
 import type { Storage } from "../storage";
 import { brandCostSink, type JobDeps } from "./deps";
 import { cliProduction } from "./productionCli";
 import { pingHandler } from "./ping";
+import { createNicheHandlers } from "./nicheJobs";
 import { createPlanHandlers } from "./planJobs";
 import { stubDeps } from "./stubs";
 import { createVideoHandlers } from "./videoJobs";
@@ -28,6 +30,7 @@ export const realDeps = (query: QueryFn, storage: Storage): JobDeps => ({
   storage,
   ops: { ingestSource, buildSpec, adaptCard, storyboardCard },
   proposer: (costSink, ref) => claudeProposer({ costSink, ref }),
+  nicheProposer: (costSink, ref) => claudeNicheProposer({ costSink, ref }),
   production: cliProduction(),
   costSinkFor: (slug) => brandCostSink(query, slug),
 });
@@ -39,5 +42,6 @@ export const createJobHandlers = (query: QueryFn, storage: Storage): Record<stri
     "system.ping": pingHandler,
     ...createPlanHandlers(deps),
     ...createVideoHandlers(deps),
+    ...createNicheHandlers(deps),
   };
 };

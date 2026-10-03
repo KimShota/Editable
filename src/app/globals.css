@@ -397,3 +397,23 @@ body {
     opacity: 0.4;
   }
 }
+
+/* ---------- onboarding replay: what a step shows once its progress has played ---------- */
+.replay-reveal {
+  animation: replay-reveal 0.5s var(--ease-out) both;
+}
+@keyframes replay-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .replay-reveal {
+    animation: none;
+  }
+}

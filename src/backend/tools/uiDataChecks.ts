@@ -5,6 +5,9 @@ import { hasUnsafeSegment, isStorageKeySegment, safeDecode } from "../../app/lib
 import { brandCostSink } from "../jobs/deps";
 import { createPlanHandlers, directionFor } from "../jobs/planJobs";
 import { createVideoHandlers } from "../jobs/videoJobs";
+import { createNicheHandlers } from "../jobs/nicheJobs";
+import { chooseNiche, NicheError } from "../niche/choose";
+import { type NicheProposal, nicheProblems, withIds } from "../niche/propose";
 import { readTakes } from "../production/takes";
 import { artifactsDir, repoRoot } from "../pipeline/paths";
 import { EdlSchema } from "../pipeline/schemas";
@@ -158,6 +161,21 @@ const main = async () => {
     t.check("a one-source pool has no alternates", [...pickAlternates([{ day: 1, sourceId: "A" }], [pool[0]]).values()][0].length === 0);
   }
   t.check("the direction for a card carries the angle and any note", directionFor("Be bold").includes("Be bold") && !directionFor("Be bold").includes("Note") && directionFor("Be bold", "shorter").includes("Note from the customer: shorter"));
+
+  console.log("niche proposals");
+  {
+    const angle = (title: string, hooks: string[] = ["First hook.", "Second hook."]) => ({ title, whyItFits: "It fits.", exampleHooks: hooks });
+    const ok: NicheProposal = { angles: [angle("Mac tips"), angle("Team mistakes"), angle("Customer questions"), angle("Behind the feature")] };
+    t.check("a clean proposal has no problems", nicheProblems(ok).length === 0);
+    t.check("fewer than 3 angles is refused", nicheProblems({ angles: ok.angles.slice(0, 2) }).some((p) => /expected 3 to 5/.test(p)));
+    t.check("more than 5 angles is refused", nicheProblems({ angles: [...ok.angles, angle("Fifth"), angle("Sixth")] }).some((p) => /expected 3 to 5/.test(p)));
+    t.check("two angles with the same title are refused, ignoring case and spacing", nicheProblems({ angles: [angle("Mac tips"), angle("  MAC   tips "), angle("Other")] }).some((p) => /both called/.test(p)));
+    t.check("two titles that make the same id are refused", nicheProblems({ angles: [angle("Mac tips!"), angle("Mac tips?"), angle("Other")] }).some((p) => /same id/.test(p)));
+    t.check("one hook is not enough, four is too many", nicheProblems({ angles: [angle("A", ["only one"]), angle("B"), angle("C")] }).some((p) => /2 or 3 example hooks/.test(p)) && nicheProblems({ angles: [angle("A", ["1", "2", "3", "4"]), angle("B"), angle("C")] }).some((p) => /2 or 3 example hooks/.test(p)));
+    t.check("a repeated hook is refused", nicheProblems({ angles: [angle("A", ["Same.", " same. "]), angle("B"), angle("C")] }).some((p) => /repeats a hook/.test(p)));
+    t.check("an empty title or reason is refused", nicheProblems({ angles: [{ ...angle("A"), title: "  " }, { ...angle("B"), whyItFits: "" }, angle("C")] }).length >= 2);
+    t.check("an angle's id comes from its title", withIds({ angles: [angle("Mac shortcuts you did not know"), angle("What's new?!"), angle("日本語のタイトル")] }).map((a) => a.id).slice(0, 2).join() === "mac-shortcuts-you-did-not-know,whats-new");
+  }
 
   console.log("plan dates");
   t.check("day 1 is the start date", dateOfDay("2026-10-09", 1) === "2026-10-09");
@@ -505,6 +523,34 @@ const main = async () => {
         if (fs.existsSync(dir)) for (const entry of fs.readdirSync(dir).filter((n) => n.startsWith("planco-"))) fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
       }
     }
+
+    console.log("niche: propose, choose, and the cycle lock");
+    const nh = createNicheHandlers(deps);
+    const runN = (payload: Record<string, unknown>) => nh["niche.propose"]({ id: 1, kind: "niche.propose", payload, attempts: 1, maxAttempts: 1 });
+    await t.rejects("proposing for a brand with no intake is refused", () => runN({ slug: "ghostbrand" }), /intake|ENOENT|no brand intake/);
+    t.check("a brand has no niche before it is proposed", (await repo.getNiche("planco")) === null);
+    await t.rejects("choosing before any are proposed says so", () => chooseNiche(storage, "planco", "x"), /no angles to choose from/);
+    t.check("proposing saves 4 distinct angles with ids and no pick", ((await runN({ slug: "planco" })) as { angles: number }).angles === 4 && (await repo.getNiche("planco"))!.angles.length === 4 && (await repo.getNiche("planco"))!.chosenAngleId === null);
+    const angles = (await repo.getNiche("planco"))!.angles;
+    await t.rejects("an angle that was not proposed cannot be chosen", () => chooseNiche(storage, "planco", "made-up"), /not one of the proposed/);
+    t.check("choosing records the pick and locks it into the plan", await (async () => {
+      const chosen = await chooseNiche(storage, "planco", angles[0].id);
+      const plan = (await repo.getPlan("planco"))!;
+      return chosen.angleId === angles[0].id && (await repo.getNiche("planco"))!.chosenAngleId === angles[0].id && plan.niche?.angleId === angles[0].id && plan.niche.title === angles[0].title;
+    })());
+    t.check("choosing the same angle again is harmless", (await chooseNiche(storage, "planco", angles[0].id)).angleId === angles[0].id);
+    await t.rejects("a different angle is refused: the niche is locked for the cycle", () => chooseNiche(storage, "planco", angles[1].id), /locked for this cycle/);
+    t.check("the refusal is a NicheError", await chooseNiche(storage, "planco", angles[1].id).then(() => false, (e) => e instanceof NicheError));
+    await t.rejects("proposing again is refused once the plan carries a niche", () => runN({ slug: "planco" }), /locked for this cycle/);
+    t.check("the locked niche and pick are untouched", (await repo.getNiche("planco"))!.chosenAngleId === angles[0].id);
+    // Before a plan exists, a pick just waits for it.
+    await storage.putBuffer("brands/nichecase/intake.json", Buffer.from(JSON.stringify({ intake })));
+    await runN({ slug: "nichecase" });
+    const early = (await repo.getNiche("nichecase"))!.angles;
+    await chooseNiche(storage, "nichecase", early[2].id);
+    t.check("a pick made before a plan exists is kept for it", (await repo.getNiche("nichecase"))!.chosenAngleId === early[2].id && (await repo.getPlan("nichecase")) === null);
+    await runN({ slug: "nichecase" });
+    t.check("proposing again keeps the pick, because that angle is still proposed", (await repo.getNiche("nichecase"))!.chosenAngleId === early[2].id);
 
     console.log("task progress on the queue");
     const q = new WorkQueue(query);

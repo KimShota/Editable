@@ -2,6 +2,7 @@ import { recreationKeys } from "../brand/keys";
 import { fixtureScript, fixtureSpec } from "../tools/fixtures/specFixture";
 import { sourceIdFromUrl } from "../recreation/decompose";
 import { parseViralUrl } from "../recreation/viralUrl";
+import { type NicheProposal, type NicheProposerFactory, nicheProblems } from "../niche/propose";
 import { type Proposal, type ProposerFactory, proposalProblems } from "../plan/propose";
 import { writeJson } from "../storageJson";
 import type { JobDeps, RecreationOps } from "./deps";
@@ -92,4 +93,20 @@ export const stubProposer: ProposerFactory = () => async (input): Promise<Propos
   return { cards };
 };
 
-export const stubDeps = (base: Pick<JobDeps, "query" | "storage" | "costSinkFor">): JobDeps => ({ ...base, ops: stubOps(), proposer: stubProposer, production: stubProduction(base.storage) });
+/** Four fixed, distinct angles built from the product's name. */
+export const stubNicheProposer: NicheProposerFactory = () => async (intake): Promise<NicheProposal> => {
+  const name = (intake.products[intake.recommendedProductIndex] ?? intake.products[0]).name;
+  const proposal: NicheProposal = {
+    angles: [
+      { title: `${name} in sixty seconds`, whyItFits: `Short demos suit ${name} because each feature fits in one clip.`, exampleHooks: [`Here is ${name} doing in a minute what takes an hour.`, `You are still doing this by hand.`] },
+      { title: "Mistakes your team keeps making", whyItFits: "Relatable problems make the product the obvious fix.", exampleHooks: ["Three things that quietly waste your week.", "Nobody tells you this about meetings."] },
+      { title: "Questions customers ask us", whyItFits: "Answering real questions builds trust and shows the product at work.", exampleHooks: ["People keep asking me this.", "Is it really private? Let me show you."] },
+      { title: "Behind the feature", whyItFits: "Explaining why a feature exists makes the product feel considered.", exampleHooks: ["Why we built this the hard way.", "This feature took the longest to get right."] },
+    ],
+  };
+  const problems = nicheProblems(proposal);
+  if (problems.length) throw new Error(`stub niche proposer made a bad proposal: ${problems.join("; ")}`);
+  return proposal;
+};
+
+export const stubDeps = (base: Pick<JobDeps, "query" | "storage" | "costSinkFor">): JobDeps => ({ ...base, ops: stubOps(), proposer: stubProposer, nicheProposer: stubNicheProposer, production: stubProduction(base.storage) });
