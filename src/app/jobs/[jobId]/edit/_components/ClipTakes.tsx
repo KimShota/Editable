@@ -12,7 +12,7 @@ import { PlusIcon, RegenerateIcon } from "./Icons";
  * changes or a generation finishes.
  */
 
-type TakeView = { id: string; src: string; inSec: number; createdAt: string; origin: "original" | "regenerated" | "retry" };
+type TakeView = { id: string; src: string; inSec: number; createdAt: string; origin: "original" | "regenerated" | "retry"; label?: string; request?: string };
 type TakesResponse = { shotId: string; regenerable: boolean; currentTakeId: string | null; takes: TakeView[] };
 
 export function ClipTakes({
@@ -69,7 +69,7 @@ export function ClipTakes({
               type="button"
               disabled={current}
               onClick={() => onChoose(t.id)}
-              title={current ? "On the timeline" : `Use take ${i + 1}`}
+              title={`${current ? "On the timeline" : `Use take ${i + 1}`}${t.request ? `\nAsked for: ${t.request}` : ""}`}
               className={`group relative aspect-[9/16] overflow-hidden rounded-lg border bg-black ${
                 current
                   ? "border-[color:var(--ed-accent)] shadow-[0_0_0_2px_var(--ed-accent-dim)]"
@@ -83,6 +83,7 @@ export function ClipTakes({
               />
               <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 pt-4 pb-1 text-left text-[10px] leading-tight text-white">
                 Take {i + 1}
+                {t.label && <span className="block truncate text-white/70">{t.label}</span>}
                 {current && <span className="block font-semibold text-[color:var(--ed-accent)]">In use</span>}
               </span>
             </button>

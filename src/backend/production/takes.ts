@@ -28,6 +28,14 @@ export type Take = {
   createdAt: string;
   /** "retry": an attempt an automatic retry replaced (production/retry.ts). */
   origin: "original" | "regenerated" | "retry";
+  /** The video-model prompt that made it, when it differs from the script's
+   *  own (a change asked for in the shot chat); a later change builds on it. */
+  prompt?: string;
+  /** The still it was animated from, when that was an edited one (absolute path). */
+  still?: string;
+  /** What the user asked for, and the plan's short name for it (shot chat). */
+  request?: string;
+  label?: string;
 };
 
 export type ShotTakes = {

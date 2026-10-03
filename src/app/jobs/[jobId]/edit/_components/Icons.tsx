@@ -145,6 +145,12 @@ export const RegenerateIcon = ({ className }: IconProps) => (
   </svg>
 );
 
+export const SendIcon = ({ className }: IconProps) => (
+  <svg viewBox="0 0 24 24" fill={base} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M12 19V5M6 11l6-6 6 6" />
+  </svg>
+);
+
 export const ArrowLeftIcon = ({ className }: IconProps) => (
   <svg viewBox="0 0 24 24" fill={base} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M19 12H5M11 6l-6 6 6 6" />

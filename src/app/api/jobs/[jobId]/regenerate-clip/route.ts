@@ -14,6 +14,7 @@ import { repoRoot, artifactsDir } from "@backend/pipeline/paths";
  *
  *   POST { clipId }                 → { estimateUsd }   asks the price, spends nothing
  *   POST { clipId, confirm: true }  → 202               starts it in the background
+ *   …and either with planId         the change a shot-chat plan describes (see shot-chat)
  *   GET                             → { clips }         status per clip, polled by the editor
  *
  * Same "child process + status file the client polls" shape as the render
@@ -58,14 +59,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ jobId: 
   if (!user?.isAdmin) {
     return NextResponse.json({ error: "regenerating a clip spends AI credits; admins only for now" }, { status: 403 });
   }
-  const body = (await req.json().catch(() => ({}))) as { clipId?: unknown; confirm?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { clipId?: unknown; confirm?: unknown; planId?: unknown };
   const clipId = typeof body.clipId === "string" && /^[A-Za-z0-9._-]+$/.test(body.clipId) ? body.clipId : null;
   if (!clipId) return NextResponse.json({ error: "clipId required" }, { status: 400 });
+  if (body.planId !== undefined && !(typeof body.planId === "string" && /^[A-Za-z0-9-]+$/.test(body.planId))) {
+    return NextResponse.json({ error: "bad planId" }, { status: 400 });
+  }
+  const planArgs = typeof body.planId === "string" ? ["--plan", body.planId] : [];
 
   if (body.confirm !== true) {
     // Price check only. The estimate endpoint call is quick and free.
     const result = await new Promise<{ ok: boolean; out: string }>((resolve) => {
-      execFile("npm", produceArgs(jobId, clipId, ["--dry"]), { cwd: repoRoot, timeout: 60_000 }, (err, stdout, stderr) =>
+      execFile("npm", produceArgs(jobId, clipId, [...planArgs, "--dry"]), { cwd: repoRoot, timeout: 60_000 }, (err, stdout, stderr) =>
         resolve({ ok: !err, out: err ? stderr || String(err) : stdout }),
       );
     });
@@ -79,7 +84,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ jobId: 
 
   const startedAt = new Date().toISOString();
   writeStatus(jobId, clipId, { status: "running", startedAt });
-  const child = spawn("npm", produceArgs(jobId, clipId), { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn("npm", produceArgs(jobId, clipId, planArgs), { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] });
   let stderrTail = "";
   child.stderr.on("data", (chunk) => {
     stderrTail = (stderrTail + chunk.toString()).slice(-4000);

@@ -10,6 +10,7 @@ import type { QuotaStatus } from "../../../../lib/quota";
 import { Timeline, type UploadPlacement } from "./Timeline";
 import { Inspector } from "./Inspector";
 import { ClipTakes } from "./ClipTakes";
+import { ShotChat } from "./ShotChat";
 import { MediaPanel } from "./MediaPanel";
 import { OverlayCanvas } from "./OverlayCanvas";
 import { RenderPanel } from "./RenderPanel";
@@ -442,25 +443,29 @@ export function Editor({
     return data.edl as Edl;
   }, [jobId]);
 
+  // With a planId (the shot chat's Generate), the price was already shown on
+  // the button that was pressed, so there is no second confirmation.
   const regenerateClip = useCallback(
-    async (clipId: string) => {
+    async (clipId: string, planId?: string) => {
       setError(null);
       try {
-        const quote = await fetch(`/api/jobs/${jobId}/regenerate-clip`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clipId }),
-        });
-        const q = await quote.json();
-        if (!quote.ok) throw new Error(q.error ?? "could not price the new take");
-        const ok = window.confirm(
-          `Make a new AI take of this shot?\n\nIt costs about $${Number(q.estimateUsd).toFixed(2)} and takes a few minutes. Only this clip changes; your other edits stay, and undo brings the old take back.`,
-        );
-        if (!ok) return;
+        if (!planId) {
+          const quote = await fetch(`/api/jobs/${jobId}/regenerate-clip`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clipId }),
+          });
+          const q = await quote.json();
+          if (!quote.ok) throw new Error(q.error ?? "could not price the new take");
+          const ok = window.confirm(
+            `Make a new AI take of this shot?\n\nIt costs about $${Number(q.estimateUsd).toFixed(2)} and takes a few minutes. Only this clip changes; your other edits stay, and undo brings the old take back.`,
+          );
+          if (!ok) return;
+        }
         const start = await fetch(`/api/jobs/${jobId}/regenerate-clip`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clipId, confirm: true }),
+          body: JSON.stringify({ clipId, confirm: true, planId }),
         });
         if (!start.ok) throw new Error((await start.json()).error ?? "could not start the new take");
         setRegenBusy((b) => (b.includes(clipId) ? b : [...b, clipId]));
@@ -542,14 +547,23 @@ export function Editor({
 
   const videoExtras = useCallback(
     (clip: Edl["video"][number]) => (
-      <ClipTakes
-        jobId={jobId}
-        clipId={clip.id}
-        currentSrc={clip.src}
-        busy={regenBusy.includes(clip.id)}
-        onChoose={(takeId) => chooseTake(clip.id, takeId)}
-        onNewTake={() => regenerateClip(clip.id)}
-      />
+      <>
+        <ClipTakes
+          jobId={jobId}
+          clipId={clip.id}
+          currentSrc={clip.src}
+          busy={regenBusy.includes(clip.id)}
+          onChoose={(takeId) => chooseTake(clip.id, takeId)}
+          onNewTake={() => regenerateClip(clip.id)}
+        />
+        <ShotChat
+          jobId={jobId}
+          clipId={clip.id}
+          currentSrc={clip.src}
+          busy={regenBusy.includes(clip.id)}
+          onGenerate={(planId) => regenerateClip(clip.id, planId)}
+        />
+      </>
     ),
     [jobId, regenBusy, chooseTake, regenerateClip],
   );

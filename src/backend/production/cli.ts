@@ -34,7 +34,9 @@ import {
 } from "./clips";
 import { compileEdl, type MadeClip, swapShotClip, type VoiceFile } from "./edl";
 import { AI_VIDEO_FORMAT } from "./format";
-import { addTake } from "./takes";
+import { appendShotMessages, findPlan, newMessage, readShotChat, updateShotMessage } from "./shotChats";
+import { planShotChange } from "./shotChange";
+import { addTake, takesForClip } from "./takes";
 import { estimateUsd, generate, seedanceUsd, uploadFile, waitFor, download } from "./higgsfield";
 import { clipProblem, GREEN_STILL_ATTEMPTS, MIN_GREEN_FRACTION, pickBest, type Quality, RETRY_CAP, usable, worstCaseUsd } from "./retry";
 import { buildTimeline, type Timeline } from "./timeline";
@@ -52,8 +54,11 @@ import { buildTimeline, type Timeline } from "./timeline";
  *       that runs out keeps its best attempt or a free fallback and is flagged, never failed
  *   npm run produce -- render --brand <slug> --source <id> [--discard-edits]
  *       also makes the video a project the app's editor opens (jobs/<brand>-<source>)
- *   npm run produce -- regen-clip --job <jobId> --clip <clipId> [--dry]
- *       a new take of one shot, swapped into the editor's timeline (the Regenerate button)
+ *   npm run produce -- regen-clip --job <jobId> --clip <clipId> [--plan <messageId>] [--dry]
+ *       a new take of one shot, swapped into the editor's timeline (the Regenerate button);
+ *       --plan makes the change a shot-chat plan describes
+ *   npm run produce -- shot-chat --job <jobId> --clip <clipId> --message "…"
+ *       what the user wants changed in a shot → Claude's plan for a new take, priced, not generated
  *   npm run produce -- all    --brand <slug> --source <id> [--dry]
  *
  *   voice/line-<i>.tts.mp3/.json each line as ElevenLabs spoke it, with word timings
@@ -68,7 +73,7 @@ import { buildTimeline, type Timeline } from "./timeline";
  *   edl.json, final.mp4          the editable timeline and its render
  */
 
-const USAGE = "usage: npm run produce -- <voice|clips|render|all> --brand <slug> --source <id> [options], or regen-clip --job <id> --clip <id>  (see cli.ts)";
+const USAGE = "usage: npm run produce -- <voice|clips|render|all> --brand <slug> --source <id> [options], or regen-clip|shot-chat --job <id> --clip <id>  (see cli.ts)";
 
 const option = (args: string[], name: string): string | undefined => {
   const i = args.indexOf(name);
@@ -315,6 +320,10 @@ const makeClip = async (
   opts: {
     retries?: number;
     fallback?: boolean;
+    /** The video-model prompt and starting still, when not the script's own
+     *  (a change from the shot chat, or a take that came from one). */
+    prompt?: string;
+    still?: string;
     /** Where a finished clip goes: a new file for every take, because a take
      *  an EDL (or the editor's undo history, or takes.json) references must
      *  never change under it. */
@@ -399,8 +408,8 @@ const makeClip = async (
       let input: Record<string, unknown>;
       if (kind === "talking") {
         input = {
-          prompt: talkingPrompt(shot, c.character.concept.name),
-          image_urls: [await uploadFile(await storage.localPath(c.k.still(shot.shotId)))],
+          prompt: opts.prompt ?? talkingPrompt(shot, c.character.concept.name),
+          image_urls: [await uploadFile(opts.still ?? (await storage.localPath(c.k.still(shot.shotId))))],
           audio_urls: [await uploadFile(wav)],
           duration: requestSeconds(kind, len),
           resolution: "720p",
@@ -409,12 +418,12 @@ const makeClip = async (
       } else {
         let still: string | null;
         try {
-          still = kind === "green" ? await greenStill(c, shot) : await storage.localPath(c.k.still(shot.shotId));
+          still = opts.still ?? (kind === "green" ? await greenStill(c, shot) : await storage.localPath(c.k.still(shot.shotId)));
         } catch (err) {
           return fallback(`no green-screen still (${errorText(err)})`);
         }
         if (!still) return fallback("no green-screen still came back green enough to key");
-        input = { image_url: await uploadFile(still), prompt: animatePrompt(shot, kind), duration: requestSeconds(kind, len), sound: "off" };
+        input = { image_url: await uploadFile(still), prompt: opts.prompt ?? animatePrompt(shot, kind), duration: requestSeconds(kind, len), sound: "off" };
       }
       const tries = 1 + (opts.retries ?? 0);
       for (let n = 1; n <= tries; n++) {
@@ -630,7 +639,8 @@ const isRegenerable = (shot: Ctx["script"]["shots"][number]) => !["footage", "te
  * own versioned file, so undo in the editor brings the previous take back.
  * With --dry it only prints `estimate_usd <x>`.
  */
-const regenClip = async (args: string[]) => {
+/** The AI shot a timeline clip was cut from, and the take of it on the timeline. */
+const clipContext = async (args: string[]) => {
   const jobId = required(args, "--job");
   const clipId = required(args, "--clip");
   const metaFile = path.join(repoRoot, "jobs", jobId, "ai-video.json");
@@ -646,19 +656,92 @@ const regenClip = async (args: string[]) => {
   const kind = planClip(shot);
   if (!isRegenerable(shot)) throw new Error("this shot is the product's own footage, not AI: regenerating would give the same clip");
   const timeline = (await readJson(c.k.timeline, "timeline")) as Timeline;
+  // The take on the timeline: a change builds on its prompt and still.
+  const takes = takesForClip(jobId, clipId);
+  const take = takes.takes.find((t) => t.id === takes.currentTakeId);
+  const takeFile = take?.file ?? edl.assets[segment.src];
+  if (!takeFile) throw new Error(`no file for clip ${clipId}`);
+  return { jobId, clipId, c, editorEdl, segment, shot, kind, timeline, take, takeFile };
+};
+type ClipCtx = Awaited<ReturnType<typeof clipContext>>;
+
+/** The prompt and still the take on the timeline was made from: its own when
+ *  it came from a change, else the script's. */
+const basePromptAndStill = async (x: ClipCtx): Promise<{ prompt: string; still: string }> => {
+  const prompt = x.take?.prompt ?? (x.kind === "talking" ? talkingPrompt(x.shot, x.c.character.concept.name) : animatePrompt(x.shot, x.kind));
+  if (x.take?.still) return { prompt, still: x.take.still };
+  const green = x.kind === "green" && (await storage.exists(x.c.k.green(x.shot.shotId)));
+  return { prompt, still: await storage.localPath(green ? x.c.k.green(x.shot.shotId) : x.c.k.still(x.shot.shotId)) };
+};
+
+/** A still edited for a change (Gemini, the current still as the image to
+ *  edit). Saved as its own file beside the video's stills, never over them. */
+const editStill = async (x: ClipCtx, from: string, instruction: string): Promise<string> => {
+  const green = x.kind === "green";
+  const prompt = [
+    `Edit this image: ${instruction}.`,
+    "Keep everything else exactly as it is: the same person, face, hair, outfit, room, lighting, framing and photographic style.",
+    green ? "The laptop screen must stay a flat, solid chroma green with nothing on it." : "",
+    "No text, captions or logos.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const bytes = await generateImage(prompt, [from], 1, { aspectRatio: "9:16", imageSize: "2K" }).catch((err: Error) => {
+    if (/API error 402/.test(err.message)) throw new Error("the still edit needs Gemini, whose prepaid credits are used up (top up at ai.studio), or ask for the change without editing the still");
+    throw err;
+  });
+  await x.c.cost(googleImageCostEntry(GEMINI_IMAGE_MODEL, 1, "still_edit", { ref: x.c.ref(x.shot.shotId) }));
+  const key = `${x.c.k.root}/stills/${x.shot.shotId}.v${stamp()}.png`;
+  await storage.putBuffer(key, bytes);
+  const file = await storage.localPath(key);
+  if (green) {
+    const g = greenFraction(file);
+    if (g < MIN_GREEN_FRACTION) throw new Error(`the edited still lost its green screen (${(g * 100).toFixed(1)}% green): try asking for the change without touching the laptop`);
+    await withTmp(async (dir) => {
+      const cleaned = path.join(dir, "clean.png");
+      execFileSync("python3", [greenscreenScript, "--clean-still", file, cleaned], { stdio: ["ignore", "ignore", "inherit"] });
+      await storage.putFile(key, cleaned);
+    });
+  }
+  return storage.localPath(key);
+};
+
+const stillEditUsd = () => googleImageCostEntry(GEMINI_IMAGE_MODEL, 1, "still_edit").usd;
+
+/**
+ * The editor's Regenerate (api/jobs/[jobId]/regenerate-clip): a new take of
+ * the one shot a timeline clip was cut from, swapped into the editor's own
+ * edl.json so every other edit stays. Each take is kept as its own versioned
+ * file, so undo in the editor brings the previous take back. It builds on
+ * the take on the timeline (its prompt and still); with --plan, on a change
+ * from the shot chat (a new prompt and/or an edited still). With --dry it
+ * only prints `estimate_usd <x>`.
+ */
+const regenClip = async (args: string[]) => {
+  const x = await clipContext(args);
+  const { c, shot, kind, jobId, clipId } = x;
+  const planId = option(args, "--plan");
+  const plan = planId ? findPlan(jobId, shot.shotId, planId) : null;
+  const change = plan?.message.plan;
 
   if (args.includes("--dry")) {
-    const usd = await estimate(c, timeline, [{ shot, kind }], { newStills: false, retries: false });
+    const usd = (await estimate(c, x.timeline, [{ shot, kind }], { newStills: false, retries: false })) + (change?.stillEdit ? stillEditUsd() : 0);
     console.log(`estimate_usd ${usd.toFixed(2)}`);
     return;
   }
+
+  // Undefined keeps the script's own prompt/still (makeClip's defaults).
+  let prompt = x.take?.prompt;
+  let still = x.take?.still;
+  if (change?.motion) prompt = change.motion;
+  if (change?.stillEdit) still = await editStill(x, (await basePromptAndStill(x)).still, change.stillEdit);
 
   await storage.remove(c.k.request(shot.shotId));
   const versionKey = c.k.take(shot.shotId);
   const version = path.basename(versionKey);
   // One attempt, no fallback: its price was confirmed up front, and on
   // failure the editor keeps the take it has. A failed check is flagged.
-  const record = await makeClip(c, timeline, shot, kind, true, { newKey: () => versionKey });
+  const record = await makeClip(c, x.timeline, shot, kind, true, { newKey: () => versionKey, prompt, still });
   if (record.flag) console.log(`  ! ${shot.shotId}: ${record.flag}`);
   const records = (await readJson(c.k.clips, "clips")) as Record<string, ClipRecord>;
   records[shot.shotId] = record;
@@ -672,17 +755,76 @@ const regenClip = async (args: string[]) => {
     rate: record.rate,
   };
   // Re-read: the editor may have saved edits while the shot was generating.
-  const latest = EdlSchema.parse(JSON.parse(fs.readFileSync(editorEdl, "utf8")));
-  addTake(jobId, shot.shotId, true, { ...made, createdAt: new Date().toISOString(), origin: "regenerated" });
+  const latest = EdlSchema.parse(JSON.parse(fs.readFileSync(x.editorEdl, "utf8")));
+  const take = addTake(jobId, shot.shotId, true, {
+    ...made,
+    createdAt: new Date().toISOString(),
+    origin: "regenerated",
+    prompt,
+    still,
+    request: plan?.request,
+    label: change?.label,
+  });
+  if (plan) updateShotMessage(jobId, shot.shotId, plan.message.id, { takeId: take.id });
   const swapped = EdlSchema.parse(swapShotClip(latest, shot.shotId, made));
-  fs.writeFileSync(editorEdl, JSON.stringify(swapped, null, 2));
+  fs.writeFileSync(x.editorEdl, JSON.stringify(swapped, null, 2));
   stageAssets(swapped);
   console.log(`regenerated ${clipId} (shot ${shot.shotId}, ${kind})`);
+};
+
+/**
+ * One turn of a shot's change chat (api/jobs/[jobId]/shot-chat): the user's
+ * request → Claude's plan for a new take, priced but not generated (the
+ * editor's Generate runs regen-clip --plan). Prints `RESULT <json>` with the
+ * two new messages.
+ */
+const shotChat = async (args: string[]) => {
+  const x = await clipContext(args);
+  const { c, shot, kind } = x;
+  const request = required(args, "--message").trim().slice(0, 1000);
+  if (!request) throw new Error("say what you want to change");
+  const base = await basePromptAndStill(x);
+  const history = readShotChat(x.jobId, shot.shotId);
+  const at = x.timeline.shots.find((s) => s.shotId === shot.shotId)!;
+  // A talking shot's line: the script lines spoken during it.
+  const line =
+    kind === "talking"
+      ? x.timeline.lines
+          .filter((l) => l.tlOutSec > at.tlInSec && l.tlInSec < at.tlOutSec)
+          .map((l) => c.script.lines.find((s) => s.index === l.index)?.text ?? "")
+          .join(" ")
+      : undefined;
+
+  const { plan } = await withTmp(async (dir) => {
+    // Small jpgs for Claude: the still, and the take at its start, middle and end.
+    const still = path.join(dir, "still.jpg");
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-i", base.still, "-vf", "scale=540:-2", "-frames:v", "1", still]);
+    const takeSec = durationOf(x.takeFile);
+    const frames = [0.1, 0.5, 0.9].map((f, i) => {
+      const out = path.join(dir, `frame-${i}.jpg`);
+      execFileSync("ffmpeg", ["-v", "error", "-y", "-ss", (takeSec * f).toFixed(2), "-i", x.takeFile, "-frames:v", "1", "-vf", "scale=360:-2", out]);
+      return out;
+    });
+    return planShotChange(
+      { kind, shotId: shot.shotId, action: shot.action, durationSec: at.tlOutSec - at.tlInSec, line, characterName: c.character.concept.name, currentPrompt: base.prompt, still, frames },
+      history,
+      request,
+      { costSink: c.cost, ref: c.ref(shot.shotId) },
+    );
+  });
+  const estimateUsd =
+    plan.action === "regenerate"
+      ? Math.round(((await estimate(c, x.timeline, [{ shot, kind }], { newStills: false, retries: false })) + (plan.stillEdit ? stillEditUsd() : 0)) * 100) / 100
+      : undefined;
+  const messages = [newMessage({ role: "user", text: request }), newMessage({ role: "assistant", text: plan.reply, plan: { ...plan, estimateUsd } })];
+  appendShotMessages(x.jobId, shot.shotId, messages);
+  console.log(`RESULT ${JSON.stringify({ shotId: shot.shotId, messages })}`);
 };
 
 const main = async () => {
   const [command, ...args] = process.argv.slice(2);
   if (command === "regen-clip") return regenClip(args);
+  if (command === "shot-chat") return shotChat(args);
   if (!["voice", "clips", "render", "all"].includes(command)) {
     console.error(USAGE);
     process.exit(1);

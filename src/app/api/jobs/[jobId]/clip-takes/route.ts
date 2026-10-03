@@ -20,7 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ jobI
   try {
     const result = takesForClip(jobId, clipId);
     // Paths on disk stay on the server.
-    const takes = result.takes.map((t) => ({ id: t.id, src: t.src, inSec: t.inSec, durationSec: t.durationSec, createdAt: t.createdAt, origin: t.origin }));
+    const takes = result.takes.map((t) => ({ id: t.id, src: t.src, inSec: t.inSec, durationSec: t.durationSec, createdAt: t.createdAt, origin: t.origin, label: t.label, request: t.request }));
     return NextResponse.json({ ...result, takes });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 404 });
