@@ -12,6 +12,7 @@ import { stubDeps } from "../jobs/stubs";
 import { buildProposalText, pickAlternates, type PoolSource, type ProposeInput, proposalProblems } from "../plan/propose";
 import { parseViralUrl } from "../recreation/viralUrl";
 import { linkBrand } from "../brand/link";
+import { cardHref, layoutCycle, summarizeCycle } from "../plan/calendar";
 import { addDays, dateOfDay, daysBetween, formatDate, todayIn, weekdayIndex } from "../plan/dates";
 import { BrandAccessError, BrandRepo } from "../brand/repo";
 import { assertBrandSlug, brandKeys, parseVideoJobId, productionKeys, recreationKeys, videoJobId } from "../brand/keys";
@@ -175,6 +176,34 @@ const main = async () => {
   for (const st of CARD_STATUSES) t.check(`customer visibility of a ${st} video`, isVideoVisible(st, false) === ["needs_review", "ready", "posted"].includes(st));
   t.check("an admin sees every video", CARD_STATUSES.every((st) => isVideoVisible(st, true)));
   t.check("the review gate hides a video that is still with the founder", !isVideoVisible("internal_review", false) && !isVideoVisible("generating", false) && !isVideoVisible("failed", false));
+
+  console.log("calendar layout");
+  {
+    const mk = (days: number[], extra: Partial<Card> = {}) => days.map((day) => card({ id: `c${day}`, day, ...extra }));
+    // 2026-10-09 is a Friday: four blank days (Mon to Thu), then the cycle.
+    const fri = layoutCycle({ startsOn: "2026-10-09", cards: mk([1, 2, 3, 4, 5]) }, "2026-10-12");
+    t.check("a Friday start spans three week-rows of seven", fri.length === 3 && fri.every((w) => w.length === 7));
+    t.check("the days before the start are outside cells", fri[0].slice(0, 4).every((c) => c.kind === "outside") && fri[0][4].kind === "day");
+    t.check("day 1 is on the Friday, and day 14 on a Thursday", (fri[0][4] as { day: number }).day === 1 && (fri[2][3] as { day: number; date: string }).day === 14 && (fri[2][3] as { date: string }).date === "2026-10-22");
+    t.check("the days after the end are outside cells", fri[2].slice(4).every((c) => c.kind === "outside"));
+    t.check("exactly 14 day cells", fri.flat().filter((c) => c.kind === "day").length === 14);
+    t.check("a day with no card is an empty day, not missing", (fri[1][0] as { card: Card | null }).card?.id === "c4" && (fri[2][0] as { card: Card | null }).card === null);
+    t.check("today is marked once, and past days before it", fri.flat().filter((c) => c.kind === "day" && c.today).length === 1 && (fri[0][4] as { past: boolean }).past && !(fri[1][1] as { past: boolean }).past);
+    t.check("the cells are consecutive dates", (() => { const all = fri.flat(); return all.every((c, i) => i === 0 || addDays(all[i - 1].date, 1) === c.date); })());
+    const mon = layoutCycle({ startsOn: "2026-10-05", cards: [] }, "2026-10-05");
+    t.check("a Monday start fits exactly two weeks", mon.length === 2 && mon.flat().every((c) => c.kind === "day"));
+    t.check("a Sunday start spans three rows, with six blank leading days", (() => { const w = layoutCycle({ startsOn: "2026-10-11", cards: [] }, "2026-10-11"); return w.length === 3 && w[0].slice(0, 6).every((c) => c.kind === "outside") && w[0][6].kind === "day"; })());
+    t.check("a day when today is before the cycle has no today cell", layoutCycle({ startsOn: "2026-10-09", cards: [] }, "2026-10-01").flat().every((c) => c.kind === "outside" || !c.today));
+
+    const sum = (today: string, cards: Card[] = []) => summarizeCycle({ startsOn: "2026-10-09", cards }, today);
+    t.check("before the cycle it counts the days to the start", sum("2026-10-06").countdown === "Starts in 3 days" && sum("2026-10-08").countdown === "Starts in 1 day");
+    t.check("during the first ten days it counts down to the next plan (day 11 is Oct 19)", sum("2026-10-09").countdown === "Next plan in 10 days" && sum("2026-10-18").countdown === "Next plan in 1 day");
+    t.check("from day 11 the next plan is on its way", sum("2026-10-19").countdown === "Your next plan is on its way" && sum("2026-10-22").countdown === "Your next plan is on its way");
+    t.check("after the last day the cycle has ended", sum("2026-10-23").countdown === "This cycle has ended");
+    t.check("the end date is day 14", sum("2026-10-09").endsOn === "2026-10-22");
+    t.check("ready counts approved and posted videos only", sum("2026-10-12", [card({ id: "a", day: 1, status: "ready" }), card({ id: "b", day: 2, status: "posted" }), card({ id: "c", day: 3, status: "needs_review" }), card({ id: "d", day: 4, status: "approved" })]).ready === 2);
+    t.check("a card leads to the editor once it has a video, else to the plan", cardHref("x", true) === "/videos/x/edit" && cardHref("x", false) === "/plan/x");
+  }
 
   console.log("plan schema");
   t.check("a plan with no niche or history parses with defaults", (() => {

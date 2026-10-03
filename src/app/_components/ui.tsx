@@ -181,9 +181,9 @@ export function StatusBadge({
 }) {
   const { key, label } = statusLabel(status, audience);
   return (
-    <span className="inline-flex items-center gap-1.5" data-status={status}>
+    <span className="inline-flex max-w-full items-center gap-1.5" data-status={status}>
       <span
-        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-[family-name:var(--font-display)] text-[11px] font-semibold tracking-[0.04em] whitespace-nowrap ${STATUS_STYLE[key]}`}
+        className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 font-[family-name:var(--font-display)] text-[11px] leading-tight font-semibold tracking-[0.04em] ${STATUS_STYLE[key]}`}
       >
         {key === "working" && <span aria-hidden="true" className="st-dot-pulse h-1.5 w-1.5 rounded-full bg-current" />}
         {label}
