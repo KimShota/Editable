@@ -411,12 +411,15 @@ export function Inspector({
   currentTimeSec,
   onOp,
   onDeselect,
+  videoExtras,
 }: {
   edl: Edl;
   selection: Selection;
   currentTimeSec: number;
   onOp: (op: TimelineOp) => void;
   onDeselect: () => void;
+  /** Extra controls for a selected main-track clip (an AI video's takes). */
+  videoExtras?: (clip: Edl["video"][number]) => React.ReactNode;
 }) {
   if (!selection) {
     return (
@@ -508,6 +511,7 @@ export function Inspector({
               )}
             </p>
           </Field>
+          {videoExtras?.(clip)}
           <label className="flex items-center gap-2 text-sm text-[color:var(--ed-ink)]">
             <input
               type="checkbox"

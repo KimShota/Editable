@@ -33,6 +33,7 @@ import {
 } from "./clips";
 import { compileEdl, type MadeClip, swapShotClip, type VoiceFile } from "./edl";
 import { AI_VIDEO_FORMAT } from "./format";
+import { addTake } from "./takes";
 import { estimateUsd, generate, seedanceUsd, uploadFile, waitFor, download } from "./higgsfield";
 import { buildTimeline, type Timeline } from "./timeline";
 
@@ -99,6 +100,7 @@ const context = async (args: string[]) => {
     raw: (shot: string) => `${root}/clips/${shot}.raw.mp4`,
     request: (shot: string) => `${root}/clips/${shot}.request.json`,
     clip: (shot: string) => `${root}/clips/${shot}.mp4`,
+    take: (shot: string) => `${root}/clips/${shot}.v${Date.now()}.mp4`,
     clips: `${root}/clips.json`,
     edl: `${root}/edl.json`,
     final: `${root}/final.mp4`,
@@ -250,10 +252,10 @@ const makeClip = async (
   shot: Ctx["script"]["shots"][number],
   kind: ClipKind,
   regenerate: boolean,
-  /** Where the finished clip goes. A take an EDL already references must
-   *  never be overwritten (undo would show the new one), so the editor's
-   *  Regenerate writes each take to its own key. */
-  outKey = c.k.clip(shot.shotId),
+  /** Where the finished clip goes: a new file for every take, because a
+   *  take an EDL (or the editor's undo history, or takes.json) references
+   *  must never change under it. */
+  outKey = c.k.take(shot.shotId),
 ): Promise<ClipRecord> => {
   const at = timeline.shots.find((s) => s.shotId === shot.shotId)!;
   const len = at.tlOutSec - at.tlInSec;
@@ -345,7 +347,7 @@ const clips = async (c: Ctx, args: string[]) => {
   const todo: { shot: Ctx["script"]["shots"][number]; kind: ClipKind }[] = [];
   for (const shot of c.script.shots) {
     if (only && !only.includes(shot.shotId)) continue;
-    if (!redo && records[shot.shotId] && (await storage.exists(c.k.clip(shot.shotId)))) continue;
+    if (!redo && records[shot.shotId] && (await storage.exists(records[shot.shotId].key))) continue;
     const kind = planClip(shot);
     if ((kind === "talking" || kind === "animate") && !(await storage.exists(c.k.still(shot.shotId)))) {
       throw new Error(`${shot.shotId} needs its storyboard still: run npm run recreate -- storyboard first`);
@@ -414,7 +416,7 @@ const renderVideo = async (c: Ctx, args: string[]) => {
   for (const shot of c.script.shots) {
     const r = records[shot.shotId];
     if (!r) throw new Error(`no clip for ${shot.shotId}: run clips first`);
-    made.set(shot.shotId, { src: `${prefix}/clips/${shot.shotId}.mp4`, file: await storage.localPath(r.key), durationSec: r.durationSec, inSec: r.inSec, rate: r.rate });
+    made.set(shot.shotId, { src: `${prefix}/clips/${path.basename(r.key)}`, file: await storage.localPath(r.key), durationSec: r.durationSec, inSec: r.inSec, rate: r.rate });
   }
   const voiceFiles = new Map<number, VoiceFile>();
   for (const l of timeline.lines) {
@@ -440,11 +442,18 @@ const renderVideo = async (c: Ctx, args: string[]) => {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(editorEdl, json);
   publishToEditor(c);
+  for (const shot of c.script.shots) {
+    const m = made.get(shot.shotId)!;
+    addTake(c.jobId, shot.shotId, isRegenerable(shot), { ...m, createdAt: new Date().toISOString(), origin: "original" });
+  }
   const out = render(edl, dir);
   await storage.putFile(c.k.final, out);
   console.log(`\n✔ ${await storage.localPath(c.k.final)} (${edl.durationSec.toFixed(1)}s)`);
   console.log(`  editor: /jobs/${c.jobId}/edit (admin account)`);
 };
+
+/** Only generated shots get new takes: the product's own footage would come out the same. */
+const isRegenerable = (shot: Ctx["script"]["shots"][number]) => !["footage", "text"].includes(planClip(shot));
 
 /**
  * The editor's Regenerate button (api/jobs/[jobId]/regenerate-clip): a new
@@ -467,7 +476,7 @@ const regenClip = async (args: string[]) => {
   const shot = c.script.shots.find((s) => s.shotId === segment.blockId);
   if (!shot) throw new Error("this clip was added by hand, not generated: there is nothing to regenerate");
   const kind = planClip(shot);
-  if (kind === "footage" || kind === "text") throw new Error("this shot is the product's own footage, not AI: regenerating would give the same clip");
+  if (!isRegenerable(shot)) throw new Error("this shot is the product's own footage, not AI: regenerating would give the same clip");
   const timeline = (await readJson(c.k.timeline, "timeline")) as Timeline;
 
   if (args.includes("--dry")) {
@@ -477,10 +486,8 @@ const regenClip = async (args: string[]) => {
   }
 
   await storage.remove(c.k.request(shot.shotId));
-  // Each take its own file: the previous take stays exactly as the editor's
-  // undo history references it.
-  const version = `${shot.shotId}.v${Date.now()}.mp4`;
-  const versionKey = `${c.k.root}/clips/${version}`;
+  const versionKey = c.k.take(shot.shotId);
+  const version = path.basename(versionKey);
   const record = await makeClip(c, timeline, shot, kind, true, versionKey);
   const records = (await readJson(c.k.clips, "clips")) as Record<string, ClipRecord>;
   records[shot.shotId] = record;
@@ -495,6 +502,7 @@ const regenClip = async (args: string[]) => {
   };
   // Re-read: the editor may have saved edits while the shot was generating.
   const latest = EdlSchema.parse(JSON.parse(fs.readFileSync(editorEdl, "utf8")));
+  addTake(jobId, shot.shotId, true, { ...made, createdAt: new Date().toISOString(), origin: "regenerated" });
   const swapped = EdlSchema.parse(swapShotClip(latest, shot.shotId, made));
   fs.writeFileSync(editorEdl, JSON.stringify(swapped, null, 2));
   stageAssets(swapped);

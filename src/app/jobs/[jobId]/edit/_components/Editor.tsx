@@ -9,6 +9,7 @@ import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import type { QuotaStatus } from "../../../../lib/quota";
 import { Timeline, type UploadPlacement } from "./Timeline";
 import { Inspector } from "./Inspector";
+import { ClipTakes } from "./ClipTakes";
 import { MediaPanel } from "./MediaPanel";
 import { OverlayCanvas } from "./OverlayCanvas";
 import { RenderPanel } from "./RenderPanel";
@@ -511,6 +512,46 @@ export function Editor({
     return () => clearInterval(timer);
   }, [regenBusy, jobId, loadServerEdl]);
 
+  // Free and instant: the take's file already exists, it just goes back on
+  // the timeline. Undoable like any edit.
+  const chooseTake = useCallback(
+    async (clipId: string, takeId: string) => {
+      setPending(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/clip-takes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clipId, takeId }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "could not switch takes");
+        setUndoStack((st) => [...st.slice(-(MAX_HISTORY - 1)), edlRef.current]);
+        setRedoStack([]);
+        setEdl(data.edl as Edl);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setPending(false);
+      }
+    },
+    [jobId],
+  );
+
+  const videoExtras = useCallback(
+    (clip: Edl["video"][number]) => (
+      <ClipTakes
+        jobId={jobId}
+        clipId={clip.id}
+        currentSrc={clip.src}
+        busy={regenBusy.includes(clip.id)}
+        onChoose={(takeId) => chooseTake(clip.id, takeId)}
+        onNewTake={() => regenerateClip(clip.id)}
+      />
+    ),
+    [jobId, regenBusy, chooseTake, regenerateClip],
+  );
+
   const regenerateProp = useMemo(
     () => (aiVideo ? { busyIds: regenBusy, onRegenerate: regenerateClip } : undefined),
     [aiVideo, regenBusy, regenerateClip],
@@ -705,6 +746,7 @@ export function Editor({
               currentTimeSec={currentTimeSec}
               onOp={submitOp}
               onDeselect={() => setSelection(null)}
+              videoExtras={aiVideo ? videoExtras : undefined}
             />
           </div>
         </div>

@@ -195,4 +195,6 @@ export const mixVoiceTrack = (lines: { file: string; atSec: number }[], duration
   ffmpeg([...inputs, "-filter_complex", `${delays};${mix}`, "-map", "[a]", "-ac", "1", "-ar", "44100", output]);
 };
 
-export const greenscreenScript = path.join(__dirname, "greenscreen.py");
+/** Resolved from the repo root (process.cwd(), as pipeline/paths.ts does):
+ *  this module is also bundled into the app, where __dirname is virtual. */
+export const greenscreenScript = path.join(process.cwd(), "src", "backend", "production", "greenscreen.py");
