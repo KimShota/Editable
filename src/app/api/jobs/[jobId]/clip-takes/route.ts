@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jobExists } from "../../../../lib/jobs";
-import { chooseTake, takesForClip } from "@backend/production/takes";
+import { chooseTake, takesForClip, chooseRawAudio } from "@backend/production/takes";
 
 /**
  * Every take of the shot a timeline clip was cut from (AI videos), and
@@ -9,6 +9,7 @@ import { chooseTake, takesForClip } from "@backend/production/takes";
  *
  *   GET  ?clipId=s8               → { shotId, regenerable, currentTakeId, takes }
  *   POST { clipId, takeId }       → { edl }
+ *   POST { clipId, audio: "raw" } → { edl }   plays the raw clip with its own audio (see chooseRawAudio)
  */
 
 const validId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9._-]+$/.test(v);
@@ -30,7 +31,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ jobI
 export async function POST(req: Request, { params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;
   if (!jobExists(jobId)) return NextResponse.json({ error: "job not found" }, { status: 404 });
-  const body = (await req.json().catch(() => ({}))) as { clipId?: unknown; takeId?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { clipId?: unknown; takeId?: unknown; audio?: unknown };
+  if (validId(body.clipId) && body.audio === "raw") {
+    try {
+      return NextResponse.json({ edl: chooseRawAudio(jobId, body.clipId) });
+    } catch (err) {
+      return NextResponse.json({ error: (err as Error).message }, { status: 400 });
+    }
+  }
   if (!validId(body.clipId) || !validId(body.takeId)) return NextResponse.json({ error: "clipId and takeId required" }, { status: 400 });
   try {
     return NextResponse.json({ edl: chooseTake(jobId, body.clipId, body.takeId) });

@@ -15,7 +15,7 @@ export default async function TaskProgressDevPage({ searchParams }: { searchPara
   return (
     <Container>
       <PageHeader title="Task progress" subtitle="Test harness" />
-      <TaskProgressDemo taskId={Number.isSafeInteger(task) ? task : undefined} replay={sp.replay === "1"} />
+      <TaskProgressDemo taskId={Number.isSafeInteger(task) ? task : undefined} replay={sp.replay === "1"} staged={sp.staged === "1"} />
     </Container>
   );
 }

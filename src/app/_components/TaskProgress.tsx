@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { finishedStages, type StageSpec, stageProgress } from "@backend/queue/stages";
 import type { PublicTask } from "../api/tasks/taskView";
 import { Button } from "./ui";
 
@@ -19,6 +20,11 @@ import { Button } from "./ui";
  * finishes: the onboarding demo uses it to show a run that already happened
  * on disk without spending anything.
  *
+ * The filled part is always the real progress. The shimmer moving over it
+ * only says "still working", so a long step (one paid clip can take minutes)
+ * never looks frozen. With `stages` the bar spans the whole job and a step
+ * track shows where it is.
+ *
  * When the task finishes, `onDone` is called once; without it the page is
  * refreshed (router.refresh()) so server components re-read what the job
  * wrote.
@@ -33,6 +39,9 @@ type Props = {
   onDone?: () => void;
   /** Shows a Retry button on failure. */
   onRetry?: () => void;
+  /** One bar across a job's named stages (see backend/queue/stages.ts), with a step track under it.
+   *  Ignored while the job reports a stage that is not listed. */
+  stages?: StageSpec[];
   pollMs?: number;
   className?: string;
 };
@@ -57,7 +66,7 @@ const fromTask = (task: PublicTask): View => ({
   error: task.error,
 });
 
-export function TaskProgress({ taskId, replay, title, onDone, onRetry, pollMs = 1500, className = "" }: Props) {
+export function TaskProgress({ taskId, replay, title, onDone, onRetry, stages, pollMs = 1500, className = "" }: Props) {
   const router = useRouter();
   const [view, setView] = useState<View>(INITIAL);
   const [offline, setOffline] = useState(false);
@@ -154,15 +163,17 @@ export function TaskProgress({ taskId, replay, title, onDone, onRetry, pollMs = 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replay?.durationMs, replay?.steps.length]);
 
-  const determinate = view.total !== null && view.total > 0 && view.done !== null;
-  const pct = determinate ? Math.round((Math.min(view.done!, view.total!) / view.total!) * 100) : view.status === "done" ? 100 : 0;
+  const finishedOk = view.status === "done";
+  const staged = stages ? (finishedOk ? finishedStages(stages) : stageProgress(stages, view.stage, view.done, view.total)) : null;
+  const determinate = staged !== null || (view.total !== null && view.total > 0 && view.done !== null);
+  const pct = finishedOk ? 100 : staged ? staged.percent : determinate ? Math.round((Math.min(view.done!, view.total!) / view.total!) * 100) : 0;
   const failed = view.status === "failed" || view.status === "lost";
-  const heading = failed ? "Something went wrong" : view.status === "done" ? "Done" : (title ?? "Working");
+  const heading = failed ? "Something went wrong" : finishedOk ? "Done" : (title ?? "Working");
   const detail = failed
     ? view.error
     : view.status === "waiting"
       ? "Waiting to start…"
-      : [view.stage, determinate ? `${view.done} of ${view.total}` : null, view.message].filter(Boolean).join(" · ");
+      : [view.stage, view.total !== null && view.total > 0 && view.done !== null ? `${view.done} of ${view.total}` : null, view.message].filter(Boolean).join(" · ");
 
   return (
     <div
@@ -173,7 +184,7 @@ export function TaskProgress({ taskId, replay, title, onDone, onRetry, pollMs = 
     >
       <div className="flex items-baseline justify-between gap-4">
         <p className="font-[family-name:var(--font-display)] text-sm font-semibold text-[color:var(--ink)]">{heading}</p>
-        {determinate && !failed && <p className="text-xs tabular-nums text-[color:var(--ink-dim)]">{pct}%</p>}
+        {determinate && !failed && <p className="text-xs tabular-nums text-[color:var(--ink-dim)]" data-testid="task-percent">{pct}%</p>}
       </div>
 
       <div
@@ -181,17 +192,29 @@ export function TaskProgress({ taskId, replay, title, onDone, onRetry, pollMs = 
         aria-label={heading}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={failed ? undefined : determinate || view.status === "done" ? pct : undefined}
-        className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--bg-2)]"
+        aria-valuenow={failed ? undefined : determinate || finishedOk ? pct : undefined}
+        className={`mt-3 w-full overflow-hidden rounded-full bg-[color:var(--bg-2)] ${stages ? "h-2" : "h-1.5"}`}
       >
         {failed ? (
           <div className="h-full w-full bg-[color:var(--st-bad-fg)]/30" />
-        ) : determinate || view.status === "done" ? (
-          <div className="h-full rounded-full bg-[color:var(--accent)] transition-[width] duration-500 ease-out" style={{ width: `${pct}%` }} />
+        ) : determinate || finishedOk ? (
+          <div className="task-bar__fill h-full rounded-full" data-state={finishedOk ? "done" : "working"} style={{ width: `${pct}%` }} />
         ) : (
           <div className="task-bar__indeterminate h-full rounded-full bg-[color:var(--accent)]" />
         )}
       </div>
+
+      {staged && !failed && (
+        <ol aria-label="Steps" className="mt-3 flex flex-wrap gap-x-5 gap-y-1">
+          {staged.steps.map((step) => (
+            <li key={step.label} data-step={step.state} aria-current={step.state === "current" ? "step" : undefined} className="flex items-center gap-1.5 text-xs">
+              <span aria-hidden="true" className="task-step__dot" data-state={step.state} />
+              <span className={step.state === "current" ? "font-medium text-[color:var(--ink)]" : "text-[color:var(--ink-dim)]"}>{step.label}</span>
+              <span className="sr-only">{step.state === "done" ? ", done" : step.state === "current" ? ", in progress" : ", waiting"}</span>
+            </li>
+          ))}
+        </ol>
+      )}
 
       {detail && <p className={`mt-2 text-[13px] ${failed ? "text-[color:var(--st-bad-fg)]" : "text-[color:var(--ink-dim)]"}`}>{detail}</p>}
       {offline && !failed && view.status !== "done" && <p className="mt-1 text-xs text-[color:var(--ink-dim)]">Connection lost. Still trying…</p>}

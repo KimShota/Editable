@@ -112,7 +112,8 @@ export const compileEdl = (args: {
     const v = voice.get(l.index);
     if (!v) throw new Error(`edl: line ${l.index} has no voice`);
     assets[v.src] = v.file;
-    return { id: `line-${l.index}`, blockId: `line-${l.index}`, src: v.src, srcInSec: 0, srcOutSec: v.durationSec, tlInSec: l.tlInSec, tlOutSec: l.tlInSec + v.durationSec, volume: 1 };
+    const at = { tlInSec: l.tlInSec, tlOutSec: l.tlInSec + v.durationSec, srcInSec: 0, srcOutSec: v.durationSec };
+    return { id: `line-${l.index}`, blockId: `line-${l.index}`, src: v.src, ...at, volume: 1, original: at };
   });
 
   const shotTimes = new Map(timeline.shots.map((s) => [s.shotId, s]));
@@ -182,4 +183,50 @@ export const swapShotClip = (edl: Edl, shotId: string, clip: MadeClip): Edl => {
     }),
     assets: { ...edl.assets, [clip.src]: clip.file },
   };
+};
+
+const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
+
+/** The shortest piece of a voice line worth keeping when a clip's own audio takes over part of it. */
+const MIN_KEPT_VOICE_SEC = 0.1;
+
+/**
+ * A shot played from its raw generated clip, with the clip's own audio instead of the ElevenLabs
+ * voice. The clip keeps its slot on the timeline and plays there at natural speed (1x) from where
+ * its speech starts (`raw.inSec`), unmuted: speech longer than the slot is cut.
+ *
+ * The voice lines under the slot are taken out so nothing speaks twice: a line inside the slot is
+ * removed, one that runs past either edge is trimmed back to it (split in two if it spans the whole
+ * slot). Captions are left alone.
+ */
+export const playRawClipAudio = (edl: Edl, shotId: string, raw: Pick<MadeClip, "src" | "file" | "durationSec" | "inSec">): Edl => {
+  const segments = edl.video.filter((v) => v.blockId === shotId).sort((a, b) => a.tlInSec - b.tlInSec);
+  if (segments.length === 0) throw new Error(`edl: no clip of shot ${shotId} on the timeline`);
+  const from = segments[0].tlInSec;
+  const to = segments[segments.length - 1].tlOutSec;
+  const ids = new Set(segments.map((s) => s.id));
+
+  const video = edl.video.map((v) => {
+    if (!ids.has(v.id)) return v;
+    const len = v.tlOutSec - v.tlInSec;
+    // A main-track clip always fills its slot (its length is its source span), so one that would
+    // run off the end of the raw clip starts that much earlier instead.
+    const srcInSec = clamp(raw.inSec + (v.tlInSec - from), 0, Math.max(0, raw.durationSec - len));
+    const srcOutSec = srcInSec + len;
+    return { ...v, src: raw.src, srcInSec, srcOutSec, srcDurationSec: raw.durationSec, speed: 1, muted: false };
+  });
+
+  const voiceovers = edl.voiceovers.flatMap((l) => {
+    if (l.tlOutSec <= from || l.tlInSec >= to) return [l];
+    const pieces: Edl["voiceovers"] = [];
+    if (l.tlInSec < from) pieces.push({ ...l, tlOutSec: from, srcOutSec: l.srcInSec + (from - l.tlInSec) });
+    if (l.tlOutSec > to) pieces.push({ ...l, id: pieces.length ? `${l.id}-b` : l.id, tlInSec: to, srcInSec: l.srcInSec + (to - l.tlInSec) });
+    return pieces
+      .filter((p) => p.tlOutSec - p.tlInSec >= MIN_KEPT_VOICE_SEC)
+      // A kept piece is its own generated line now: "back to the original position" must not
+      // stretch it back under the clip.
+      .map((p) => ({ ...p, original: { tlInSec: p.tlInSec, tlOutSec: p.tlOutSec, srcInSec: p.srcInSec, srcOutSec: p.srcOutSec } }));
+  });
+
+  return { ...edl, video, voiceovers, assets: { ...edl.assets, [raw.src]: raw.file } };
 };

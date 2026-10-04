@@ -88,6 +88,15 @@ export const PIP_DEFAULT_BOX = { x: 0.1, y: 0.1, width: 0.8, height: 0.8 } as co
 const DeletableTrackSchema = z.enum(["video", "overlay", "sfx", "captions", "transition", "music"]);
 
 export const TimelineOpSchema = z.discriminatedUnion("type", [
+  /** The generated voice lines. They are not on a layer (no track, no lane packing): each is addressed
+   *  by id and edited in place. `voiceReset` puts lines back where they were generated, which is the
+   *  position the talking clips are lip-synced to. */
+  z.object({ type: z.literal("voiceMove"), id: z.string(), tlInSec: z.number().min(0) }),
+  z.object({ type: z.literal("voiceTrim"), id: z.string(), edge: z.enum(["in", "out"]), tlSec: z.number().min(0) }),
+  z.object({ type: z.literal("voiceVolume"), id: z.string(), volume: z.number().min(0).max(MAX_VOLUME) }),
+  z.object({ type: z.literal("voiceReset"), ids: z.array(z.string()).min(1) }),
+  /** Removes generated voice lines from the video. Undo (a `restore`) brings them back. */
+  z.object({ type: z.literal("voiceDelete"), ids: z.array(z.string()).min(1) }),
   /** Retime a free-floating clip (everything except the video track,
    *  which is always contiguous — repositioning a clip there means
    *  "reorder", not "move"). Music can have several simultaneous beds, so
@@ -272,28 +281,146 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
  *  each segment's own (possibly just-changed) duration. This is the one
  *  function every video-track op ends with — it's what makes ripple
  *  trim/reorder/split/delete each a couple lines instead of bespoke
- *  gap-closing logic. */
+ *  gap-closing logic. Everything on the other layers follows separately
+ *  (see rippleFollowers, run by applyOp once the op is done). */
 const recomputeVideoTrack = (edl: Edl): void => {
   let cursor = 0;
   for (const seg of edl.video) {
     // Duration comes from the SOURCE range, not the old tl* fields — this
     // is what's changed by a trim/split before recompute re-lays timeline
-    // positions from it.
-    const duration = seg.srcOutSec - seg.srcInSec;
+    // positions from it. A sped-up segment covers its source in less time.
+    const duration = (seg.srcOutSec - seg.srcInSec) / seg.speed;
     seg.tlInSec = cursor;
     seg.tlOutSec = cursor + duration;
     cursor = seg.tlOutSec;
     const transition = edl.transitions.find((t) => t.afterClipId === seg.id);
     if (transition) transition.atSec = seg.tlOutSec;
   }
+  recomputeDuration(edl);
+};
+
+/** The document ends where its last element does. */
+const recomputeDuration = (edl: Edl): void => {
   const ends = [
-    cursor,
+    edl.video.length ? edl.video[edl.video.length - 1].tlOutSec : 0,
     ...edl.overlays.map((o) => o.tlOutSec),
     ...edl.sfx.map((s) => s.tlInSec + (s.durationSec ?? 0)),
     ...edl.captions.map((c) => c.tlOutSec),
     ...edl.music.map((m) => m.tlInSec + (m.durationSec ?? 0)),
+    ...edl.voiceovers.map((v) => v.tlOutSec),
   ];
   edl.durationSec = Math.max(...ends, MIN_CLIP_SEC);
+};
+
+type Span = { id: string; tlInSec: number; tlOutSec: number };
+
+/** Two times this close are the same instant (a caption that starts exactly on a cut). */
+const SAME_SEC = 1e-3;
+
+/**
+ * The magnetic main track, CapCut-style: when a main-track clip grows,
+ * shrinks, is deleted, inserted or reordered, everything on the other
+ * layers moves with the clip it starts on, so whatever sat after the edit
+ * slides along with the footage instead of being left behind.
+ *
+ * Each element (overlay, caption, sound effect, music bed, voice line) is
+ * anchored to the main-track clip under its START, by `before` (the track
+ * before the op), and moved rigidly by however far that clip's start moved
+ * — its length, and a caption's word timings, are kept. Something that
+ * started past the old end of the reel moves with the end. Something that
+ * started on a deleted clip lands where the gap closed; something past a
+ * shrunk clip's new end lands on that end. Elements that start before the
+ * edit don't move, so a music bed under the whole video stays put; one
+ * that ran to the end of the reel still does (a bed or a watermark over the
+ * whole video stretches or shrinks with it).
+ * `skip`: elements the op itself just placed (a clip lifted onto a layer).
+ * Returns whether the main track moved at all.
+ */
+const rippleFollowers = (edl: Edl, before: Span[], skip: Set<string>): boolean => {
+  const after = new Map(edl.video.map((v) => [v.id, v]));
+  const unchanged =
+    before.length === edl.video.length &&
+    before.every((b) => {
+      const a = after.get(b.id);
+      return a && Math.abs(a.tlInSec - b.tlInSec) < SAME_SEC && Math.abs(a.tlOutSec - b.tlOutSec) < SAME_SEC;
+    });
+  if (unchanged) return false;
+
+  const oldEnd = before.length ? before[before.length - 1].tlOutSec : 0;
+  const newEnd = edl.video.length ? edl.video[edl.video.length - 1].tlOutSec : 0;
+  /** How far a surviving clip's footage now runs: its own end, or the end of the new clips right
+   *  after it (the second half of a split keeps the first half's id, so the part it covered is still there). */
+  const existed = new Set(before.map((b) => b.id));
+  const reach = (id: string): number => {
+    let j = edl.video.findIndex((v) => v.id === id);
+    while (j + 1 < edl.video.length && !existed.has(edl.video[j + 1].id)) j++;
+    return edl.video[j].tlOutSec;
+  };
+  /** Where the reel picks up after old clip `i`: the next surviving clip's new start, else the new end. */
+  const resumeAfter = (i: number): number => {
+    for (let j = i + 1; j < before.length; j++) {
+      const a = after.get(before[j].id);
+      if (a) return a.tlInSec;
+    }
+    return newEnd;
+  };
+  const shiftFor = (t: number): number => {
+    if (t >= oldEnd - SAME_SEC) return newEnd - oldEnd;
+    let i = 0;
+    while (i + 1 < before.length && before[i + 1].tlInSec <= t + SAME_SEC) i++;
+    const was = before[i];
+    const now = after.get(was.id);
+    if (!now) return resumeAfter(i) - t;
+    return Math.min(t + (now.tlInSec - was.tlInSec), reach(now.id)) - t;
+  };
+  const moved = (t: number, d: number) => Math.max(0, t + d);
+  /** The new end for an element that stays put but ran to the end of the reel. */
+  const reelEnd = (start: number, end: number): number =>
+    Math.abs(end - oldEnd) < SAME_SEC && newEnd - start >= MIN_CLIP_SEC ? newEnd : end;
+
+  for (const o of edl.overlays) {
+    if (skip.has(o.id)) continue;
+    const d = shiftFor(o.tlInSec);
+    if (d === 0) {
+      o.tlOutSec = reelEnd(o.tlInSec, o.tlOutSec);
+      continue;
+    }
+    o.tlInSec = moved(o.tlInSec, d);
+    o.tlOutSec = moved(o.tlOutSec, d);
+    for (const st of o.states) st.atSec += d;
+  }
+  for (const c of edl.captions) {
+    const d = shiftFor(c.tlInSec);
+    if (d === 0) continue;
+    c.tlInSec = moved(c.tlInSec, d);
+    c.tlOutSec = moved(c.tlOutSec, d);
+    for (const w of c.words) {
+      w.tlStartSec = moved(w.tlStartSec, d);
+      w.tlEndSec = moved(w.tlEndSec, d);
+    }
+  }
+  for (const x of edl.sfx) x.tlInSec = moved(x.tlInSec, shiftFor(x.tlInSec));
+  for (const m of edl.music) {
+    const d = shiftFor(m.tlInSec);
+    if (d === 0 && m.durationSec !== undefined) m.durationSec = reelEnd(m.tlInSec, m.tlInSec + m.durationSec) - m.tlInSec;
+    m.tlInSec = moved(m.tlInSec, d);
+    for (const w of m.duckWindows) {
+      const dw = shiftFor(w.tlInSec);
+      w.tlInSec = moved(w.tlInSec, dw);
+      w.tlOutSec = moved(w.tlOutSec, dw);
+    }
+  }
+  for (const v of edl.voiceovers) {
+    const d = shiftFor(v.tlInSec);
+    if (d === 0) continue;
+    // Its generated position moves too: the talking clip it is lip-synced to moved by the same amount.
+    v.original ??= { tlInSec: v.tlInSec, tlOutSec: v.tlOutSec, srcInSec: v.srcInSec, srcOutSec: v.srcOutSec };
+    v.tlInSec = moved(v.tlInSec, d);
+    v.tlOutSec = moved(v.tlOutSec, d);
+    v.original.tlInSec = moved(v.original.tlInSec, d);
+    v.original.tlOutSec = moved(v.original.tlOutSec, d);
+  }
+  return true;
 };
 
 /** Greedy interval partitioning, same algorithm the editor's own lanes.ts
@@ -617,11 +744,12 @@ const applyTrimEdge = (edl: Edl, op: Extract<TimelineOp, { type: "trimEdge" }>):
   if (op.track === "video") {
     const seg = edl.video[findIndexOrThrow(edl.video, op.id, "video clip")];
     const maxSrcOut = seg.srcDurationSec ?? seg.srcOutSec;
+    // The drag is in timeline seconds; a sped-up clip covers more source per second.
     if (op.edge === "in") {
-      const delta = op.tlSec - seg.tlInSec;
+      const delta = (op.tlSec - seg.tlInSec) * seg.speed;
       seg.srcInSec = clamp(seg.srcInSec + delta, 0, seg.srcOutSec - MIN_CLIP_SEC);
     } else {
-      const delta = op.tlSec - seg.tlOutSec;
+      const delta = (op.tlSec - seg.tlOutSec) * seg.speed;
       seg.srcOutSec = clamp(seg.srcOutSec + delta, seg.srcInSec + MIN_CLIP_SEC, maxSrcOut);
     }
     recomputeVideoTrack(edl);
@@ -1153,6 +1281,65 @@ const applyAddVideo = (edl: Edl, op: Extract<TimelineOp, { type: "addVideo" }>):
  *  Never mutates the input. Throws on an op that doesn't apply cleanly
  *  (unknown id, degenerate timing) — the caller (the API route) turns
  *  that into a 400 rather than persisting a broken document. */
+/** The shortest a voice line can be trimmed to. */
+const MIN_VOICE_SEC = 0.1;
+
+/** A voice line, with its original window recorded: a line from before `original` existed is
+ *  assumed to be untouched the first time it is edited. */
+const editableVoice = (edl: Edl, id: string): Edl["voiceovers"][number] => {
+  const v = edl.voiceovers[findIndexOrThrow(edl.voiceovers, id, "voice line")];
+  v.original ??= { tlInSec: v.tlInSec, tlOutSec: v.tlOutSec, srcInSec: v.srcInSec, srcOutSec: v.srcOutSec };
+  return v;
+};
+
+const applyVoiceMove = (edl: Edl, op: Extract<TimelineOp, { type: "voiceMove" }>): void => {
+  const v = editableVoice(edl, op.id);
+  const len = v.tlOutSec - v.tlInSec;
+  // Anywhere on the timeline, but not off the end of the video.
+  const start = clamp(op.tlInSec, 0, Math.max(0, edl.durationSec - len));
+  v.tlInSec = start;
+  v.tlOutSec = start + len;
+};
+
+/** Trimming moves the edge in the timeline and the matching point in the take together, so the
+ *  rest of the line keeps playing in time. A line can be un-trimmed back out to its original take, no further. */
+const applyVoiceTrim = (edl: Edl, op: Extract<TimelineOp, { type: "voiceTrim" }>): void => {
+  const v = editableVoice(edl, op.id);
+  const o = v.original!;
+  if (op.edge === "in") {
+    const earliest = v.tlInSec - (v.srcInSec - o.srcInSec); // back to the start of the take
+    const at = clamp(op.tlSec, Math.max(0, earliest), v.tlOutSec - MIN_VOICE_SEC);
+    v.srcInSec += at - v.tlInSec;
+    v.tlInSec = at;
+  } else {
+    const latest = Math.min(edl.durationSec, v.tlOutSec + (o.srcOutSec - v.srcOutSec)); // to the end of the take
+    const at = clamp(op.tlSec, v.tlInSec + MIN_VOICE_SEC, latest);
+    v.srcOutSec += at - v.tlOutSec;
+    v.tlOutSec = at;
+  }
+};
+
+const applyVoiceVolume = (edl: Edl, op: Extract<TimelineOp, { type: "voiceVolume" }>): void => {
+  editableVoice(edl, op.id).volume = op.volume;
+};
+
+const applyVoiceReset = (edl: Edl, op: Extract<TimelineOp, { type: "voiceReset" }>): void => {
+  for (const id of op.ids) {
+    const v = edl.voiceovers[findIndexOrThrow(edl.voiceovers, id, "voice line")];
+    if (!v.original) continue; // never edited, so already where it was generated
+    v.tlInSec = v.original.tlInSec;
+    v.tlOutSec = v.original.tlOutSec;
+    v.srcInSec = v.original.srcInSec;
+    v.srcOutSec = v.original.srcOutSec;
+  }
+};
+
+const applyVoiceDelete = (edl: Edl, op: Extract<TimelineOp, { type: "voiceDelete" }>): void => {
+  for (const id of op.ids) findIndexOrThrow(edl.voiceovers, id, "voice line"); // refuse the whole op on an unknown id
+  const ids = new Set(op.ids);
+  edl.voiceovers = edl.voiceovers.filter((v) => !ids.has(v.id));
+};
+
 export const applyOp = (edl: Edl, opInput: unknown): Edl => {
   const op = TimelineOpSchema.parse(opInput);
 
@@ -1164,8 +1351,24 @@ export const applyOp = (edl: Edl, opInput: unknown): Edl => {
   }
 
   const next = clone(edl);
+  const mainTrackBefore: Span[] = next.video.map((v) => ({ id: v.id, tlInSec: v.tlInSec, tlOutSec: v.tlOutSec }));
 
   switch (op.type) {
+    case "voiceMove":
+      applyVoiceMove(next, op);
+      break;
+    case "voiceTrim":
+      applyVoiceTrim(next, op);
+      break;
+    case "voiceVolume":
+      applyVoiceVolume(next, op);
+      break;
+    case "voiceReset":
+      applyVoiceReset(next, op);
+      break;
+    case "voiceDelete":
+      applyVoiceDelete(next, op);
+      break;
     case "move":
       applyMove(next, op);
       break;
@@ -1218,6 +1421,10 @@ export const applyOp = (edl: Edl, opInput: unknown): Edl => {
       applyAddVideo(next, op);
       break;
   }
+
+  // The other layers follow the main track (a no-op unless the op moved it).
+  // A clip lifted onto a layer keeps the place it was dropped at.
+  if (rippleFollowers(next, mainTrackBefore, new Set(op.type === "videoToOverlay" ? [op.id] : []))) recomputeDuration(next);
 
   // Every op above may have added a clip with no trackId opinion of its
   // own (a fresh addOverlay/addSfx/addMusic) or left a legacy document's

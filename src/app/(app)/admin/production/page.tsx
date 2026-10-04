@@ -35,6 +35,7 @@ export default async function AdminProductionPage() {
   const cards = [...(plan?.cards ?? [])].filter((c) => ["approved", "queued", "generating", "failed"].includes(c.status)).sort((a, b) => a.day - b.day);
   const taskOf = (cardId: string, kind: string) => live.find((t) => t.kind === kind && (t.payload as { cardId?: string }).cardId === cardId)?.id ?? null;
   const waiting = cards.filter((c) => c.status === "approved");
+  const makingCount = cards.filter((c) => c.status === "queued" || c.status === "generating").length;
   const total = waiting.reduce((sum, c) => sum + (c.estimateMaxUsd ?? c.estimateUsd ?? 0), 0);
 
   return (
@@ -69,9 +70,9 @@ export default async function AdminProductionPage() {
                 </div>
                 <div className="min-w-0 md:w-64">
                   {card.status === "approved" || card.status === "failed" ? (
-                    <ProductionActions slug={slug} cardId={card.id} hasEstimate={card.estimateUsd !== undefined} estimateMax={card.estimateMaxUsd ?? card.estimateUsd ?? null} running={taskOf(card.id, "video.estimate")} />
+                    <ProductionActions slug={slug} cardId={card.id} hasEstimate={card.estimateUsd !== undefined} estimateMax={card.estimateMaxUsd ?? card.estimateUsd ?? null} running={taskOf(card.id, "video.estimate")} openEditorWhenDone={makingCount === 0} />
                   ) : (
-                    <ProductionActions slug={slug} cardId={card.id} hasEstimate estimateMax={null} running={taskOf(card.id, "video.produce")} />
+                    <ProductionActions slug={slug} cardId={card.id} hasEstimate estimateMax={null} running={taskOf(card.id, "video.produce")} producing openEditorWhenDone={makingCount <= 1} />
                   )}
                   {card.status === "failed" && <p className="mt-2 text-[13px] text-[color:var(--st-bad-fg)]">The last run failed. Releasing again pays for a new run.</p>}
                 </div>

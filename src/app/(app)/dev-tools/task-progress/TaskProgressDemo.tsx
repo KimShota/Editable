@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { StageSpec } from "@backend/queue/stages";
 import { type ReplayStep, TaskProgress } from "../../../_components/TaskProgress";
 
 const REPLAY_STEPS: ReplayStep[] = [
@@ -12,8 +13,13 @@ const REPLAY_STEPS: ReplayStep[] = [
 // A stable object: TaskProgress restarts its replay when this identity's
 // duration/length changes, so it must not be rebuilt on every render.
 const REPLAY = { steps: REPLAY_STEPS, durationMs: 1600 };
+// The ping job only reports "Counting", so the harness's staged bar is that stage plus one that follows.
+const STAGES: StageSpec[] = [
+  { match: "Counting", label: "Counting", weight: 3 },
+  { match: "Wrapping up", label: "Finishing", weight: 1 },
+];
 
-export function TaskProgressDemo({ taskId, replay }: { taskId?: number; replay: boolean }) {
+export function TaskProgressDemo({ taskId, replay, staged }: { taskId?: number; replay: boolean; staged: boolean }) {
   const [finished, setFinished] = useState(0);
   const [retries, setRetries] = useState(0);
   return (
@@ -22,6 +28,7 @@ export function TaskProgressDemo({ taskId, replay }: { taskId?: number; replay: 
         taskId={taskId}
         replay={replay ? REPLAY : undefined}
         title="Generating storyboard"
+        stages={staged ? STAGES : undefined}
         onDone={() => setFinished((n) => n + 1)}
         onRetry={() => setRetries((n) => n + 1)}
         pollMs={400}

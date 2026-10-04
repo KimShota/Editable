@@ -26,6 +26,7 @@ import {
   SelectionTrack,
   toggleSelect,
 } from "./selection";
+import { voiceMoved, voiceText } from "./voiceLines";
 import { buildMajorLadder, chooseTickScale, formatTick } from "./tickScale";
 import {
   FitIcon,
@@ -79,6 +80,8 @@ const TRACK_COLOR = {
   sfx: "bg-purple-400/75",
   captions: "bg-violet-700/85",
   music: "bg-indigo-900/85",
+  // The generated voice: its own teal, apart from sfx purple and the music bed.
+  voice: "bg-teal-600/80",
 } as const;
 
 /** How long a dropped image or text card runs by default — mirrors the
@@ -120,7 +123,6 @@ const clamp = (v: number, lo: number, hi: number) =>
 // actually change.
 const BOTH_TRIM_EDGES: ("in" | "out")[] = ["in", "out"];
 const OUT_TRIM_EDGE_ONLY: ("in" | "out")[] = ["out"];
-
 type ClipView = {
   id: string;
   tlInSec: number;
@@ -623,6 +625,7 @@ const TimelineTracks = memo(function TimelineTracks({
   textGroups,
   overlayGroups,
   captionGroups,
+  voiceClips,
   musicGroups,
   sfxGroups,
   transitionClips,
@@ -638,6 +641,8 @@ const TimelineTracks = memo(function TimelineTracks({
   commitVideoTrim,
   commitTransitionMove,
   commitTransitionTrim,
+  commitVoiceMove,
+  commitVoiceTrim,
   commitFloatTrim,
   commitGroupMove,
   registerRow,
@@ -654,6 +659,7 @@ const TimelineTracks = memo(function TimelineTracks({
   textGroups: TrackGroup[];
   overlayGroups: TrackGroup[];
   captionGroups: TrackGroup[];
+  voiceClips: ClipView[];
   musicGroups: TrackGroup[];
   sfxGroups: TrackGroup[];
   transitionClips: ClipView[];
@@ -684,6 +690,8 @@ const TimelineTracks = memo(function TimelineTracks({
     deltaSec: number,
   ) => void;
   commitTransitionMove: (afterClipId: string, deltaSec: number) => void;
+  commitVoiceMove: (id: string, deltaSec: number) => void;
+  commitVoiceTrim: (id: string, edge: "in" | "out", deltaSec: number) => void;
   commitTransitionTrim: (
     afterClipId: string,
     edge: "in" | "out",
@@ -835,6 +843,24 @@ const TimelineTracks = memo(function TimelineTracks({
           resolveDragSnap={resolveDragSnap}
           onSnapGuide={onSnapGuide}
           trimEdges={OUT_TRIM_EDGE_ONLY}
+        />
+      )}
+      {/* The generated voice, on its own layer under the picture (see voiceClips). */}
+      {voiceClips.length > 0 && (
+        <TrackRow
+          label="Voice"
+          clips={voiceClips}
+          colorClass={TRACK_COLOR.voice}
+          handlers={{
+            move: (id, d) => commitVoiceMove(id, d),
+            trim: (id, edge, d) => commitVoiceTrim(id, edge, d),
+          }}
+          track="voice"
+          selection={selection}
+          onSelect={onSelect}
+          pxPerSec={pxPerSec}
+          resolveDragSnap={resolveDragSnap}
+          onSnapGuide={onSnapGuide}
         />
       )}
       {/* Music and sfx each get their own section — a music bed's edges
@@ -1201,6 +1227,28 @@ export function Timeline({
         family: "captions" as const,
       })),
     [edl.captions],
+  );
+
+  // The generated voice lines, one clip per line, on a Voice layer of their own. Each is labelled with
+  // what it says (the caption words that fall inside it) and drawn with its own waveform. They can be
+  // moved and trimmed, but the talking clips are lip-synced to the positions they were generated at,
+  // so a line that has moved says so, and "Back to original position" (in the inspector) undoes it.
+  const voiceClips: ClipView[] = useMemo(
+    () =>
+      edl.voiceovers.map((v) => {
+        return {
+          id: v.id,
+          tlInSec: v.tlInSec,
+          tlOutSec: v.tlOutSec,
+          label: voiceText(edl, v),
+          sublabel: voiceMoved(v) ? "voice · moved" : "voice",
+          waveformSrc: previewProxySrc(edl.jobId, v.src),
+          waveformInSec: v.srcInSec,
+          waveformOutSec: v.srcOutSec,
+          family: "sfx" as const, // only ever dragged along its own row
+        };
+      }),
+    [edl],
   );
 
   const musicClips: ClipView[] = useMemo(
@@ -1703,6 +1751,23 @@ export function Timeline({
     [edl.transitions, onOp],
   );
 
+  // Voice lines: a move shifts the line in time (its take is untouched), a trim moves an edge in the
+  // timeline and the matching point of the take together. Both start from where the line is now.
+  const commitVoiceMove = useCallback(
+    (id: string, deltaSec: number) => {
+      const v = edl.voiceovers.find((x) => x.id === id);
+      if (v) onOp({ type: "voiceMove", id, tlInSec: Math.max(0, v.tlInSec + deltaSec) });
+    },
+    [edl.voiceovers, onOp],
+  );
+  const commitVoiceTrim = useCallback(
+    (id: string, edge: "in" | "out", deltaSec: number) => {
+      const v = edl.voiceovers.find((x) => x.id === id);
+      if (v) onOp({ type: "voiceTrim", id, edge, tlSec: Math.max(0, (edge === "in" ? v.tlInSec : v.tlOutSec) + deltaSec) });
+    },
+    [edl.voiceovers, onOp],
+  );
+
   const commitFloatTrim = useCallback(
     (
       track: FloatTrack,
@@ -2093,6 +2158,7 @@ export function Timeline({
             textGroups={textGroups}
             overlayGroups={overlayGroups}
             captionGroups={captionGroups}
+            voiceClips={voiceClips}
             musicGroups={musicGroups}
             sfxGroups={sfxGroups}
             transitionClips={transitionClips}
@@ -2107,6 +2173,8 @@ export function Timeline({
             previewClipDrag={previewClipDrag}
             commitVideoTrim={commitVideoTrim}
             commitTransitionMove={commitTransitionMove}
+            commitVoiceMove={commitVoiceMove}
+            commitVoiceTrim={commitVoiceTrim}
             commitTransitionTrim={commitTransitionTrim}
             commitFloatTrim={commitFloatTrim}
             commitGroupMove={commitGroupMove}

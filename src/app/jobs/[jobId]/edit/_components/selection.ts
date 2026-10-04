@@ -1,4 +1,4 @@
-export type SelectionTrack = "video" | "overlay" | "sfx" | "transition" | "music" | "captions";
+export type SelectionTrack = "video" | "overlay" | "sfx" | "transition" | "music" | "captions" | "voice";
 
 /** What a freshly-uploaded file becomes once wired into the timeline — see
  *  /api/jobs/[jobId]/timeline/media. */

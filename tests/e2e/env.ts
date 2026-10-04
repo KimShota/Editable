@@ -32,6 +32,8 @@ export const testEnv = (): Record<string, string> => ({
   KATALAB_TEST_DB_URL: DB_URL,
   STORAGE_ROOT,
   KATALAB_STUB_PROVIDERS: "1",
+  // Slow enough that a test can open the page while a video is being "made".
+  KATALAB_STUB_STEP_MS: "700",
   // A fixed "today" (Monday, day 4 of the fixture plan) for the calendar.
   KATALAB_NOW: "2026-10-12T12:00:00Z",
   NEXT_DIST_DIR: ".next-test",

@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CardStatus } from "@backend/plan/schemas";
 import { sendJson } from "../../../../lib/clientApi";
+import { PRODUCTION_STAGES } from "@backend/queue/stages";
 import { TaskProgress } from "../../../../_components/TaskProgress";
-import { Button, StatusBadge } from "../../../../_components/ui";
+import { canAutoOpenEditor } from "../../../../lib/autoOpenEditor";
+import { Button, ButtonLink, StatusBadge } from "../../../../_components/ui";
 
 /**
  * One plan card, for review (plan/ui-ux-full-flow.md §4): the source video,
@@ -31,7 +33,13 @@ type Props = {
   rows: Row[];
   shots: Shot[];
   swapOptions: { sourceId: string; label: string }[];
-  liveTaskIds: number[];
+  /** Whose words the status badge uses: the founder sees internal review, a customer sees "Generating". */
+  audience: "admin" | "customer";
+  /** The editor for this card's video, and whether there is a video this viewer may open yet. */
+  editorPath: string;
+  canOpenEditor: boolean;
+  /** Work running on this card: planning steps and, once released, the video itself. */
+  liveTasks: { id: number; kind: string }[];
   prevId: string | null;
   nextId: string | null;
 };
@@ -59,6 +67,11 @@ const lengthHint = (text: string, sourceWords: number): string | null => {
   return null;
 };
 
+type LiveTask = { id: number; title: string; producing: boolean };
+/** Making the video itself gets its own title and the staged bar (Voice, Clips, Finishing). */
+const asLiveTask = (t: { id: number; kind: string }): LiveTask =>
+  t.kind === "video.produce" ? { id: t.id, title: "Making your video", producing: true } : { id: t.id, title: "Working on this video", producing: false };
+
 export function CardWorkspace(props: Props) {
   const { slug, cardId, status, rows, shots, swapOptions } = props;
   const router = useRouter();
@@ -72,7 +85,7 @@ export function CardWorkspace(props: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const saved = useMemo(() => Object.fromEntries(rows.map((r) => [r.index, r.text])) as Record<number, string>, [signature]);
   const [texts, setTexts] = useState<Record<number, string>>(saved);
-  const [tasks, setTasks] = useState<{ id: number; title: string }[]>(props.liveTaskIds.map((id) => ({ id, title: "Working on this video" })));
+  const [tasks, setTasks] = useState<LiveTask[]>(props.liveTasks.map(asLiveTask));
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -81,13 +94,14 @@ export function CardWorkspace(props: Props) {
 
   // The server sends fresh rows after a save or a rewrite; start typing from those.
   useEffect(() => setTexts(saved), [saved]);
-  const liveKey = props.liveTaskIds.join(",");
+  const liveKey = props.liveTasks.map((t) => t.id).join(",");
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => setTasks(props.liveTaskIds.map((id) => ({ id, title: "Working on this video" }))), [liveKey]);
+  useEffect(() => setTasks(props.liveTasks.map(asLiveTask)), [liveKey]);
 
   const changed = rows.filter((r) => texts[r.index] !== r.text).map((r) => ({ index: r.index, text: texts[r.index] ?? r.text }));
   const dirty = changed.length > 0;
   const writing = tasks.length > 0;
+  const producing = tasks.some((t) => t.producing);
   const locked = !editable || writing;
 
   // Left and right arrows move between days, unless the person is typing.
@@ -116,7 +130,7 @@ export function CardWorkspace(props: Props) {
 
   const startTask = (title: string) => (data: Record<string, unknown>) => {
     const id = typeof data.taskId === "number" ? data.taskId : null;
-    if (id !== null) setTasks((t) => (t.some((x) => x.id === id) ? t : [...t, { id, title }]));
+    if (id !== null) setTasks((t) => (t.some((x) => x.id === id) ? t : [...t, { id, title, producing: false }]));
   };
 
   const save = () => act("save", () => sendJson(`/api/brands/${slug}/cards/${cardId}/script`, { lines: changed }, "PUT"), () => setNotice("Saved."));
@@ -136,10 +150,11 @@ export function CardWorkspace(props: Props) {
       {/* Status and the actions that change the card */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <StatusBadge status={status} lowConfidence={props.lowConfidence} audience="customer" />
-          {writing && <span className="text-sm text-[color:var(--ink-dim)]">Writing in progress</span>}
+          <StatusBadge status={status} lowConfidence={props.lowConfidence} audience={props.audience} />
+          {writing && <span className="text-sm text-[color:var(--ink-dim)]">{producing ? "Being made" : "Writing in progress"}</span>}
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          {props.canOpenEditor && <ButtonLink href={props.editorPath}>Open the video</ButtonLink>}
           {status === "draft" && (
             <Button onClick={() => act("approve", () => post("approve"))} disabled={busy !== null || dirty || writing || rows.length === 0}>
               {busy === "approve" ? "Approving" : "Approve"}
@@ -169,7 +184,14 @@ export function CardWorkspace(props: Props) {
       {tasks.length > 0 && (
         <div className="flex flex-col gap-3">
           {tasks.map((t) => (
-            <TaskProgress key={t.id} taskId={t.id} title={t.title} onDone={() => router.refresh()} />
+            <TaskProgress
+              key={t.id}
+              taskId={t.id}
+              title={t.title}
+              stages={t.producing ? PRODUCTION_STAGES : undefined}
+              // A video the founder watched being made opens in the editor as soon as it is done.
+              onDone={() => (t.producing && props.audience === "admin" && canAutoOpenEditor() ? router.push(props.editorPath) : router.refresh())}
+            />
           ))}
         </div>
       )}

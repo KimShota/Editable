@@ -2,17 +2,39 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { canAutoOpenEditor, editorPath } from "../../../lib/autoOpenEditor";
 import { sendJson } from "../../../lib/clientApi";
+import { PRODUCTION_STAGES } from "@backend/queue/stages";
 import { TaskProgress } from "../../../_components/TaskProgress";
 import { Button } from "../../../_components/ui";
 
 /** One card in the production queue: price it, then release it (which spends). */
-export function ProductionActions({ slug, cardId, hasEstimate, estimateMax, running }: { slug: string; cardId: string; hasEstimate: boolean; estimateMax: number | null; running: number | null }) {
+export function ProductionActions({
+  slug,
+  cardId,
+  hasEstimate,
+  estimateMax,
+  running,
+  producing = false,
+  openEditorWhenDone = false,
+}: {
+  slug: string;
+  cardId: string;
+  hasEstimate: boolean;
+  estimateMax: number | null;
+  running: number | null;
+  /** The task already running is the video itself (not the estimate). */
+  producing?: boolean;
+  /** Open the editor when this video is done. Off when several are being made, so a batch does not pull the founder around. */
+  openEditorWhenDone?: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<number | null>(running);
   const [confirming, setConfirming] = useState(false);
+  // Releasing starts the video itself; an estimate is the other thing that runs here.
+  const [released, setReleased] = useState(false);
 
   const call = async (name: string, path: string) => {
     setBusy(name);
@@ -21,6 +43,7 @@ export function ProductionActions({ slug, cardId, hasEstimate, estimateMax, runn
     setBusy(null);
     if (!res.ok) return setError(res.error);
     setConfirming(false);
+    setReleased(name === "release");
     setTaskId(res.data.taskId);
     router.refresh();
   };
@@ -58,11 +81,14 @@ export function ProductionActions({ slug, cardId, hasEstimate, estimateMax, runn
         <TaskProgress
           taskId={taskId}
           title="Working"
+          stages={PRODUCTION_STAGES}
           // Done: free the buttons again (an estimate finishing is what lets the
           // founder release), and re-read the queue.
           onDone={() => {
             setTaskId(null);
-            router.refresh();
+            // A video the founder watched being made opens in the editor as soon as it is done.
+            if ((producing || released) && openEditorWhenDone && canAutoOpenEditor()) router.push(editorPath(cardId));
+            else router.refresh();
           }}
         />
       )}

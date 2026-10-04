@@ -14,7 +14,7 @@ import { PlusIcon, RegenerateIcon } from "./Icons";
  */
 
 type TakeView = { id: string; src: string; inSec: number; createdAt: string; origin: "original" | "regenerated" | "retry"; label?: string; request?: string };
-type TakesResponse = { shotId: string; regenerable: boolean; currentTakeId: string | null; takes: TakeView[] };
+type TakesResponse = { shotId: string; regenerable: boolean; currentTakeId: string | null; rawAudio: boolean; takes: TakeView[] };
 
 /**
  * The original shot beside the take that is on the timeline, both muted and
@@ -69,6 +69,7 @@ export function ClipTakes({
   busy,
   onChoose,
   onNewTake,
+  onUseRawAudio,
 }: {
   jobId: string;
   clipId: string;
@@ -77,6 +78,8 @@ export function ClipTakes({
   busy: boolean;
   onChoose: (takeId: string) => void;
   onNewTake: () => void;
+  /** Play the raw clip with its own audio, in place of the ElevenLabs voice under it. */
+  onUseRawAudio: () => void;
 }) {
   const [data, setData] = useState<TakesResponse | null>(null);
   const [failed, setFailed] = useState(false);
@@ -154,6 +157,21 @@ export function ClipTakes({
           </button>
         )}
       </div>
+      {data.rawAudio && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onUseRawAudio}
+          data-testid="use-raw-audio"
+          title="Plays the generated clip with its own voice at normal speed, and removes the ElevenLabs voice under it"
+          className="rounded-lg border border-[color:var(--ed-border-strong)] px-2.5 py-1.5 text-xs text-[color:var(--ed-ink)] transition-colors hover:bg-[color:var(--ed-raised)] disabled:opacity-60"
+        >
+          Use the clip&apos;s own audio
+        </button>
+      )}
+      {currentSrc.endsWith(".raw.mp4") && (
+        <p className="text-[11px] text-[color:var(--ed-ink-faint)]" data-testid="raw-audio-status">Playing the clip&apos;s own audio. Pick a take above to go back to the edited clip.</p>
+      )}
       {!data.regenerable && (
         <p className="text-[11px] text-[color:var(--ed-ink-faint)]">This shot is the product&apos;s own screen recording, so there is nothing to regenerate.</p>
       )}

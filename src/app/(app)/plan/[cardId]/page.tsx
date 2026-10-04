@@ -3,12 +3,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { recreationKeys } from "@backend/brand/keys";
 import { dateOfDay, formatDate } from "@backend/plan/dates";
+import { isVideoVisible } from "@backend/plan/status";
 import { getActiveBrand } from "../../../lib/activeBrand";
 import { getRequestUser } from "../../../lib/auth";
+import { editorPath } from "../../../lib/autoOpenEditor";
 import { brandRepo } from "../../../lib/brandRepo";
 import { mediaUrl } from "../../../lib/mediaUrl";
 import { queue } from "../../../lib/tasks";
 import { Container, EmptyState } from "../../../_components/ui";
+import { LiveRefresh } from "../_components/LiveRefresh";
 import { CardWorkspace, type Row, type Shot } from "./_components/CardWorkspace";
 
 export const metadata: Metadata = { title: "Plan · Katalab" };
@@ -23,12 +26,14 @@ export default async function CardPage({ params }: { params: Promise<{ cardId: s
   const [plan, card] = await Promise.all([brandRepo.getPlan(slug), brandRepo.getCard(slug, cardId)]);
   if (!plan || !card) notFound();
 
-  const [script, spec, stills, sources, live] = await Promise.all([
+  const [script, spec, stills, sources, live, madeVideo] = await Promise.all([
     brandRepo.getScript(slug, cardId),
     brandRepo.getSpec(slug, card.sourceId),
     brandRepo.listStoryboard(slug, cardId),
     brandRepo.listSources(slug),
-    queue.listTasks({ slug, cardId, kinds: ["card.adapt", "card.storyboard"] }),
+    queue.listTasks({ slug, cardId, kinds: ["card.adapt", "card.storyboard", "video.produce"] }),
+    // The video we made, only for someone who may see it (the founder from internal review, a customer once it is sent).
+    isVideoVisible(card.status, user.isAdmin) ? brandRepo.getVideo(slug, cardId) : null,
   ]);
 
   const k = recreationKeys(slug);
@@ -56,8 +61,13 @@ export default async function CardPage({ params }: { params: Promise<{ cardId: s
   const ordered = [...plan.cards].sort((a, b) => a.day - b.day);
   const at = ordered.findIndex((c) => c.id === cardId);
 
+  // While the video is being made the page re-reads itself, so a run that starts after it was
+  // opened shows its progress, and the finished video replaces it without a reload.
+  const making = card.status === "queued" || card.status === "generating";
+
   return (
     <Container>
+      <LiveRefresh active={making || live.length > 0} />
       <nav aria-label="Breadcrumb" className="mb-6 flex items-center justify-between gap-4 text-sm">
         <Link href="/plan" className="font-medium text-[color:var(--ink-dim)] underline-offset-4 hover:text-[color:var(--ink)] hover:underline">
           All videos
@@ -90,6 +100,9 @@ export default async function CardPage({ params }: { params: Promise<{ cardId: s
           cardId={card.id}
           dayLabel={`Day ${card.day}`}
           status={card.status}
+          audience={user.isAdmin ? "admin" : "customer"}
+          editorPath={editorPath(card.id)}
+          canOpenEditor={Boolean(madeVideo?.hasEdl)}
           lowConfidence={card.lowConfidence}
           angle={card.angle}
           whyItWorks={spec?.whyItWorks ?? null}
@@ -97,7 +110,7 @@ export default async function CardPage({ params }: { params: Promise<{ cardId: s
           rows={rows}
           shots={shots}
           swapOptions={swapOptions}
-          liveTaskIds={live.map((t) => t.id)}
+          liveTasks={live.map((t) => ({ id: t.id, kind: t.kind }))}
           prevId={ordered[at - 1]?.id ?? null}
           nextId={ordered[at + 1]?.id ?? null}
         />

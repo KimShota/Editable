@@ -1,10 +1,11 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { artifactsDir, repoRoot } from "../pipeline/paths";
 import { stageAssets } from "../pipeline/render";
 import { EdlSchema } from "../pipeline/schemas";
 import type { Edl } from "../pipeline/types";
-import { swapShotClip } from "./edl";
+import { playRawClipAudio, swapShotClip } from "./edl";
 
 /**
  * Every take of every shot of an AI video, so regenerating a shot never
@@ -70,12 +71,50 @@ export const addTake = (jobId: string, shotId: string, regenerable: boolean, tak
 
 const readEdl = (jobId: string): Edl => EdlSchema.parse(JSON.parse(fs.readFileSync(edlPath(jobId), "utf8")));
 
-/** The takes of the shot a timeline clip was cut from, and which is in use. */
-export const takesForClip = (jobId: string, clipId: string): { shotId: string; currentTakeId: string | null } & ShotTakes => {
+/** A shot's raw generated clip, beside its takes (`<shot>.raw.mp4`): the model's own output, audio included. */
+const rawClipOf = (shotId: string, take: Take): { src: string; file: string } => ({
+  src: path.posix.join(path.posix.dirname(take.src), `${shotId}.raw.mp4`),
+  file: path.join(path.dirname(take.file), `${shotId}.raw.mp4`),
+});
+
+const probe = (file: string, entries: string): string[] =>
+  execFileSync("ffprobe", ["-v", "error", ...entries.split(" "), "-of", "csv=p=0", file]).toString().trim().split("\n");
+
+/** The raw clip when it exists and has a voice in it (only the talking shots do). */
+const rawClipWithAudio = (shotId: string, take: Take): (ReturnType<typeof rawClipOf> & { durationSec: number }) | null => {
+  const raw = rawClipOf(shotId, take);
+  if (!fs.existsSync(raw.file)) return null;
+  try {
+    if (!probe(raw.file, "-select_streams a -show_entries stream=codec_type")[0]) return null;
+    return { ...raw, durationSec: Number(probe(raw.file, "-show_entries format=duration")[0]) };
+  } catch {
+    return null;
+  }
+};
+
+/** The takes of the shot a timeline clip was cut from, and which is in use. `rawAudio`: the clip can
+ *  play the raw clip's own audio (and is not already). */
+export const takesForClip = (jobId: string, clipId: string): { shotId: string; currentTakeId: string | null; rawAudio: boolean } & ShotTakes => {
   const segment = readEdl(jobId).video.find((v) => v.id === clipId);
   if (!segment) throw new Error(`no clip ${clipId} on the timeline`);
   const shot = readTakes(jobId)[segment.blockId] ?? { regenerable: false, takes: [] };
-  return { shotId: segment.blockId, ...shot, currentTakeId: shot.takes.find((t) => t.src === segment.src)?.id ?? null };
+  const rawAudio = shot.takes.length > 0 && !segment.src.endsWith(".raw.mp4") && rawClipWithAudio(segment.blockId, shot.takes[0]) !== null;
+  return { shotId: segment.blockId, ...shot, currentTakeId: shot.takes.find((t) => t.src === segment.src)?.id ?? null, rawAudio };
+};
+
+/** Plays that clip's shot from its raw clip with the clip's own audio, replacing the ElevenLabs lines under it. */
+export const chooseRawAudio = (jobId: string, clipId: string): Edl => {
+  const edl = readEdl(jobId);
+  const segment = edl.video.find((v) => v.id === clipId);
+  if (!segment) throw new Error(`no clip ${clipId} on the timeline`);
+  const takes = readTakes(jobId)[segment.blockId]?.takes ?? [];
+  const current = takes.find((t) => t.src === segment.src) ?? takes[takes.length - 1];
+  const raw = current && rawClipWithAudio(segment.blockId, current);
+  if (!current || !raw) throw new Error(`shot ${segment.blockId} has no raw clip with audio`);
+  const swapped = EdlSchema.parse(playRawClipAudio(edl, segment.blockId, { ...raw, inSec: current.inSec }));
+  fs.writeFileSync(edlPath(jobId), JSON.stringify(swapped, null, 2));
+  stageAssets(swapped);
+  return swapped;
 };
 
 /** Puts a take of that clip's shot on the timeline, keeping every other edit. */

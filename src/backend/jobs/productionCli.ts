@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { repoRoot } from "../pipeline/paths";
 import type { OpContext, ProductionOps } from "./deps";
+import { PRODUCE_STAGE } from "../queue/stages";
 
 /**
  * Production through the `produce` CLI (production/cli.ts), run as a child
@@ -55,30 +56,30 @@ export const cliProduction = (): ProductionOps => ({
 
   produce: async (ctx: OpContext, slug, cardId) => {
     const flagged = new Set<string>();
-    ctx.report?.({ stage: "Voicing the script" });
+    ctx.report?.({ stage: PRODUCE_STAGE.voice });
     mustSucceed(await runProduce(["voice", ...cardArgs(slug, cardId)]), "voice");
 
     let total = 0;
     let done = 0;
-    ctx.report?.({ stage: "Making the clips" });
+    ctx.report?.({ stage: PRODUCE_STAGE.clips });
     mustSucceed(
       await runProduce(["clips", ...cardArgs(slug, cardId)], (line) => {
         const count = /^(\d+) clip\(s\) to make/.exec(line);
         if (count) {
           total = Number(count[1]);
-          ctx.report?.({ stage: "Making the clips", done, total });
+          ctx.report?.({ stage: PRODUCE_STAGE.clips, done, total });
         }
         const shot = /^\s+([✔⚑✘]) (\S+) \w+\s*$/.exec(line);
         if (shot) {
           done++;
           if (shot[1] === "⚑") flagged.add(shot[2]);
-          ctx.report?.({ stage: "Making the clips", done, total: Math.max(total, done), message: shot[2] });
+          ctx.report?.({ stage: PRODUCE_STAGE.clips, done, total: Math.max(total, done), message: shot[2] });
         }
       }),
       "clips",
     );
 
-    ctx.report?.({ stage: "Putting the video together" });
+    ctx.report?.({ stage: PRODUCE_STAGE.assemble });
     mustSucceed(await runProduce(["render", ...cardArgs(slug, cardId)]), "render");
     return { flagged: [...flagged] };
   },

@@ -44,6 +44,55 @@ test.describe("the review gate", () => {
     expect((await page.request.get(`/api/jobs/acme-${CARDS.review}/edl`)).status()).toBe(200);
   });
 
+  test("the card page shows the video being made, with the staged bar, then the finished state", async ({ page }, info) => {
+    test.setTimeout(90_000);
+    await asFounder(page);
+    // Warm the route first: the dev server compiles a page the first time it is asked for.
+    await page.goto(`/plan/${CARDS.approved}`);
+    const priced = await page.request.post(`/api/admin/brands/acme/cards/${CARDS.approved}/estimate`, { data: {} });
+    expect(priced.ok()).toBe(true);
+    await expect.poll(async () => (await (await page.request.get("/api/tasks?slug=acme&cardId=" + CARDS.approved)).json()).tasks.length, { timeout: 20_000 }).toBe(0);
+    expect((await page.request.post(`/api/admin/brands/acme/cards/${CARDS.approved}/release`, { data: {} })).ok()).toBe(true);
+
+    await page.goto(`/plan/${CARDS.approved}`);
+    const bar = page.getByRole("status").filter({ hasText: "Making your video" });
+    await expect(bar).toBeVisible();
+    const steps = bar.getByRole("list", { name: "Steps" }).getByRole("listitem");
+    await expect(steps).toHaveText([/Voice/, /Clips/, /Finishing/]);
+    await expect(bar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", /^\d+$/);
+    await expect(bar.locator("[data-step=current]")).toHaveCount(1);
+    await expect(page.getByText("Being made", { exact: true })).toBeVisible();
+    await expect(page.getByText("Writing in progress")).toHaveCount(0);
+    await shot(page, info, "p1.3", "card-making");
+
+    if (isPhone(page)) {
+      // The editor is built for a wide screen, so a phone stays where it is: the bar is replaced by the finished state.
+      await expect(page.getByRole("status").filter({ hasText: "Making your video" })).toHaveCount(0, { timeout: 40_000 });
+      await expect(page.getByText("Internal review", { exact: true }).first()).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`/plan/${CARDS.approved}$`));
+      await expect(page.getByRole("link", { name: "Open the video" })).toBeVisible();
+    } else {
+      // A video the founder watched being made opens in the editor as soon as it is done.
+      await expect(page).toHaveURL(new RegExp(`/videos/${CARDS.approved}/edit$`), { timeout: 40_000 });
+    }
+  });
+
+  test("the card page links to the video once there is one this person may open", async ({ page }) => {
+    // Founder: from internal review. Customer: only once it has been sent to them.
+    await asFounder(page);
+    await page.goto(`/plan/${CARDS.inReview}`);
+    await expect(page.getByRole("link", { name: "Open the video" })).toHaveAttribute("href", `/videos/${CARDS.inReview}/edit`);
+    await page.goto(`/plan/${CARDS.draft}`);
+    await expect(page.getByRole("link", { name: "Open the video" })).toHaveCount(0);
+    await page.context().clearCookies();
+
+    await asMember(page);
+    await page.goto(`/plan/${CARDS.review}`);
+    await expect(page.getByRole("link", { name: "Open the video" })).toHaveAttribute("href", `/videos/${CARDS.review}/edit`);
+    await page.goto(`/plan/${CARDS.inReview}`);
+    await expect(page.getByRole("link", { name: "Open the video" })).toHaveCount(0); // behind the gate: not theirs yet
+  });
+
   test("a customer cannot act on a video behind the gate, or release anything", async ({ page }) => {
     await asMember(page);
     const video = (id: string, data: unknown) => page.request.post(`/api/brands/acme/cards/${id}/video`, { data, failOnStatusCode: false });
@@ -93,8 +142,8 @@ test.describe("from approval to the customer's calendar", () => {
 
     await expect(row.getByRole("status").first()).toBeVisible();
     await shot(page, info, "p1.3", "production-running");
-    // It leaves the queue once produced, and waits at the gate, not at the customer.
-    await expect(page.locator(`[data-card-id="${CARDS.approved}"]`)).toHaveCount(0, { timeout: 40_000 });
+    // A video the founder watched being made opens in the editor, and it waits at the gate, not at the customer.
+    await expect(page).toHaveURL(new RegExp(`/videos/${CARDS.approved}/edit$`), { timeout: 40_000 });
 
     await page.goto("/admin/review");
     await expect(page.locator("[data-card-id]")).toHaveCount(2);
@@ -150,6 +199,51 @@ test.describe("reviewing a video in the editor", () => {
     await expect(page.getByRole("link", { name: "Calendar" }).first()).toHaveAttribute("href", "/calendar");
     await expect(page.getByRole("button", { name: "Send to customer" })).toHaveCount(0);
     await shot(page, info, "p1.3", "editor-review");
+  });
+
+  test("the generated voice sits on its own Voice layer, can be moved, and goes back to where it was generated", async ({ page }, info) => {
+    await asFounder(page);
+    await page.goto(editor(CARDS.inReview));
+    await expect(page.getByText("Voice", { exact: true })).toBeVisible();
+
+    // One clip per voice line, each labelled with the words it says (not the caption row's clips, which say "caption").
+    const voice = page.locator('[role="button"]', { hasText: "voice" });
+    await expect(voice).toHaveCount(3);
+    await expect(voice.first()).toContainText(`Hook words for ${CARDS.inReview}.`);
+    await expect(voice.first().locator("canvas")).toBeVisible(); // its own waveform
+
+    // Selecting one shows the voice panel; it is where it was generated, so there is nothing to go back to yet.
+    const line = voice.nth(1);
+    await line.click();
+    await expect(page.getByText("Voice line", { exact: true })).toBeVisible();
+    const back = page.getByRole("button", { name: "Back to original position" });
+    await expect(back).toBeDisabled();
+    await expect(page.getByTestId("voice-status")).toContainText("lip-synced");
+    await shot(page, info, "p1.3", "editor-voice-layer");
+
+    // Dragging it later moves it, says so, and offers the way back.
+    const start = (await line.boundingBox())!;
+    await page.mouse.move(start.x + 20, start.y + start.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(start.x + 160, start.y + start.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(async () => (await voice.nth(1).boundingBox())!.x).toBeGreaterThan(start.x + 100);
+    await expect(voice.nth(1)).toContainText("moved");
+    await expect(voice.nth(1)).toContainText(`Middle words for ${CARDS.inReview}.`); // still called what it says, wherever it sits
+    await expect(page.getByText("Voice line", { exact: true }).locator("xpath=following-sibling::p")).toContainText("Middle words");
+    await expect(page.getByTestId("voice-status")).toContainText("later than generated");
+    await expect(back).toBeEnabled();
+    await shot(page, info, "p1.3", "editor-voice-moved");
+
+    // A stray key never deletes a voice line.
+    await page.keyboard.press("Delete");
+    await expect(voice).toHaveCount(3);
+
+    // Back to original position puts it exactly where the lip-synced clips expect it.
+    await back.click();
+    await expect.poll(async () => Math.abs((await voice.nth(1).boundingBox())!.x - start.x)).toBeLessThan(1.5);
+    await expect(voice.nth(1)).not.toContainText("moved");
+    await expect(back).toBeDisabled();
   });
 
   test("approving makes it ready, and approval can be undone", async ({ page }) => {

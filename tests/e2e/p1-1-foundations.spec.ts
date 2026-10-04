@@ -249,6 +249,59 @@ test.describe("task progress", () => {
     await shot(page, info, "p1.1", "task-done");
   });
 
+  test("a staged bar spans the whole job, with a step track and a shimmer while it works", async ({ page }, info) => {
+    await signInAndOpenCalendar(page, "member");
+    await page.goto("/dev-tools/task-progress?staged=1");
+    const id = await enqueuePing({ slug: "acme", cardId: CARDS.draft, steps: 5, stepMs: 900 });
+    await page.goto(`/dev-tools/task-progress?staged=1&task=${id}`);
+
+    const steps = page.getByRole("list", { name: "Steps" }).getByRole("listitem");
+    await expect(steps).toHaveCount(2);
+    await expect(page.getByRole("status")).toHaveAttribute("data-task-status", "running");
+    await expect(steps.nth(0)).toHaveAttribute("data-step", "current");
+    await expect(steps.nth(0)).toHaveAttribute("aria-current", "step");
+    await expect(steps.nth(1)).toHaveAttribute("data-step", "upcoming");
+
+    // The bar spans the whole job: the one stage that is running can fill at most its share (3 of 4).
+    const bar = page.getByRole("progressbar");
+    const seen: number[] = [];
+    await expect.poll(async () => {
+      seen.push(Number(await bar.getAttribute("aria-valuenow")));
+      return seen[seen.length - 1];
+    }, { timeout: 8000 }).toBeGreaterThan(20);
+    expect(Math.max(...seen)).toBeLessThanOrEqual(75);
+    expect(seen).toEqual([...seen].sort((a, b) => a - b)); // never backwards
+
+    // The fill is the real progress; the shimmer over it is decoration that stops when done.
+    const fill = page.locator(".task-bar__fill");
+    await expect(fill).toHaveAttribute("data-state", "working");
+    expect(await fill.evaluate((el) => getComputedStyle(el, "::after").animationName)).toBe("task-bar-sheen");
+    await shot(page, info, "p1.1", "task-staged-running");
+
+    await expect(page.getByRole("status")).toHaveAttribute("data-task-status", "done");
+    await expect(bar).toHaveAttribute("aria-valuenow", "100");
+    await expect(steps.nth(0)).toHaveAttribute("data-step", "done");
+    await expect(steps.nth(1)).toHaveAttribute("data-step", "done");
+    await expect(fill).toHaveAttribute("data-state", "done");
+    // Once the growth has settled the fill spans the whole track, in the finished colour.
+    await expect.poll(async () => (await fill.boundingBox())!.width / (await bar.boundingBox())!.width, { timeout: 3000 }).toBeGreaterThan(0.99);
+    expect(await fill.evaluate((el) => getComputedStyle(el, "::after").animationName)).toBe("none");
+    await shot(page, info, "p1.1", "task-staged-done");
+  });
+
+  test("with reduced motion the fill still grows but nothing shimmers or pulses", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await signInAndOpenCalendar(page, "member");
+    await page.goto("/dev-tools/task-progress?staged=1");
+    const id = await enqueuePing({ slug: "acme", cardId: CARDS.draft, steps: 4, stepMs: 900 });
+    await page.goto(`/dev-tools/task-progress?staged=1&task=${id}`);
+    const fill = page.locator(".task-bar__fill");
+    await expect(fill).toHaveAttribute("data-state", "working");
+    expect(await fill.evaluate((el) => getComputedStyle(el, "::after").display)).toBe("none");
+    expect(await page.locator('[data-step="current"] .task-step__dot').evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
+    await expect.poll(async () => Number(await page.getByRole("progressbar").getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+  });
+
   test("a failed task tells a customer plainly and offers a retry, without the internals", async ({ page }, info) => {
     await signInAndOpenCalendar(page, "member");
     const id = await enqueuePing({ slug: "acme", steps: 2, stepMs: 100, failWith: "boom: provider returned 500" }, 1);

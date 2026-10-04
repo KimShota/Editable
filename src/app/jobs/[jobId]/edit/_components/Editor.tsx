@@ -418,7 +418,11 @@ export function Editor({
 
       if ((e.key === "Delete" || e.key === "Backspace") && selection) {
         e.preventDefault();
-        submitOp({ type: "deleteMany", track: selection.track, ids: selection.ids });
+        submitOp(
+          selection.track === "voice"
+            ? { type: "voiceDelete", ids: selection.ids }
+            : { type: "deleteMany", track: selection.track, ids: selection.ids },
+        );
       }
       if (e.key === " ") {
         e.preventDefault();
@@ -528,16 +532,17 @@ export function Editor({
   }, [regenBusy, jobId, loadServerEdl]);
 
   // Free and instant: the take's file already exists, it just goes back on
-  // the timeline. Undoable like any edit.
+  // the timeline. Undoable like any edit. `choice` is a take, or the raw clip
+  // with its own audio (which also takes the ElevenLabs lines out from under it).
   const chooseTake = useCallback(
-    async (clipId: string, takeId: string) => {
+    async (clipId: string, choice: { takeId: string } | { audio: "raw" }) => {
       setPending(true);
       setError(null);
       try {
         const res = await fetch(`/api/jobs/${jobId}/clip-takes`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clipId, takeId }),
+          body: JSON.stringify({ clipId, ...choice }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "could not switch takes");
@@ -561,7 +566,8 @@ export function Editor({
           clipId={clip.id}
           currentSrc={clip.src}
           busy={regenBusy.includes(clip.id)}
-          onChoose={(takeId) => chooseTake(clip.id, takeId)}
+          onChoose={(takeId) => chooseTake(clip.id, { takeId })}
+          onUseRawAudio={() => chooseTake(clip.id, { audio: "raw" })}
           onNewTake={() => regenerateClip(clip.id)}
         />
         <ShotChat

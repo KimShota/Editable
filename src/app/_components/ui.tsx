@@ -120,6 +120,19 @@ export function Button({
   );
 }
 
+/** A link that looks like a Button, for actions that go to another page. */
+export function ButtonLink({ children, href, variant = "primary", className = "" }: { children: ReactNode; href: string; variant?: "primary" | "secondary"; className?: string }) {
+  const base =
+    "inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 font-[family-name:var(--font-display)] text-sm font-bold tracking-wide transition-transform";
+  const variantClass =
+    variant === "primary" ? "bg-[color:var(--ink)] text-[color:var(--bg)] hover:scale-[1.03]" : "border border-[color:var(--card-border)] text-[color:var(--ink)] hover:border-[color:var(--ink)]";
+  return (
+    <Link href={href} className={`${base} ${variantClass} ${className}`}>
+      {children}
+    </Link>
+  );
+}
+
 export function PageHeader({
   kicker,
   title,

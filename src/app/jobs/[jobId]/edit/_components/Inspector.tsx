@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Edl, EdlCaptionGroup } from "@backend/pipeline/types";
 import type { TimelineOp } from "@backend/pipeline/timelineOps";
 import { Selection } from "./selection";
+import { voiceMoved, voiceOffsetLabel, voiceText } from "./voiceLines";
 import { CloseIcon, ScissorsIcon, TrashIcon } from "./Icons";
 import { dbToLinear, formatDb, linearToDb, MAX_DB, MIN_DB } from "./decibels";
 import {
@@ -463,8 +464,29 @@ export function Inspector({
             ? "sound effects"
             : track === "captions"
               ? "caption groups"
-              : "items";
+              : track === "voice"
+                ? "voice lines"
+                : "items";
     const canDelete = isBulkDeletable(track) && !(track === "video" && edl.video.length - selection.ids.length <= 0);
+    if (track === "voice") {
+      const anyMoved = edl.voiceovers.some((v) => selection.ids.includes(v.id) && voiceMoved(v));
+      return (
+        <div className="flex h-full flex-col">
+          {header(`${selection.ids.length} voice lines selected`)}
+          <div className={sectionClass}>
+            <div className={actionsClass}>
+              <button disabled={!anyMoved} onClick={() => onOp({ type: "voiceReset", ids: selection.ids })} className={secondaryButtonClass}>
+                Back to original position
+              </button>
+              <button onClick={() => onOp({ type: "voiceDelete", ids: selection.ids })} className={dangerButtonClass}>
+                <TrashIcon className="h-4 w-4" />
+                Delete {selection.ids.length} voice lines
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex h-full flex-col">
         {header(`${selection.ids.length} ${trackLabel} selected`, "Drag any one to move them all together")}
@@ -635,6 +657,35 @@ export function Inspector({
             <button onClick={() => onOp({ type: "delete", track: "overlay", id: clip.id })} className={dangerButtonClass}>
               <TrashIcon className="h-4 w-4" />
               Delete overlay
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (selection.track === "voice") {
+    const line = edl.voiceovers.find((v) => v.id === id);
+    if (!line) return null;
+    const moved = voiceMoved(line);
+    const offset = voiceOffsetLabel(line);
+    return (
+      <div className="flex h-full flex-col">
+        {header("Voice line", voiceText(edl, line))}
+        <div className={sectionClass}>
+          <VolumeField volume={line.volume} onCommit={(volume) => onOp({ type: "voiceVolume", id: line.id, volume })} />
+          <p className="text-xs text-[color:var(--ed-ink-dim)]" data-testid="voice-status">
+            {moved
+              ? `${offset ?? "Trimmed"}. The talking clips are lip-synced to where it was generated.`
+              : "At the position it was generated, where the talking clips are lip-synced."}
+          </p>
+          <div className={actionsClass}>
+            <button disabled={!moved} onClick={() => onOp({ type: "voiceReset", ids: [line.id] })} className={secondaryButtonClass}>
+              Back to original position
+            </button>
+            <button onClick={() => onOp({ type: "voiceDelete", ids: [line.id] })} className={dangerButtonClass} data-testid="voice-delete">
+              <TrashIcon className="h-4 w-4" />
+              Delete voice line
             </button>
           </div>
         </div>

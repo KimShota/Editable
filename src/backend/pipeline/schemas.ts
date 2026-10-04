@@ -1483,6 +1483,10 @@ export const EdlVoiceoverSchema = z.object({
   tlOutSec: z.number().positive(),
   /** Linear gain — see EdlVideoSegmentSchema.volume's doc comment. */
   volume: z.number().min(0).max(10).default(1),
+  /** Where this line sat when it was generated: the position the talking clips are lip-synced to.
+   *  Set by production (or, for older videos, the first time a line is edited), so "back to the
+   *  original position" always has somewhere to go, and a trim can never reach past the take. */
+  original: z.object({ tlInSec: z.number().min(0), tlOutSec: z.number().positive(), srcInSec: z.number().min(0), srcOutSec: z.number().positive() }).optional(),
 });
 
 /**

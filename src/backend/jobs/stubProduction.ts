@@ -11,6 +11,7 @@ import { AdaptedScriptSchema } from "../recreation/schemas";
 import type { Storage } from "../storage";
 import { readJson } from "../storageJson";
 import type { ProductionOps } from "./deps";
+import { PRODUCE_STAGE } from "../queue/stages";
 
 /**
  * Production without a provider: real, tiny videos made with ffmpeg, and
@@ -30,6 +31,11 @@ const makeClip = (out: string, color: string, seconds: number): void => {
     ["-y", "-loglevel", "error", "-f", "lavfi", "-i", `color=c=${color}:s=${SIZE}:d=${seconds}:r=30`, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", out],
     { stdio: "ignore" },
   );
+};
+
+/** A short tone standing in for a voice line (mp3, like the real ElevenLabs takes). */
+const makeTone = (out: string, seconds: number): void => {
+  execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-f", "lavfi", "-i", `sine=frequency=220:duration=${seconds}`, "-c:a", "libmp3lame", out], { stdio: "ignore" });
 };
 
 const withTmp = async <T>(fn: (dir: string) => Promise<T>): Promise<T> => {
@@ -54,6 +60,8 @@ export const writeStubVideo = async (storage: Storage, slug: string, cardId: str
   fs.mkdirSync(jobDir, { recursive: true });
 
   const edlVideo: unknown[] = [];
+  const edlVoiceovers: unknown[] = [];
+  const edlCaptions: unknown[] = [];
   const assets: Record<string, string> = {};
   await withTmp(async (dir) => {
     let at = 0;
@@ -68,12 +76,33 @@ export const writeStubVideo = async (storage: Storage, slug: string, cardId: str
       at += SHOT_SEC;
       addTake(jobId, shot.shotId, shot.treatment !== "screen_fill" && shot.treatment !== "text_card", { src, file: abs, durationSec: SHOT_SEC, inSec: 0, createdAt: new Date().toISOString(), origin: "original" });
     }
+    // One voice line and one caption per script line, spread evenly over the video, as the real
+    // pipeline publishes them (voiceovers + captions in the EDL, the takes under voice/).
+    const slot = at / Math.max(1, script.lines.length);
+    for (const [i, line] of script.lines.entries()) {
+      const file = path.join(dir, `line-${i}.mp3`);
+      const len = Math.round(slot * 0.8 * 100) / 100;
+      makeTone(file, len);
+      await storage.putFile(k.line(i), file);
+      const src = `${prefix}/voice/line-${i}.mp3`;
+      assets[src] = await storage.localPath(k.line(i));
+      const start = Math.round(i * slot * 100) / 100;
+      const place = { tlInSec: start, tlOutSec: start + len, srcInSec: 0, srcOutSec: len };
+      edlVoiceovers.push({ id: `line-${i}`, blockId: `line-${i}`, src, ...place, volume: 1, original: place });
+      const words = line.text.split(/\s+/).filter(Boolean);
+      edlCaptions.push({
+        id: `cap-${i}-0`,
+        words: words.map((text, w) => ({ text, tlStartSec: start + (len * w) / words.length, tlEndSec: start + (len * (w + 1)) / words.length, emphasis: false })),
+        tlInSec: start,
+        tlOutSec: start + len,
+      });
+    }
     const final = path.join(dir, "final.mp4");
     makeClip(final, "0x111827", at);
     await storage.putFile(k.final, final);
   });
 
-  const edl = EdlSchema.parse({ jobId, formatId: AI_VIDEO_FORMAT, fps: 30, width: 360, height: 640, durationSec: shots.length * SHOT_SEC, video: edlVideo, assets });
+  const edl = EdlSchema.parse({ jobId, formatId: AI_VIDEO_FORMAT, fps: 30, width: 360, height: 640, durationSec: shots.length * SHOT_SEC, video: edlVideo, voiceovers: edlVoiceovers, captions: edlCaptions, assets });
   const json = JSON.stringify(edl, null, 2);
   await storage.putBuffer(k.edl, Buffer.from(json));
 
@@ -91,8 +120,8 @@ export const writeStubVideo = async (storage: Storage, slug: string, cardId: str
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Stands in for the production CLI. `stepMs` paces progress so a test can
- *  watch a run in flight. */
-export const stubProduction = (storage: Storage, stepMs = 200): ProductionOps => ({
+ *  watch a run in flight (default 200 ms, or KATALAB_STUB_STEP_MS). */
+export const stubProduction = (storage: Storage, stepMs = Number(process.env.KATALAB_STUB_STEP_MS) || 200): ProductionOps => ({
   estimate: async () => {
     await pause(stepMs);
     return { usd: 12.5, maxUsd: 18 };
@@ -100,13 +129,13 @@ export const stubProduction = (storage: Storage, stepMs = 200): ProductionOps =>
 
   produce: async ({ report }, slug, cardId) => {
     const script = AdaptedScriptSchema.parse(await readJson(storage, recreationKeys(slug).script(cardId), "adapted script"));
-    report?.({ stage: "Voicing the script" });
+    report?.({ stage: PRODUCE_STAGE.voice });
     await pause(stepMs);
     for (let i = 0; i < script.shots.length; i++) {
-      report?.({ stage: "Making the clips", done: i, total: script.shots.length, message: script.shots[i].shotId });
+      report?.({ stage: PRODUCE_STAGE.clips, done: i, total: script.shots.length, message: script.shots[i].shotId });
       await pause(stepMs);
     }
-    report?.({ stage: "Putting the video together" });
+    report?.({ stage: PRODUCE_STAGE.assemble });
     await writeStubVideo(storage, slug, cardId);
     // A card named like a flagged shot makes the run report a QC warning, so
     // the warning path can be tested without a real generation.

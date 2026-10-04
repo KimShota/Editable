@@ -29,6 +29,7 @@ import { allowedNext, canTransition, isEditable, isVideoVisible, MAX_HISTORY, st
 import { planFromFiles } from "../plan/seed";
 import { findCard, sourceIdForCard } from "../plan/store";
 import { runOnce, NO_CONTEXT } from "../queue/worker";
+import { finishedStages, PRODUCE_STAGE, PRODUCTION_STAGES, stageProgress } from "../queue/stages";
 import { WorkQueue } from "../queue/workQueue";
 import { LocalStorage } from "../storage";
 import { makeChecker } from "./checks";
@@ -546,7 +547,9 @@ const main = async () => {
       t.check("the status history shows queued, generating, internal review", after.history.slice(-3).map((h) => h.to).join() === "queued,generating,internal_review");
       t.check("the finished video is stored with its cost log", (await repo.getVideo("planco", target.id)).hasFinal && (await repo.getVideo("planco", target.id)).costUsd > 0);
       const edl = EdlSchema.parse(JSON.parse(fs.readFileSync(path.join(artifactsDir(`planco-${target.id}`), "edl.json"), "utf8")));
-      t.check("an EDL the editor can open is written, one segment per shot", edl.video.length === 3 && edl.durationSec === 6 && Object.keys(edl.assets).length === 3);
+      t.check("an EDL the editor can open is written, one segment per shot", edl.video.length === 3 && edl.durationSec === 6);
+      t.check("…with each generated voice line as its own clip, remembering where it was generated", edl.voiceovers.length > 0 && Object.keys(edl.assets).length === 3 + edl.voiceovers.length && edl.voiceovers.every((v) => v.original?.tlInSec === v.tlInSec && v.original?.srcOutSec === v.srcOutSec));
+      t.check("…and a caption for each, so the editor can say what a voice line says", edl.captions.length === edl.voiceovers.length);
       t.check("every clip file in the EDL exists", Object.values(edl.assets).every((f) => fs.existsSync(f) && fs.statSync(f).size > 500));
       t.check("the editor's job folder says which brand video it is", JSON.parse(fs.readFileSync(path.join(jobDirOf(target.id), "ai-video.json"), "utf8")).brand === "planco");
       t.check("each shot has its first take", Object.keys(readTakes(`planco-${target.id}`)).length === 3 && Object.values(readTakes(`planco-${target.id}`)).every((x) => x.takes.length === 1));
@@ -740,6 +743,22 @@ const main = async () => {
   } finally {
     await db.close();
     fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  // One bar across a production run (queue/stages.ts).
+  {
+    const at = (stage: string | null, done: number | null = null, total: number | null = null) => stageProgress(PRODUCTION_STAGES, stage, done, total);
+    t.check("a stage that is not listed has no staged view", at("Estimating the cost") === null && at(null) === null && stageProgress([], "Voicing the script", null, null) === null);
+    t.check("the voice stage starts the bar at zero", at(PRODUCE_STAGE.voice)?.percent === 0);
+    t.check("the clips stage starts after the voice's share and moves with each clip", at(PRODUCE_STAGE.clips)?.percent === 5 && at(PRODUCE_STAGE.clips, 5, 10)?.percent === 45);
+    t.check("all clips made is not done: the video still has to be put together", at(PRODUCE_STAGE.clips, 10, 10)?.percent === 85);
+    t.check("putting the video together is the last 15%", at(PRODUCE_STAGE.assemble)?.percent === 85);
+    t.check("stage names match case-insensitively and by part", at("MAKING THE CLIPS", 0, 4)?.steps[1].state === "current");
+    t.check("the step track says what is done, current and upcoming", at(PRODUCE_STAGE.clips, 1, 4)?.steps.map((x) => x.state).join() === "done,current,upcoming");
+    t.check("a bad count cannot push the bar outside its stage", at(PRODUCE_STAGE.clips, 99, 10)?.percent === 85 && at(PRODUCE_STAGE.clips, -3, 10)?.percent === 5 && at(PRODUCE_STAGE.clips, 3, 0)?.percent === 5);
+    t.check("progress never goes backwards from one stage to the next", [at(PRODUCE_STAGE.voice), at(PRODUCE_STAGE.clips), at(PRODUCE_STAGE.clips, 10, 10), at(PRODUCE_STAGE.assemble)].every((v, i, a) => i === 0 || v!.percent >= a[i - 1]!.percent));
+    t.check("a finished run is 100% with every step done", finishedStages(PRODUCTION_STAGES).percent === 100 && finishedStages(PRODUCTION_STAGES).steps.every((x) => x.state === "done"));
+    t.check("the stage names are the ones the production jobs report", PRODUCTION_STAGES.map((x) => x.match).join() === "Voicing the script,Making the clips,Putting the video together");
   }
 
   t.finish("ui-data checks");

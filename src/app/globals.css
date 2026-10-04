@@ -387,14 +387,77 @@ body {
   }
 }
 
+/* The fill is the real progress: it only ever moves when the job reports more.
+   The sheen travelling over it is the "still working" signal, so a step that
+   takes minutes does not look frozen. It sweeps the filled part only (the
+   ::after is as wide as the fill), at a constant speed, so it reads as motion
+   and not as a progress change. */
+.task-bar__fill {
+  position: relative;
+  overflow: hidden;
+  background: var(--accent);
+  transition:
+    width 700ms var(--ease-out),
+    background-color 300ms ease;
+}
+.task-bar__fill[data-state="working"] {
+  min-width: 0.5rem; /* a live nub at 0%, so the bar is never an empty line */
+}
+.task-bar__fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.5) 50%, transparent 100%);
+  transform: translateX(-100%);
+  animation: task-bar-sheen 1.6s linear infinite;
+}
+.task-bar__fill[data-state="done"] {
+  background: var(--st-ready-fg);
+}
+.task-bar__fill[data-state="done"]::after {
+  animation: none;
+  opacity: 0;
+}
+@keyframes task-bar-sheen {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* The step track under the bar: done is solid, the one in progress pulses, the rest are hollow. */
+.task-step__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  border: 1.5px solid var(--ink-dim);
+  transition:
+    background-color 250ms ease,
+    border-color 250ms ease;
+}
+.task-step__dot[data-state="done"] {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.task-step__dot[data-state="current"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  animation: st-dot-pulse 1.6s var(--ease-in-out) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .st-dot-pulse,
-  .task-bar__indeterminate {
+  .task-bar__indeterminate,
+  .task-bar__fill::after,
+  .task-step__dot[data-state="current"] {
     animation: none;
   }
   .task-bar__indeterminate {
     width: 100%;
     opacity: 0.4;
+  }
+  /* Growth stays: it is the information. Only the decoration stops. */
+  .task-bar__fill::after {
+    display: none;
   }
 }
 
