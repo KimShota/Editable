@@ -79,3 +79,58 @@ export const buildTimeline = (script: AdaptedScript, spec: RecreationSpec, voice
   }
   return { durationSec, lines, shots };
 };
+
+/**
+ * Words of a line with estimated times: spread across the slot in proportion
+ * to their length. Only a placeholder for captions until the clip's own
+ * speech has been heard (`alignWords`).
+ */
+export const estimateWords = (text: string, fromSec: number, toSec: number): Timeline["lines"][number]["words"] => {
+  const words = text.split(/\s+/).filter(Boolean);
+  const total = words.reduce((s, w) => s + w.length + 1, 0) || 1;
+  let t = fromSec;
+  return words.map((text) => {
+    const len = ((text.length + 1) / total) * (toSec - fromSec);
+    const w = { text, tlStartSec: t, tlEndSec: t + len };
+    t += len;
+    return w;
+  });
+};
+
+/**
+ * The timeline when the clips speak for themselves (audio mode "native"):
+ * nothing is voiced first, so the source's own times are the timeline. Every
+ * cut and every line sits exactly where it does in the source, and the
+ * adapted lines take the source lines' speech slots.
+ */
+export const buildNativeTimeline = (script: AdaptedScript, spec: RecreationSpec): Timeline => {
+  const src = spec.speech.lines;
+  if (script.lines.length !== src.length) throw new Error(`timeline: ${script.lines.length} script lines for ${src.length} source lines`);
+  if (script.shots.length !== spec.shots.length) throw new Error(`timeline: ${script.shots.length} script shots for ${spec.shots.length} source shots`);
+  const durationSec = spec.media.durationSec;
+  const lines = script.lines.map((l, i) => ({
+    index: l.index,
+    tlInSec: src[i].startSec,
+    tlOutSec: src[i].endSec,
+    words: estimateWords(l.text, src[i].startSec, src[i].endSec),
+  }));
+  const edges = [...spec.shots.map((s) => s.startSec), durationSec];
+  const shots = script.shots.map((s, i) => ({ shotId: s.shotId, tlInSec: edges[i], tlOutSec: edges[i + 1] }));
+  if (shots.some((s) => s.tlOutSec - s.tlInSec < MIN_SHOT_SEC - 1e-9)) {
+    throw new Error(`timeline: a source shot is shorter than ${MIN_SHOT_SEC}s`);
+  }
+  return { durationSec, lines, shots };
+};
+
+/**
+ * Caption words for a line the clip spoke: the script's own words, timed by
+ * what whisper heard. When the counts match each word takes its heard time;
+ * otherwise the words are spread across the heard speech. `heard` times are
+ * seconds on the timeline.
+ */
+export const alignWords = (text: string, heard: { startSec: number; endSec: number }[]): Timeline["lines"][number]["words"] | null => {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0 || heard.length === 0) return null;
+  if (heard.length === words.length) return words.map((w, i) => ({ text: w, tlStartSec: heard[i].startSec, tlEndSec: heard[i].endSec }));
+  return estimateWords(text, heard[0].startSec, heard[heard.length - 1].endSec);
+};

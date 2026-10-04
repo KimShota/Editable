@@ -14,6 +14,7 @@ import { AdaptedScriptSchema, ProductFootageSchema, RecreationSpecSchema } from 
 import { DEFAULT_SET, framePrompt, planFrames } from "../recreation/storyboard";
 import { sourceIdForCard } from "../plan/store";
 import { getStorage } from "../storage";
+import { type AudioMode, parseAudioMode, readAudioMode } from "./audioMode";
 import { textToSpeechTimed, type TimedWord } from "../voice/elevenlabs";
 import {
   ANIMATE_MODEL,
@@ -30,6 +31,9 @@ import {
   stillClip,
   whisperModel,
   TALKING_MODEL,
+  nativeTalkingPrompt,
+  spokenShare,
+  speechWords,
   talkingPrompt,
   textCardClip,
   voiceSegment,
@@ -41,7 +45,7 @@ import { planShotChange } from "./shotChange";
 import { addTake, takesForClip } from "./takes";
 import { estimateUsd, generate, seedanceUsd, uploadFile, waitFor, download } from "./higgsfield";
 import { clipProblem, GREEN_STILL_ATTEMPTS, MIN_GREEN_FRACTION, pickBest, type Quality, RETRY_CAP, usable, worstCaseUsd } from "./retry";
-import { buildTimeline, type Timeline } from "./timeline";
+import { alignWords, buildNativeTimeline, buildTimeline, type Timeline } from "./timeline";
 
 /**
  * An adapted script → a finished, editable video (M1 day 5-6), run by hand
@@ -49,6 +53,9 @@ import { buildTimeline, type Timeline } from "./timeline";
  * brands/<brand>/videos/<source>/ and is safe to rerun; --redo regenerates.
  *
  *   npm run produce -- voice  --brand <slug> --source <id> | --card <id> [--tempo 1.25] [--redo]
+ *       audio mode (brands/<slug>/production.json, or --audio native|revoice): native (the default) skips
+ *       ElevenLabs; the timeline follows the source and talking clips speak with the video model's own
+ *       audio. revoice voices every line in the locked voice and lip-syncs the clips to it
  *   npm run produce -- clips  --brand <slug> --source <id> [--shots s0,s3] [--redo | --regenerate | --new-stills] [--dry]
  *       --redo rebuilds clips from what the providers already returned (free);
  *       --regenerate pays for new generations; --new-stills also redraws green-screen stills.
@@ -129,7 +136,10 @@ const context = async (args: string[]) => {
   const spec = RecreationSpecSchema.parse(await readJson(`brands/${brand}/sources/specs/${sourceId}.json`, "spec"));
   const character = LockedCharacterSchema.parse(await readJson(`brands/${brand}/character/character.json`, "locked character"));
   const footage = ProductFootageSchema.parse(await readJson(`brands/${brand}/product/footage.json`, "product footage"));
-  return { brand, id, sourceId, k, script, spec, character, footage, cost: costLog(k.costs), jobId: `${brand}-${id}`, ref: (s: string) => `${brand}/${id}/${s}` };
+  // --audio native|revoice overrides the brand's setting for one run.
+  const audioOverride = option(args, "--audio");
+  const audioMode: AudioMode = audioOverride ? parseAudioMode({ audioMode: audioOverride }) : await readAudioMode(storage, brand);
+  return { brand, id, sourceId, k, script, spec, character, footage, audioMode, cost: costLog(k.costs), jobId: `${brand}-${id}`, ref: (s: string) => `${brand}/${id}/${s}` };
 };
 type Ctx = Awaited<ReturnType<typeof context>>;
 
@@ -151,6 +161,13 @@ const withTmp = async <T>(fn: (dir: string) => Promise<T>): Promise<T> => {
 export const DEFAULT_TEMPO = 1.25;
 
 const voice = async (c: Ctx, redo: boolean, tempo: number): Promise<Timeline> => {
+  if (c.audioMode === "native") {
+    // Nothing to voice: the clips speak for themselves, so the source's own times are the timeline.
+    const timeline = buildNativeTimeline(c.script, c.spec);
+    await writeJson(c.k.timeline, timeline);
+    console.log(`native audio: no voice step. timeline: ${timeline.durationSec.toFixed(1)}s (the source's own), ${timeline.shots.length} shots`);
+    return timeline;
+  }
   if (!c.character.voice) throw new Error("the character has no voice: run npm run character -- voice-pick first");
   const voiceId = c.character.voice.voiceId;
   // ElevenLabs allows 2 concurrent requests on this plan.
@@ -204,6 +221,10 @@ type ClipFile = { key: string; durationSec: number; inSec: number; rate?: number
 type ClipRecord = ClipFile & {
   kind: ClipKind;
   lipSyncDriftSec?: number;
+  /** Native audio: the share of the line the clip says. */
+  spokenShare?: number;
+  /** Native audio: the words the clip says, in clip seconds, for caption timing. */
+  heard?: { word: string; startSec: number; endSec: number }[];
   cleanUntilSec?: number;
   /** Why this shot needs a look in the editor (a failed check, a fallback). */
   flag?: string;
@@ -279,7 +300,7 @@ const greenStill = async (c: Ctx, shot: Ctx["script"]["shots"][number]): Promise
   return storage.localPath(c.k.green(shot.shotId));
 };
 
-type Attempt = Quality & { problem: string | null; out: string; raw: string; durationSec: number; inSec: number; rate?: number };
+type Attempt = Quality & { problem: string | null; out: string; raw: string; durationSec: number; inSec: number; rate?: number; heard?: ClipRecord["heard"] };
 
 /** A failure as one readable line: a local tool's own last stderr line
  *  (ffmpeg, greenscreen.py) rather than the command it ran. */
@@ -298,6 +319,21 @@ const errorText = (err: unknown): string => {
  * and a flag instead of failing the video; without it (the editor's
  * Regenerate, where the current take stays) it throws.
  */
+/** The words a talking shot says: the script lines spoken during it. */
+const lineOf = (c: Ctx, timeline: Timeline, shotId: string): string => {
+  const at = timeline.shots.find((s) => s.shotId === shotId)!;
+  return timeline.lines
+    .filter((l) => l.tlOutSec > at.tlInSec && l.tlInSec < at.tlOutSec)
+    .map((l) => c.script.lines.find((s) => s.index === l.index)?.text ?? "")
+    .join(" ");
+};
+
+/** The script's own prompt for a talking shot, for this brand's audio mode. */
+const talkingPromptFor = (c: Ctx, timeline: Timeline, shot: Ctx["script"]["shots"][number]): string =>
+  c.audioMode === "native"
+    ? nativeTalkingPrompt(shot, c.character.concept.name, lineOf(c, timeline, shot.shotId), c.character.concept.voiceDescription)
+    : talkingPrompt(shot, c.character.concept.name);
+
 const makeClip = async (
   c: Ctx,
   timeline: Timeline,
@@ -347,11 +383,25 @@ const makeClip = async (
 
     const footagePath = kind === "green" ? await storage.localPath(productClip().key) : "";
     const wav = path.join(dir, "voice.wav");
-    if (kind === "talking") voiceSegment(await storage.localPath(c.k.track), at.tlInSec, at.tlOutSec, wav, requestSeconds(kind, len));
+    if (kind === "talking" && c.audioMode === "revoice") voiceSegment(await storage.localPath(c.k.track), at.tlInSec, at.tlOutSec, wav, requestSeconds(kind, len));
 
     /** Provider output → a checked clip on the output canvas. Free. */
     const finish = (raw: string, n: number): Attempt => {
       const out = path.join(dir, `clip-${n}.mp4`);
+      if (kind === "talking" && c.audioMode === "native") {
+        // The clip's own voice: check it says the line, and keep where each word falls for the captions.
+        const expected = lineOf(c, timeline, shot.shotId);
+        let heard: NonNullable<Attempt["heard"]> = [];
+        try {
+          heard = speechWords(raw, whisperModel(c.script.language));
+        } catch {
+          // No speech could be read: the clip is kept as a last resort, flagged.
+        }
+        const q: Quality = { spokenShare: heard.length ? spokenShare(expected, heard) : 0 };
+        const inSec = heard.length ? Math.max(0, heard[0].startSec - 0.15) : 0;
+        normalize(raw, out, 0, true);
+        return { ...q, problem: clipProblem(kind, len, q), out, raw, durationSec: durationOf(out), inSec, heard };
+      }
       if (kind === "talking") {
         let q: Quality = { lipSyncDriftSec: Infinity };
         let inSec = 0;
@@ -395,9 +445,10 @@ const makeClip = async (
       let input: Record<string, unknown>;
       if (kind === "talking") {
         input = {
-          prompt: opts.prompt ?? talkingPrompt(shot, c.character.concept.name),
+          prompt: opts.prompt ?? talkingPromptFor(c, timeline, shot),
           image_urls: [await uploadFile(opts.still ?? (await storage.localPath(c.k.still(shot.shotId))))],
-          audio_urls: [await uploadFile(wav)],
+          // Native audio supplies no voice: the model speaks the line in the prompt itself.
+          ...(c.audioMode === "revoice" ? { audio_urls: [await uploadFile(wav)] } : {}),
           duration: requestSeconds(kind, len),
           resolution: "720p",
           aspect_ratio: "9:16",
@@ -443,6 +494,8 @@ const makeClip = async (
     if (!reuse) await storage.putFile(c.k.raw(shot.shotId), best.raw);
     const record: ClipRecord = { kind, key: await keep(best.out), durationSec: best.durationSec, inSec: best.inSec, rate: best.rate, others };
     if (best.lipSyncDriftSec !== undefined && Number.isFinite(best.lipSyncDriftSec)) record.lipSyncDriftSec = best.lipSyncDriftSec;
+    if (best.spokenShare !== undefined) record.spokenShare = best.spokenShare;
+    if (best.heard) record.heard = best.heard;
     if (best.cleanUntilSec !== undefined && Number.isFinite(best.cleanUntilSec)) record.cleanUntilSec = best.cleanUntilSec;
     if (best.problem) {
       record.flag = reuse ? `${best.problem} (rerun with --regenerate --shots ${shot.shotId} to retry)` : `${best.problem}, after ${attempts.length} attempt(s)`;
@@ -570,11 +623,28 @@ const renderVideo = async (c: Ctx, args: string[]) => {
     made.set(shot.shotId, { src: `${prefix}/clips/${path.basename(r.key)}`, file: await storage.localPath(r.key), durationSec: r.durationSec, inSec: r.inSec, rate: r.rate });
   }
   const voiceFiles = new Map<number, VoiceFile>();
-  for (const l of timeline.lines) {
-    const v = (await readJson(c.k.lineWords(l.index), "voiced line")) as { durationSec: number };
-    voiceFiles.set(l.index, { src: `${prefix}/voice/line-${l.index}.mp3`, file: await storage.localPath(c.k.line(l.index)), durationSec: v.durationSec });
+  // Native audio: the shots that speak play their own clip audio, and there is no voice track.
+  let speaking: Set<string> | undefined;
+  if (c.audioMode === "native") {
+    speaking = new Set(c.script.shots.filter((s) => planClip(s) === "talking" && !records[s.shotId]?.flag?.includes("instead")).map((s) => s.shotId));
+    // Captions follow what each clip said: the script's words at the heard times.
+    for (const l of timeline.lines) {
+      const at = timeline.shots.find((s) => s.tlInSec <= l.tlInSec + 1e-6 && l.tlInSec < s.tlOutSec);
+      const r = at && speaking.has(at.shotId) ? records[at.shotId] : undefined;
+      if (!at || !r?.heard?.length) continue;
+      const heard = r.heard
+        .map((w) => ({ startSec: at.tlInSec + w.startSec - r.inSec, endSec: at.tlInSec + w.endSec - r.inSec }))
+        .filter((w) => w.endSec > at.tlInSec && w.startSec < at.tlOutSec);
+      const words = alignWords(c.script.lines.find((s) => s.index === l.index)?.text ?? "", heard);
+      if (words) l.words = words;
+    }
+  } else {
+    for (const l of timeline.lines) {
+      const v = (await readJson(c.k.lineWords(l.index), "voiced line")) as { durationSec: number };
+      voiceFiles.set(l.index, { src: `${prefix}/voice/line-${l.index}.mp3`, file: await storage.localPath(c.k.line(l.index)), durationSec: v.durationSec });
+    }
   }
-  const edl = EdlSchema.parse(compileEdl({ jobId: c.jobId, script: c.script, spec: c.spec, timeline, clips: made, voice: voiceFiles }));
+  const edl = EdlSchema.parse(compileEdl({ jobId: c.jobId, script: c.script, spec: c.spec, timeline, clips: made, voice: voiceFiles, speaking }));
   for (const d of edl.diagnostics) console.log(`  ! ${d}`);
 
   // The editor saves its edits to artifacts/<jobId>/edl.json. If that file
@@ -657,7 +727,7 @@ type ClipCtx = Awaited<ReturnType<typeof clipContext>>;
 /** The prompt and still the take on the timeline was made from: its own when
  *  it came from a change, else the script's. */
 const basePromptAndStill = async (x: ClipCtx): Promise<{ prompt: string; still: string }> => {
-  const prompt = x.take?.prompt ?? (x.kind === "talking" ? talkingPrompt(x.shot, x.c.character.concept.name) : animatePrompt(x.shot, x.kind));
+  const prompt = x.take?.prompt ?? (x.kind === "talking" ? talkingPromptFor(x.c, x.timeline, x.shot) : animatePrompt(x.shot, x.kind));
   if (x.take?.still) return { prompt, still: x.take.still };
   const green = x.kind === "green" && (await storage.exists(x.c.k.green(x.shot.shotId)));
   return { prompt, still: await storage.localPath(green ? x.c.k.green(x.shot.shotId) : x.c.k.still(x.shot.shotId)) };

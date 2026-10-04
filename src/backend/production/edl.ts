@@ -76,8 +76,11 @@ export const compileEdl = (args: {
   timeline: Timeline;
   clips: Map<string, MadeClip>;
   voice: Map<number, VoiceFile>;
+  /** Audio mode "native": the shots in this set speak with their own clip audio, so they play
+   *  unmuted and there is no voice track. Absent: every line is a voice clip over muted video. */
+  speaking?: Set<string>;
 }): Edl => {
-  const { jobId, script, timeline, clips, voice } = args;
+  const { jobId, script, timeline, clips, voice, speaking } = args;
   const assets: Record<string, string> = {};
   const diagnostics: string[] = [];
 
@@ -101,14 +104,14 @@ export const compileEdl = (args: {
       srcDurationSec: clip.durationSec,
       tlInSec: t.tlInSec,
       tlOutSec: t.tlOutSec,
-      muted: true,
+      muted: !speaking?.has(t.shotId),
       speed,
       volume: 1,
       zoom: 1,
     };
   });
 
-  const voiceovers = timeline.lines.map((l) => {
+  const voiceovers = (speaking ? [] : timeline.lines).map((l) => {
     const v = voice.get(l.index);
     if (!v) throw new Error(`edl: line ${l.index} has no voice`);
     assets[v.src] = v.file;

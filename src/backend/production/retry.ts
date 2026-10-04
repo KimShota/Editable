@@ -25,6 +25,8 @@ export const GREEN_STILL_ATTEMPTS = 3;
 export const MIN_GREEN_FRACTION = 0.04;
 /** Lips further than this from our voice (rms, after alignment) look dubbed. */
 export const MAX_LIP_DRIFT_SEC = 0.12;
+/** Native audio: below this share of the line's words in the clip's own speech, the clip does not say the line. */
+export const MIN_SPOKEN_SHARE = 0.6;
 /** A green-screen clip whose clean part has to play slower than this to fill
  *  the shot looks like slow motion: retry it. (0.97× passed review on DbAJ.) */
 export const MIN_CLEAN_SPEED = 0.8;
@@ -35,6 +37,8 @@ export type Quality = {
   cleanUntilSec?: number;
   /** Talking clips: how far the lips miss our voice after alignment; Infinity when alignment failed. */
   lipSyncDriftSec?: number;
+  /** Talking clips with native audio: the share of the line's words the clip actually says (0 when nothing was heard). */
+  spokenShare?: number;
 };
 
 /** Why an attempt should be retried, or null when it passes. */
@@ -44,6 +48,9 @@ export const clipProblem = (kind: ClipKind, shotSec: number, q: Quality): string
   }
   if (kind === "talking" && q.lipSyncDriftSec !== undefined && !(q.lipSyncDriftSec <= MAX_LIP_DRIFT_SEC)) {
     return Number.isFinite(q.lipSyncDriftSec) ? `lips drift ${q.lipSyncDriftSec.toFixed(2)}s from the voice` : "the line could not be found in the clip's speech";
+  }
+  if (kind === "talking" && q.spokenShare !== undefined && q.spokenShare < MIN_SPOKEN_SHARE) {
+    return q.spokenShare === 0 ? "the clip has no speech" : `the clip says only ${Math.round(q.spokenShare * 100)}% of the line`;
   }
   return null;
 };
@@ -61,7 +68,7 @@ export const usable = (kind: ClipKind, shotSec: number, q: Quality): boolean =>
 /** Higher is better: the longest clean part, the tightest lip-sync. */
 const score = (kind: ClipKind, q: Quality): number => {
   if (kind === "green") return q.cleanUntilSec ?? Infinity;
-  if (kind === "talking") return -(q.lipSyncDriftSec ?? 0);
+  if (kind === "talking") return q.spokenShare !== undefined ? q.spokenShare : -(q.lipSyncDriftSec ?? 0);
   return 0;
 };
 

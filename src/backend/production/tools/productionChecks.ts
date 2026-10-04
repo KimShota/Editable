@@ -4,11 +4,12 @@ import type { Edl } from "../../pipeline/types";
 import type { AdaptedScript, RecreationSpec } from "../../recreation/schemas";
 import { makeChecker } from "../../tools/checks";
 import { wordsFromAlignment } from "../../voice/elevenlabs";
-import { planClip, requestSeconds } from "../clips";
+import { DEFAULT_AUDIO_MODE, parseAudioMode } from "../audioMode";
+import { nativeTalkingPrompt, planClip, requestSeconds, spokenShare } from "../clips";
 import { captionGroups, compileEdl, type MadeClip, playRawClipAudio, swapShotClip } from "../edl";
 import { seedanceUsd } from "../higgsfield";
 import { clipProblem, pickBest, RETRY_CAP, usable, worstCaseUsd } from "../retry";
-import { buildTimeline, MIN_SHOT_SEC } from "../timeline";
+import { alignWords, buildNativeTimeline, buildTimeline, MIN_SHOT_SEC } from "../timeline";
 
 /**
  * Production planning with no network, no provider and no ffmpeg: the
@@ -90,7 +91,7 @@ const main = () => {
   t.check("animate shots have no automatic check", clipProblem("animate", 3, {}) === null);
   t.check("a green screen clean for a sliver is not usable (s15: 0.25s of 5.9s)", !usable("green", 5.9, { cleanUntilSec: 0.25 }) && usable("green", 5.9, { cleanUntilSec: 3 }));
   t.check("a badly synced talking clip is still usable", usable("talking", 6.4, { lipSyncDriftSec: Infinity }));
-  const a = (problem: string | null, q: { cleanUntilSec?: number; lipSyncDriftSec?: number }, id: string) => ({ ...q, problem, id });
+  const a = (problem: string | null, q: { cleanUntilSec?: number; lipSyncDriftSec?: number; spokenShare?: number }, id: string) => ({ ...q, problem, id });
   t.check("a passing attempt is kept over a failing one", pickBest("green", [a("x", { cleanUntilSec: 2 }, "1"), a(null, { cleanUntilSec: 9 }, "2")])?.id === "2");
   t.check("with no passing attempt, the longest clean part wins", pickBest("green", [a("x", { cleanUntilSec: 1 }, "1"), a("x", { cleanUntilSec: 2 }, "2"), a("x", { cleanUntilSec: 0.5 }, "3")])?.id === "2");
   t.check("with no passing attempt, the tightest lips win", pickBest("talking", [a("x", { lipSyncDriftSec: 0.4 }, "1"), a("x", { lipSyncDriftSec: 0.2 }, "2")])?.id === "2");
@@ -138,6 +139,37 @@ const main = () => {
   t.check("pieces keep their place on the timeline and continue through the new take", swapped.video[1].tlInSec === edited.video[1].tlInSec && near(swapped.video[1].srcInSec, 0.5, 1e-9) && near(swapped.video[2].srcInSec, 0.5 + (2 - edited.video[1].tlInSec), 1e-9));
   t.check("other shots and every edit stay as they were", swapped.video[0] === edited.video[0] && swapped.overlays[0].params.text === "EDITED" && swapped.assets["jobs/j/s1.v2.mp4"] === "/abs/s1.v2.mp4" && swapped.assets["jobs/j/s1.mp4"] !== undefined);
   t.throws("a shot that is not on the timeline is an error", () => swapShotClip(edl, "s9", clip("s9", 3)), /no clip of shot s9/);
+
+  // Native audio: the clips speak for themselves.
+  t.check("native audio is the default", DEFAULT_AUDIO_MODE === "native" && parseAudioMode({}) === "native" && parseAudioMode(null) === "native");
+  t.check("a brand can stay on re-voice", parseAudioMode({ audioMode: "revoice" }) === "revoice");
+  t.throws("an unknown audio mode is an error", () => parseAudioMode({ audioMode: "dub" }), /audioMode/);
+  const nativeScript = { ...script, lines: [{ index: 0, text: "If I lost everything," }, { index: 1, text: "Press Option. Done." }] } as unknown as AdaptedScript;
+  const ntl = buildNativeTimeline(nativeScript, spec);
+  t.check("the native timeline is the source's own", ntl.durationSec === 10.5 && ntl.shots.map((x) => `${x.tlInSec}-${x.tlOutSec}`).join() === "0-2,2-7,7-10.5", JSON.stringify(ntl.shots));
+  t.check("lines take the source's speech slots", ntl.lines.map((l) => `${l.tlInSec}-${l.tlOutSec}`).join() === "0-4,4-10");
+  t.check("estimated words fill their slot", ntl.lines[0].words.length === 4 && ntl.lines[0].words[0].tlStartSec === 0 && near(ntl.lines[0].words[3].tlEndSec, 4, 1e-9));
+  t.throws("a script with another line count is an error", () => buildNativeTimeline({ ...nativeScript, lines: [nativeScript.lines[0]] } as AdaptedScript, spec), /script lines/);
+  const heard3 = [{ startSec: 0.4, endSec: 0.8 }, { startSec: 0.9, endSec: 1.3 }, { startSec: 1.4, endSec: 2 }];
+  const exact = alignWords("Press Option. Done.", heard3)!;
+  t.check("script words take the heard times when the counts match", exact.map((x) => x.text).join(" ") === "Press Option. Done." && exact[1].tlStartSec === 0.9);
+  const spread = alignWords("Press Option and be done.", heard3)!;
+  t.check("otherwise the words spread across the heard speech", spread.length === 5 && spread[0].tlStartSec === 0.4 && near(spread[4].tlEndSec, 2, 1e-9));
+  t.check("nothing heard, nothing to align", alignWords("Press Option.", []) === null);
+  const said = (...w: string[]) => w.map((word) => ({ word }));
+  t.check("a clip that says the whole line passes", spokenShare("Press Option. Done.", said("press", "option", "done")) === 1 && clipProblem("talking", 4, { spokenShare: 1 }) === null);
+  t.check("words out of order do not count", spokenShare("Press Option. Done.", said("done", "option", "press")) < 1);
+  t.check("a clip that says too little is retried", /only/.test(clipProblem("talking", 4, { spokenShare: 0.3 }) ?? ""));
+  t.check("a clip with no speech is retried", /no speech/.test(clipProblem("talking", 4, { spokenShare: 0 }) ?? ""));
+  t.check("with no passing attempt, the clip that says most of the line wins", pickBest("talking", [a("x", { spokenShare: 0.2 }, "1"), a("x", { spokenShare: 0.5 }, "2")])?.id === "2");
+  const prompt = nativeTalkingPrompt(script.shots[0], "Nova", "Press Option.", "Female, cool and composed.");
+  t.check("the native prompt carries the words and the voice, and supplies no audio reference", prompt.includes('"Press Option."') && prompt.includes("Female, cool and composed.") && !/audio 1/.test(prompt));
+  const nativeEdl = EdlSchema.parse(
+    compileEdl({ jobId: "j", script, spec, timeline: ntl, clips: new Map([["s0", clip("s0", 4)], ["s1", clip("s1", 6)], ["s2", clip("s2", 5)]]), voice: new Map(), speaking: new Set(["s0"]) }),
+  );
+  t.check("a speaking shot plays its own audio and the rest stay muted", nativeEdl.video.map((v) => v.muted).join() === "false,true,true");
+  t.check("native audio has no voice track", nativeEdl.voiceovers.length === 0);
+
 
   t.throws("a missing clip is an error", () => compileEdl({ jobId: "j", script, spec, timeline: tl, clips: new Map(), voice: new Map() }), /no clip/);
 

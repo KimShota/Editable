@@ -48,6 +48,17 @@ export const talkingPrompt = (shot: AdaptedScript["shots"][number], name: string
   "No other speech, no music, no captions or on-screen text.";
 
 /**
+ * The talking shot when the clip speaks for itself (audio mode "native"): the
+ * video model generates her voice with the clip, so the words go in the prompt
+ * and no audio is supplied. Her voice is described, so it stays close from
+ * clip to clip.
+ */
+export const nativeTalkingPrompt = (shot: AdaptedScript["shots"][number], name: string, line: string, voice: string): string =>
+  `${name}, the woman in image 1, talks straight to the phone camera and says exactly these words, clearly and naturally, with precise lip-sync: "${line}" ` +
+  `Her voice: ${voice} ${shot.action} Same face, hair, outfit and room as image 1. Handheld phone camera, natural light, like a creator filming a selfie video. ` +
+  "She says only those words. No music, no captions or on-screen text.";
+
+/**
  * A green-screen shot's prompt never mentions what is on the screen: asked
  * to show "typing a search", the video model draws a fake search bar onto the
  * green, which the key then keeps. It only gets the body's motion.
@@ -75,14 +86,14 @@ export const durationOf = (file: string): number =>
   Number(execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file]).toString().trim());
 
 /** Any generated clip → the output canvas (cover-cropped), constant frame
- *  rate, no audio. `holdSec` repeats the last frame: a lip-synced clip must
+ *  rate, no audio unless `keepAudio` (native clips speak). `holdSec` repeats the last frame: a lip-synced clip must
  *  play at its sync rate, so a short one holds its end (the silent tail
  *  after the last word) rather than slowing down and losing the sync. */
-export const normalize = (input: string, output: string, holdSec = 0): void =>
+export const normalize = (input: string, output: string, holdSec = 0, keepAudio = false): void =>
   ffmpeg([
-    "-i", input, "-an",
+    "-i", input, ...(keepAudio ? [] : ["-an"]),
     "-vf", `scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=increase,crop=${WIDTH}:${HEIGHT},fps=${FPS}${holdSec > 0 ? `,tpad=stop_mode=clone:stop_duration=${holdSec}` : ""}`,
-    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", output,
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", ...(keepAudio ? ["-c:a", "aac", "-b:a", "192k", "-ar", "48000"] : []), output,
   ]);
 
 /**
@@ -138,6 +149,38 @@ const wordStarts = (file: string, model: string): { word: string; atSec: number 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+};
+
+/** Every word a file's speech holds, with start and end seconds (whisper.cpp). */
+export const speechWords = (file: string, model: string): { word: string; startSec: number; endSec: number }[] => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "katalab-heard-"));
+  try {
+    const wav = path.join(dir, "a.wav");
+    ffmpeg(["-i", file, "-vn", "-ac", "1", "-ar", "16000", wav]);
+    execFileSync("whisper-cli", ["-m", model, "-f", wav, "-ml", "1", "-oj", "-of", path.join(dir, "w"), "-np"], { stdio: "ignore" });
+    const json = JSON.parse(fs.readFileSync(path.join(dir, "w.json"), "utf8")) as { transcription: { text: string; offsets: { from: number; to: number } }[] };
+    return json.transcription
+      .map((t) => ({ word: t.text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ""), startSec: t.offsets.from / 1000, endSec: t.offsets.to / 1000 }))
+      .filter((w) => w.word.length > 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+/** Share of the expected line's words the clip's speech contains, in order. */
+export const spokenShare = (expected: string, heard: { word: string }[]): number => {
+  const want = expected.toLowerCase().split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, "")).filter(Boolean);
+  if (want.length === 0) return 1;
+  let at = 0;
+  let hit = 0;
+  for (const w of want) {
+    const i = heard.findIndex((h, k) => k >= at && h.word === w);
+    if (i !== -1) {
+      hit++;
+      at = i + 1;
+    }
+  }
+  return hit / want.length;
 };
 
 /** Least-squares line y = rate·x + offset. */
