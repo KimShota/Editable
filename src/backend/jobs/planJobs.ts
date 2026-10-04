@@ -28,7 +28,11 @@ import type { JobDeps } from "./deps";
 const IngestPayload = TaskPayloadSchema.and(z.object({ url: z.string() }));
 const AdaptPayload = TaskPayloadSchema.and(z.object({ cardId: z.string(), note: z.string().max(500).optional() }));
 const CardPayload = TaskPayloadSchema.and(z.object({ cardId: z.string() }));
-const BuildPayload = TaskPayloadSchema.and(z.object({ days: z.number().int().min(1).max(CYCLE_DAYS).optional() }));
+/** `sourceIds`: plan exactly these viral videos, one each, on the first free days (newly added ones,
+ *  say); without it the free days up to `days` are filled from the whole pool. */
+const BuildPayload = TaskPayloadSchema.and(
+  z.object({ days: z.number().int().min(1).max(CYCLE_DAYS).optional(), sourceIds: z.array(z.string()).min(1).max(CYCLE_DAYS).optional() }),
+);
 
 /** The prompt direction for a card: its angle, and any note from the person
  *  who asked for a rewrite. */
@@ -86,7 +90,7 @@ export const createPlanHandlers = (deps: JobDeps): Record<string, JobHandler> =>
     },
 
     "plan.build": async (job, ctx = NO_CONTEXT) => {
-      const { slug, days } = BuildPayload.parse(job.payload);
+      const { slug, days, sourceIds } = BuildPayload.parse(job.payload);
       const costSink = deps.costSinkFor(slug);
       ctx.report({ stage: "Reading your brand" });
 
@@ -104,21 +108,31 @@ export const createPlanHandlers = (deps: JobDeps): Record<string, JobHandler> =>
       }
       if (pool.length === 0) throw new Error("there are no viral sources to plan from yet: add some first");
 
+      const chosenPool = sourceIds ? sourceIds.map((id) => pool.find((s) => s.sourceId === id)) : pool;
+      const missing = sourceIds?.filter((_, i) => !chosenPool[i]) ?? [];
+      if (missing.length > 0) throw new Error(`not in the pool, or not analysed yet: ${missing.join(", ")}`);
+      const planFrom = chosenPool as PoolSource[];
+
       const existing = await readPlan(storage, slug);
       const taken = new Set(existing?.cards.map((c) => c.day) ?? []);
-      const target = days ?? CYCLE_DAYS;
-      const freeDays = Array.from({ length: target }, (_, i) => i + 1).filter((d) => !taken.has(d));
+      const target = sourceIds ? CYCLE_DAYS : (days ?? CYCLE_DAYS);
+      let freeDays = Array.from({ length: target }, (_, i) => i + 1).filter((d) => !taken.has(d));
+      if (sourceIds) {
+        if (freeDays.length < sourceIds.length) throw new Error(`only ${freeDays.length} free days left for ${sourceIds.length} videos`);
+        freeDays = freeDays.slice(0, sourceIds.length);
+      }
       if (freeDays.length === 0) return { added: 0 };
 
-      ctx.report({ stage: "Choosing the videos", message: `${freeDays.length} days to fill from ${pool.length} formats` });
+      ctx.report({ stage: "Choosing the videos", message: `${freeDays.length} days to fill from ${planFrom.length} formats` });
       const proposal = await deps.proposer(costSink, `${slug}/plan`)({
         company: intake.companyName,
         product: { name: product.name, oneLiner: product.oneLiner, features: product.features },
         audience: brand.audience ?? intake.audience,
         language: brand.language,
         niche: chosen ? { title: chosen.title, whyItFits: chosen.whyItFits } : null,
-        sources: pool,
+        sources: planFrom,
         freeDays,
+        eachOnce: sourceIds !== undefined,
         existing: (existing?.cards ?? []).map((c) => ({ day: c.day, sourceId: c.sourceId, angle: c.angle })),
       });
 

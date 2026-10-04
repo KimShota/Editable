@@ -34,6 +34,8 @@ export type ProposeInput = {
   freeDays: number[];
   /** Cards already in the plan: kept as they are, and context for the rest. */
   existing: { day: number; sourceId: string; angle: string }[];
+  /** Every listed source gets exactly one of the free days (planning chosen videos). */
+  eachOnce?: boolean;
 };
 
 export const ProposalSchema = z.object({
@@ -73,6 +75,12 @@ export const proposalProblems = (input: ProposeInput, proposal: Proposal): strin
     if (!c.angle.trim()) problems.push(`day ${c.day}: the angle is empty`);
   }
   for (const d of input.freeDays) if (!seenDays.has(d)) problems.push(`day ${d} has no card`);
+  if (input.eachOnce) {
+    for (const src of input.sources) {
+      const n = proposal.cards.filter((c) => c.sourceId === src.sourceId).length;
+      if (n !== 1) problems.push(`source ${src.sourceId} must be used exactly once, not ${n} times`);
+    }
+  }
 
   // The same angle twice means two videos that say the same thing.
   const angles = new Map<string, number>();
@@ -145,6 +153,7 @@ export const buildProposalText = (input: ProposeInput): string => {
     ``,
     `Plan a video for each of these days: ${input.freeDays.join(", ")} (of ${CYCLE_DAYS}).`,
     `Rules: use only the listed source ids. Never use the same source on two neighbouring days, counting days already planned. Spread the sources: no one format more than its fair share. Every angle must be a different idea, specific to this product, and fit the source's format. Do not repeat an angle already planned.`,
+    ...(input.eachOnce ? [`Use every listed source exactly once.`] : []),
   ].join("\n");
 };
 

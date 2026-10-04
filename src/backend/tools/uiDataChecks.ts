@@ -524,6 +524,12 @@ const main = async () => {
     const planB = (await repo.getPlan("planco"))!;
     t.check("planning with days already taken fills only the free ones", filled.added === 11 && planB.cards.length === 14 && planB.cards.slice(0, 3).every((c, i) => c.id === planA.cards[i].id));
     t.check("the existing cards, their status and the start date are untouched", planB.cards[0].status === "approved" && planB.startsOn === planA.startsOn);
+    await repo.updatePlan("planco", (p) => ({ ...p, cards: p.cards.filter((c) => c.day <= 3 || c.day > 5) }));
+    await t.rejects("planning chosen videos refuses one that is not in the pool", () => run("plan.build", { slug: "planco", sourceIds: ["AAA111", "nope"] }), /not in the pool.*nope/);
+    const chosen = (await run("plan.build", { slug: "planco", sourceIds: ["333", "AAA111"] })) as { added: number };
+    const planC = (await repo.getPlan("planco"))!;
+    t.check("chosen videos get one free day each, the first ones", chosen.added === 2 && planC.cards.filter((c) => c.day === 4 || c.day === 5).map((c) => c.sourceId).sort().join() === "333,AAA111" && planC.cards.length === 14);
+    await t.rejects("chosen videos need enough free days", () => run("plan.build", { slug: "planco", sourceIds: ["333"] }), /only 0 free days/);
 
     console.log("video jobs with the stub producer");
     const vh = createVideoHandlers(deps);
