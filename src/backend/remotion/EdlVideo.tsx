@@ -200,12 +200,19 @@ const Segment: React.FC<{
           useWebAudioApi={previewMode}
           // A sped-up segment consumes its whole source span across a
           // proportionally shorter timeline span — assemble.ts already
-          // divided tlOutSec-tlInSec by the same number, so startFrom/endAt
-          // stay in SOURCE frames and playbackRate is what reconciles the
-          // two. 1 for every ordinary segment.
+          // divided tlOutSec-tlInSec by the same number, so startFrom stays
+          // in SOURCE frames and playbackRate is what reconciles the two.
+          // 1 for every ordinary segment.
+          //
+          // endAt is NOT a source frame: Remotion makes the clip visible for
+          // (endAt - startFrom) frames of the OUTPUT timeline, unscaled by
+          // playbackRate. In source frames, a clip slowed to 0.8x showed
+          // only 80% of its slot and then went black (the segment itself was
+          // fine). So it is startFrom plus the segment's own length on the
+          // timeline, which at 1x is the same number as before.
           playbackRate={seg.speed}
           startFrom={Math.round(seg.srcInSec * fps)}
-          endAt={Math.round(seg.srcOutSec * fps)}
+          endAt={Math.round(seg.srcInSec * fps) + durationInFrames}
           pauseWhenBuffering={!(previewMode && seg.muted)}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
