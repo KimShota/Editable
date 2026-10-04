@@ -311,6 +311,21 @@ const main = () => {
     const trimmedIn = applyOp(doc, { type: "trimEdge", track: "video", id: "a", edge: "in", tlSec: 1 });
     t.check("trimming a clip's start ripples the same way (the clip stays at its place)", near(trimmedIn.video[0].tlInSec, 0) && near(cap(trimmedIn, "cb").tlInSec, 2));
 
+    // Changing a clip's speed.
+    const slow = applyOp(doc, { type: "setSpeed", id: "a", speed: 0.5 });
+    t.check("a slower clip gets longer and keeps its source range", near(slow.video[0].tlOutSec, 6) && near(slow.video[0].srcOutSec, 3) && slow.video[0].speed === 0.5);
+    t.check("the track behind a slowed clip moves later and keeps its lengths", near(slow.video[1].tlInSec, 6) && near(slow.video[1].tlOutSec - slow.video[1].tlInSec, 2) && near(slow.video[2].tlInSec, 8) && near(slow.durationSec, 12));
+    t.check("a caption inside the clip stretches with it, words included", near(cap(slow, "ca").tlInSec, 1) && near(cap(slow, "ca").tlOutSec, 2) && near(cap(slow, "ca").words[0].tlStartSec, 1) && near(cap(slow, "ca").words[0].tlEndSec, 2));
+    t.check("a caption on a later clip moves by the clip's growth, unstretched", near(cap(slow, "cb").tlInSec, 6) && near(cap(slow, "cb").tlOutSec, 7) && near(cap(slow, "cc").tlInSec, 9));
+    t.check("a watermark over the whole video follows the new end, not the clip's stretch", near(ov(slow, "mark").tlInSec, 0) && near(ov(slow, "mark").tlOutSec, 12));
+    const quick = applyOp(doc, { type: "setSpeed", id: "a", speed: 2 });
+    t.check("a faster clip is shorter and the track closes up behind it", near(quick.video[0].tlOutSec, 1.5) && near(quick.video[1].tlInSec, 1.5) && near(quick.durationSec, 7.5));
+    t.check("back to normal speed restores the length", near(applyOp(slow, { type: "setSpeed", id: "a", speed: 1 }).video[0].tlOutSec, 3));
+    t.check("speed changes the clip you picked and no other", slow.video[1].speed === 1.5 && slow.video[2].speed === 1);
+    t.throws("a speed of zero is an error", () => applyOp(doc, { type: "setSpeed", id: "a", speed: 0 }));
+    t.throws("a speed past the limit is an error", () => applyOp(doc, { type: "setSpeed", id: "a", speed: 10 }));
+    t.throws("a clip that is not on the timeline is an error", () => applyOp(doc, { type: "setSpeed", id: "zzz", speed: 1.2 }), /no video clip|video clip/);
+
     const fast = applyOp(doc, { type: "trimEdge", track: "video", id: "b", edge: "out", tlSec: 6 });
     t.check("a sped-up clip is trimmed in timeline seconds, and the clips after it keep their length", near(fast.video[1].tlOutSec, 6) && near(fast.video[1].srcOutSec, 4.5) && near(fast.video[2].tlOutSec - fast.video[2].tlInSec, 4));
     const split = applyOp(doc, { type: "split", track: "video", id: "b", atSec: 4 });

@@ -177,6 +177,60 @@ const VolumeField = ({
   );
 };
 
+const SPEED_PRESETS = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 2];
+
+/** How fast a main-track clip plays. 1x is normal speed; the clip gets longer when slower and the
+ *  timeline behind it follows. Commits on a preset click, Enter or leaving the box, never per keystroke. */
+const SpeedField = ({ speed, onCommit }: { speed: number; onCommit: (speed: number) => void }) => {
+  const [text, setText] = useState(() => String(Number(speed.toFixed(2))));
+  useEffect(() => setText(String(Number(speed.toFixed(2)))), [speed]);
+  const commit = (raw: string) => {
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v < 0.25 || v > 4) {
+      setText(String(Number(speed.toFixed(2))));
+      return;
+    }
+    if (Math.abs(v - speed) > 1e-6) onCommit(v);
+  };
+  return (
+    <Field label={`Speed — ${Number(speed.toFixed(2))}x`}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {SPEED_PRESETS.map((p) => {
+          const active = Math.abs(p - speed) < 1e-6;
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onCommit(p)}
+              className={`rounded-lg border px-2 py-1 text-xs font-medium tabular-nums transition-colors ${
+                active
+                  ? "border-[color:var(--ed-accent)] bg-[color:var(--ed-accent)]/15 text-[color:var(--ed-accent)]"
+                  : "border-[color:var(--ed-border-strong)] text-[color:var(--ed-ink)] hover:border-[color:var(--ed-accent)]/50"
+              }`}
+            >
+              {p}x
+            </button>
+          );
+        })}
+        <input
+          type="number"
+          min={0.25}
+          max={4}
+          step={0.05}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={(e) => commit(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit((e.target as HTMLInputElement).value);
+          }}
+          aria-label="Custom speed"
+          className="w-20 rounded-lg border border-[color:var(--ed-border-strong)] bg-[color:var(--ed-raised)] px-2 py-1 text-xs tabular-nums text-[color:var(--ed-ink)] outline-none focus:border-[color:var(--ed-accent)]"
+        />
+      </div>
+    </Field>
+  );
+};
+
 const inputClass =
   "w-full rounded-lg border border-[color:var(--ed-border-strong)] bg-[color:var(--ed-raised)] px-2.5 py-1.5 text-sm text-[color:var(--ed-ink)] outline-none focus:border-[color:var(--ed-accent)]";
 
@@ -534,6 +588,7 @@ export function Inspector({
             </p>
           </Field>
           {videoExtras?.(clip)}
+          <SpeedField speed={clip.speed} onCommit={(speed) => onOp({ type: "setSpeed", id: clip.id, speed })} />
           <label className="flex items-center gap-2 text-sm text-[color:var(--ed-ink)]">
             <input
               type="checkbox"

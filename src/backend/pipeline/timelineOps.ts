@@ -33,6 +33,9 @@ import { assertCaptionGroupCoversWords } from "./timing";
  */
 
 const MIN_CLIP_SEC = 0.1;
+/** The slowest and fastest a main-track clip may play. */
+export const MIN_SPEED = 0.25;
+export const MAX_SPEED = 4;
 /** Smallest an overlay's on-canvas box can shrink to, as a fraction of the
  *  composition — small enough to feel unconstrained, large enough that a
  *  handle never shrinks to something you can no longer grab. */
@@ -197,6 +200,10 @@ export const TimelineOpSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("delete"), track: DeletableTrackSchema, id: z.string() }),
   /** Multi-select bulk delete: remove every listed clip in one atomic edit. */
   z.object({ type: z.literal("deleteMany"), track: DeletableTrackSchema, ids: z.array(z.string()).min(1) }),
+  /** Change how fast a main-track clip plays. Its source range stays the same, so the clip gets
+   *  shorter when faster and longer when slower; the track closes up or opens out behind it, and the
+   *  captions and titles that start inside the clip stretch with it. 1 is normal speed. */
+  z.object({ type: z.literal("setSpeed"), id: z.string(), speed: z.number().min(MIN_SPEED).max(MAX_SPEED) }),
   /** Patch a clip's non-timing properties (component swap, volume,
    *  mute, transition swap). Never touches timing fields — those only
    *  ever move through the ops above, so the contiguity invariant can't
@@ -390,6 +397,7 @@ const rippleFollowers = (edl: Edl, before: Span[], skip: Set<string>): boolean =
     for (const st of o.states) st.atSec += d;
   }
   for (const c of edl.captions) {
+    if (skip.has(c.id)) continue;
     const d = shiftFor(c.tlInSec);
     if (d === 0) continue;
     c.tlInSec = moved(c.tlInSec, d);
@@ -820,6 +828,44 @@ const applyTrimEdge = (edl: Edl, op: Extract<TimelineOp, { type: "trimEdge" }>):
   } else {
     clip.durationSec = Math.max(op.tlSec - clip.tlInSec, MIN_CLIP_SEC);
   }
+};
+
+/**
+ * A clip's new speed. The clip keeps its source range, so its length changes by 1/speed and
+ * recomputeVideoTrack re-lays the track behind it. Captions and titles that START inside the clip are
+ * stretched about the clip's start by the same factor (when they also end inside it), so they stay on the words they were on (the
+ * generic ripple only moves things rigidly). Returns the ids it placed itself, so the ripple leaves
+ * them alone.
+ */
+const applySetSpeed = (edl: Edl, op: Extract<TimelineOp, { type: "setSpeed" }>): Set<string> => {
+  const seg = edl.video[findIndexOrThrow(edl.video, op.id, "video clip")];
+  const oldIn = seg.tlInSec;
+  const oldOut = seg.tlOutSec;
+  seg.speed = clamp(op.speed, MIN_SPEED, MAX_SPEED);
+  recomputeVideoTrack(edl);
+  const k = (seg.tlOutSec - seg.tlInSec) / (oldOut - oldIn);
+  const at = (t: number): number => seg.tlInSec + (t - oldIn) * k;
+  /** Starts and ends inside the clip. Something that runs on past it (a watermark, a bed) is not stretched. */
+  const inside = (from: number, to: number): boolean => from >= oldIn - SAME_SEC && from < oldOut - SAME_SEC && to <= oldOut + SAME_SEC;
+  const placed = new Set<string>();
+  for (const o of edl.overlays) {
+    if (!inside(o.tlInSec, o.tlOutSec)) continue;
+    o.tlInSec = at(o.tlInSec);
+    o.tlOutSec = Math.max(o.tlInSec + MIN_CLIP_SEC, at(o.tlOutSec));
+    for (const st of o.states) st.atSec = at(st.atSec);
+    placed.add(o.id);
+  }
+  for (const c of edl.captions) {
+    if (!inside(c.tlInSec, c.tlOutSec)) continue;
+    c.tlInSec = at(c.tlInSec);
+    c.tlOutSec = at(c.tlOutSec);
+    for (const w of c.words) {
+      w.tlStartSec = at(w.tlStartSec);
+      w.tlEndSec = at(w.tlEndSec);
+    }
+    placed.add(c.id);
+  }
+  return placed;
 };
 
 const applyReorder = (edl: Edl, op: Extract<TimelineOp, { type: "reorder" }>): void => {
@@ -1353,7 +1399,11 @@ export const applyOp = (edl: Edl, opInput: unknown): Edl => {
   const next = clone(edl);
   const mainTrackBefore: Span[] = next.video.map((v) => ({ id: v.id, tlInSec: v.tlInSec, tlOutSec: v.tlOutSec }));
 
+  let placedByOp = new Set<string>();
   switch (op.type) {
+    case "setSpeed":
+      placedByOp = applySetSpeed(next, op);
+      break;
     case "voiceMove":
       applyVoiceMove(next, op);
       break;
@@ -1424,7 +1474,7 @@ export const applyOp = (edl: Edl, opInput: unknown): Edl => {
 
   // The other layers follow the main track (a no-op unless the op moved it).
   // A clip lifted onto a layer keeps the place it was dropped at.
-  if (rippleFollowers(next, mainTrackBefore, new Set(op.type === "videoToOverlay" ? [op.id] : []))) recomputeDuration(next);
+  if (rippleFollowers(next, mainTrackBefore, new Set(op.type === "videoToOverlay" ? [op.id] : placedByOp))) recomputeDuration(next);
 
   // Every op above may have added a clip with no trackId opinion of its
   // own (a fresh addOverlay/addSfx/addMusic) or left a legacy document's
