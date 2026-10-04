@@ -136,7 +136,7 @@ export const adaptCard = async ({ storage, costSink, report }: OpDeps, slug: str
   return script;
 };
 
-export type StoryboardOptions = { shots?: string[]; redo?: boolean; set?: string };
+export type StoryboardOptions = { shots?: string[]; redo?: boolean; set?: string; screenRefKey?: string };
 export type StoryboardResult = { generated: string[]; failed: string[]; footageShots: number; boardKey: string };
 
 /** One still per shot from the character sheet, the source composition and
@@ -165,7 +165,7 @@ export const storyboardCard = async ({ storage, costSink, report }: OpDeps, slug
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 
-  const plans = planFrames(script, spec, character, footageKey, opts.set);
+  const plans = planFrames(script, spec, character, footageKey, opts.set, opts.screenRefKey);
   const stillKey = (shotId: string) => `${dir}/${shotId}.png`;
   const todo: Extract<FramePlan, { mode: "generate" }>[] = [];
   for (const p of plans) {

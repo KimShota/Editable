@@ -1,3 +1,4 @@
+import path from "node:path";
 import "dotenv/config";
 import fs from "node:fs";
 import { consoleSink } from "../cost/ledger";
@@ -26,7 +27,7 @@ import { type AdaptedScript, AdaptedScriptSchema, type RecreationSpec, Recreatio
  *   npm run recreate -- show   --brand <slug> [--source <id>]
  *   npm run recreate -- adapt  --brand <slug> [--source <id> | --card <id>] [--keep 0,3] [--cta WORD] [--direction "…"]
  *   npm run recreate -- script --brand <slug> [--source <id>]     (print adapted scripts)
- *   npm run recreate -- storyboard --brand <slug> --source <id> | --card <id> [--shots s0,s3] [--redo] [--set "…"]
+ *   npm run recreate -- storyboard --brand <slug> --source <id> | --card <id> [--shots s0,s3] [--redo] [--set "…"] [--screen-ref <image>]
  */
 
 const USAGE = "usage: npm run recreate -- <ingest|spec|show|adapt|script|storyboard> --brand <slug> [options]  (see cli.ts)";
@@ -131,12 +132,19 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
     const id = option(args, "--card") ?? required(args, "--source");
     const sourceId = await sourceIdForCard(storage, brand, id);
     const only = option(args, "--shots")?.split(",");
+    // --screen-ref <image file>: the composition for screen shots without product footage, a laptop on a table.
+    const screenRefFile = option(args, "--screen-ref");
+    let screenRefKey: string | undefined;
+    if (screenRefFile) {
+      screenRefKey = `brands/${brand}/storyboards/${id}/screen-ref${path.extname(screenRefFile).toLowerCase() || ".jpg"}`;
+      await storage.putFile(screenRefKey, screenRefFile);
+    }
     const result = await storyboardCard(
       { storage, costSink: consoleSink, report: (p) => p.message && console.log(`  ${p.stage}: ${p.message}${p.total ? ` (${p.done}/${p.total})` : ""}`) },
       brand,
       id,
       sourceId,
-      { shots: only, redo: args.includes("--redo"), set: option(args, "--set") },
+      { shots: only, redo: args.includes("--redo"), set: option(args, "--set"), screenRefKey },
     );
     console.log(`${result.generated.length} still(s) generated (${result.footageShots} shots use footage frames)`);
     for (const f of result.failed) console.log(`  ✘ ${f}`);

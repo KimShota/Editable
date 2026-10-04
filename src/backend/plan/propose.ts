@@ -148,8 +148,8 @@ export const buildProposalText = (input: ProposeInput): string => {
   ].join("\n");
 };
 
+// No server-side fallback here: the API refuses one for Sonnet 5.5 (it lists no allowed fallback models).
 const DEFAULT_MODEL = "claude-sonnet-5-5";
-const FALLBACK_MODEL = "claude-opus-4-8";
 
 export type Proposer = (input: ProposeInput) => Promise<Proposal>;
 
@@ -167,8 +167,6 @@ export const claudeProposer =
       const response = await client.beta.messages.parse({
         model,
         max_tokens: 8_000,
-        betas: ["server-side-fallback-2026-06-01"],
-        fallbacks: [{ model: FALLBACK_MODEL }],
         output_config: { effort: "low", format: betaZodOutputFormat(ProposalSchema) },
         system:
           "You plan a brand's daily short-form video calendar. Each day recreates one proven viral format with the brand's recurring character, so the series builds a recognisable identity. " +

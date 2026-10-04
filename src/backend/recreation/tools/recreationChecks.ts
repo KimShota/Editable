@@ -169,6 +169,16 @@ const main = () => {
   const close = plans[2].mode === "generate" ? plans[2] : null;
   t.check("a device close-up shows the real footage on screen", close?.refs[close.refs.length - 1]?.key === "f/draft.jpg" && /screen in image 2/.test(close?.prompt ?? ""), close?.prompt);
   t.check("prompts never let the composition ref leak its person", /Do not copy its person/.test(talk?.prompt ?? ""));
+  // A screen shot with no product footage: a laptop on a table, her hand and a pen. Never a zoomed-in screen.
+  const screenScript = AdaptedScriptSchema.parse({ ...script, shots: [{ ...script.shots[1], treatment: "screen_fill", footageId: null, otherScreen: "a packed inbox", action: "Unread threads pile up." }, script.shots[0], script.shots[2]] });
+  const screenPlan = planFrames(screenScript, spec, locked, (id) => `f/${id}.jpg`, undefined, "refs/laptop.jpg")[0];
+  const screenPrompt = screenPlan.mode === "generate" ? screenPlan.prompt : "";
+  t.check("a screen shot uses her hand and the laptop-on-a-table composition, never the source keyframe", screenPlan.mode === "generate" && screenPlan.refs.map((r) => `${r.role}:${r.key}`).join() === "character:front.png,composition:refs/laptop.jpg");
+  t.check("a screen shot shows the whole laptop and only her hand", /Do not zoom into the screen/.test(screenPrompt) && /Only Rin's hand is in frame/.test(screenPrompt) && /pen/.test(screenPrompt) && /Setting:/.test(screenPrompt) && !/undefined/.test(screenPrompt), screenPrompt);
+  t.check("a screen shot says what the screen shows, on one screen", /The screen shows: a packed inbox/.test(screenPrompt) && /One single screen/.test(screenPrompt));
+  const noRef = planFrames(screenScript, spec, locked, (id) => `f/${id}.jpg`)[0];
+  t.check("without a reference a screen shot gets no composition, so the source's screen cannot leak", noRef.mode === "generate" && noRef.refs.every((r) => r.role !== "composition"));
+  t.check("a character shot still names its person", /The person is Rin/.test(talk?.prompt ?? "") && /Setting:/.test(talk?.prompt ?? ""));
   const html = boardHtml({ ...boardScript, angle: "<b>x</b>" }, (id) => (id === "s0" ? "s0.png" : null));
   t.check("the board escapes text and marks missing stills", html.includes("&lt;b&gt;x&lt;/b&gt;") && html.includes('src="s0.png"') && html.includes("no still"));
 

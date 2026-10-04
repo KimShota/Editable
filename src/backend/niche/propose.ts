@@ -86,8 +86,8 @@ export const buildNicheText = (intake: BrandIntake): string => {
   ].join("\n");
 };
 
+// No server-side fallback here: the API refuses one for Sonnet 5.5 (it lists no allowed fallback models).
 const DEFAULT_MODEL = "claude-sonnet-5-5";
-const FALLBACK_MODEL = "claude-opus-4-8";
 
 export type NicheProposer = (intake: BrandIntake) => Promise<NicheProposal>;
 export type NicheProposerFactory = (costSink: CostSink, ref: string) => NicheProposer;
@@ -103,8 +103,6 @@ export const claudeNicheProposer =
       const response = await client.beta.messages.parse({
         model,
         max_tokens: 4_000,
-        betas: ["server-side-fallback-2026-06-01"],
-        fallbacks: [{ model: FALLBACK_MODEL }],
         output_config: { effort: "low", format: betaZodOutputFormat(NicheProposalSchema) },
         system:
           "You help a brand choose what its daily short-form videos are about. Write like a creator pitching a series: concrete and specific, never generic marketing. State no product facts beyond those given, and no invented numbers or results.",

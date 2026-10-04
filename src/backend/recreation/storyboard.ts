@@ -24,6 +24,7 @@ const CHARACTER_VIEW: Partial<Record<AdaptedScript["shots"][number]["treatment"]
   character_with_device: "with_prop",
   broll: "three_quarter",
   device_closeup: "front",
+  screen_fill: "front", // only without product footage (with it, the frame is the footage): her hand on the laptop
 };
 
 const ordinal = ["image 1", "image 2", "image 3", "image 4"];
@@ -43,6 +44,22 @@ export const framePrompt = (
 ): string => {
   const at = (role: FrameRef["role"]) => ordinal[refs.findIndex((r) => r.role === role)];
   const name = character.concept.name;
+  // A screen shot with no product footage: a laptop on the table facing the camera with its screen
+  // clearly visible, and her hand guiding a pen along it. Not a zoomed-in screen: a model asked to
+  // fill the whole frame with an interface invents a poor one, and copies whatever a reference shows.
+  if (shot.treatment === "screen_fill") {
+    const composition = at("composition");
+    return [
+      "A storyboard frame for a vertical 9:16 short-form video, filmed on a smartphone, photorealistic.",
+      "A MacBook open on a table, its screen facing the camera, shown whole and straight on in a medium shot, so the screen is large and clear but the laptop, keyboard and table are all visible. Do not zoom into the screen.",
+      `Only ${name}'s hand is in frame, holding a pen and pointing at the screen: the same skin tone and nails as the woman in ${at("character")}. No face or body is visible.`,
+      ...(composition ? [`Copy only the composition of ${composition}: a laptop centred on a table, facing the camera. Do not copy its room, background, table, lighting or anything on its screen.`] : []),
+      `The screen shows: ${shot.otherScreen ?? shot.action}. One single screen, sharp, upright and horizontal: a generic interface with no real brand logos or product names, with short, large, plain-English text that stays legible. If the action describes several screens in turn, show only the first.`,
+      `Action: ${shot.action}`,
+      `Setting: ${set}.`,
+      "No captions, subtitles, text overlays or watermarks.",
+    ].join("\n");
+  }
   const lines = [
     "A storyboard frame for a vertical 9:16 short-form video, filmed on a smartphone, photorealistic.",
     shot.treatment === "device_closeup"
@@ -54,12 +71,21 @@ export const framePrompt = (
   else if (at("screen")) lines.push(`The laptop screen shows exactly the screen in ${at("screen")}, sharp and legible. Do not change or invent any of its interface.`);
   else if (shot.otherScreen) lines.push(`The laptop screen shows: ${shot.otherScreen}. Generic interface, no real brand logos.`);
   lines.push(`Action: ${shot.action}`);
-  if (shot.treatment !== "device_closeup" && shot.treatment !== "screen_fill") lines.push(`Setting: ${set}.`);
+  if (shot.treatment !== "device_closeup") lines.push(`Setting: ${set}.`);
   lines.push("No captions, subtitles, text overlays or watermarks.");
   return lines.join("\n");
 };
 
-export const planFrames = (script: AdaptedScript, spec: RecreationSpec, character: LockedCharacter, footageFrameKey: (clipId: string) => string, set = DEFAULT_SET): FramePlan[] =>
+export const planFrames = (
+  script: AdaptedScript,
+  spec: RecreationSpec,
+  character: LockedCharacter,
+  footageFrameKey: (clipId: string) => string,
+  set = DEFAULT_SET,
+  /** The composition for screen shots without footage (a laptop on a table). Never the source
+   *  keyframe: that is the source's own screen, and the model copies what it shows. */
+  screenRefKey?: string,
+): FramePlan[] =>
   script.shots.map((shot) => {
     if (shot.treatment === "screen_fill" && shot.footageId) return { shotId: shot.shotId, mode: "footage", footageId: shot.footageId };
     if (shot.treatment === "text_card") return { shotId: shot.shotId, mode: "text" };
@@ -69,7 +95,9 @@ export const planFrames = (script: AdaptedScript, spec: RecreationSpec, characte
     const characterKey = view ? (character.sheet[view] ?? character.baseImageKey) : undefined;
     if (characterKey) refs.push({ role: "character", key: characterKey });
     const keyframe = spec.shots.find((s) => s.id === shot.shotId)?.keyframes[0]?.key;
-    if (keyframe) refs.push({ role: "composition", key: keyframe });
+    if (shot.treatment === "screen_fill") {
+      if (screenRefKey) refs.push({ role: "composition", key: screenRefKey });
+    } else if (keyframe) refs.push({ role: "composition", key: keyframe });
     if (shot.footageId) refs.push({ role: "screen", key: footageFrameKey(shot.footageId) });
     return { shotId: shot.shotId, mode: "generate", refs, prompt: framePrompt(shot, character, refs, set) };
   });
