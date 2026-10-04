@@ -113,10 +113,10 @@ const wordCount = (text: string): number => text.split(/\s+/).filter(Boolean).le
  *
  * Each line is spoken in exactly one shot: the one that holds most of the
  * line's source time. (A line shared between shots would be said in each.)
- * The source's cuts and shot order are kept, but a shot is never shorter than
- * its words need at a normal pace: where the source talked faster than that,
- * the shot grows, and everything after it moves later, so the video runs
- * longer than the source rather than rushing her.
+ * The source's cuts and shot order are kept, but the video does not have to
+ * match the source's length: a shot with speech is exactly as long as its
+ * words need at a normal pace (never sped up), and a shot with none keeps the
+ * source's length.
  */
 export const buildNativeTimeline = (script: AdaptedScript, spec: RecreationSpec): Timeline => {
   const src = spec.speech.lines;
@@ -146,7 +146,7 @@ export const buildNativeTimeline = (script: AdaptedScript, spec: RecreationSpec)
     const speech = mine.map(({ l }) => (wordCount(l.text) * 60) / NATIVE_WPM);
     const needed = mine.length ? NATIVE_LEAD + speech.reduce((a, b) => a + b, 0) + NATIVE_GAP * (mine.length - 1) + NATIVE_TAIL : 0;
     const sourceLen = sourceEdges[i + 1] - sourceEdges[i];
-    const len = Math.min(MAX_NATIVE_SHOT_SEC, Math.max(sourceLen, needed));
+    const len = mine.length ? Math.min(MAX_NATIVE_SHOT_SEC, Math.max(MIN_SHOT_SEC, needed)) : sourceLen;
     let at = t + NATIVE_LEAD;
     mine.forEach(({ l }, n) => {
       const d = speech[n];

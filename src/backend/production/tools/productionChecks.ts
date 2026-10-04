@@ -149,7 +149,8 @@ const main = () => {
   // Line 0 (0-4s) sits in s0 (0-2s, 2s) and s1 (2-7s): s1 holds more of it, so s1 says it; line 1 (4-10s) is mostly s1/s2 too.
   t.check("each line is said in exactly one shot", ntl.lines.length === 2 && ntl.lines.every((l) => ntl.shots.filter((s) => l.tlInSec >= s.tlInSec && l.tlOutSec <= s.tlOutSec + 1e-9).length === 1), JSON.stringify(ntl));
   t.check("shots keep their order and run back to back", ntl.shots.map((x) => x.shotId).join() === "s0,s1,s2" && ntl.shots.every((x, i) => i === 0 || near(x.tlInSec, ntl.shots[i - 1].tlOutSec, 1e-9)) && near(ntl.shots[2].tlOutSec, ntl.durationSec, 1e-9));
-  t.check("a shot is never shorter than its source", ntl.shots.every((x, i) => x.tlOutSec - x.tlInSec >= [2, 5, 3.5][i] - 1e-9));
+  t.check("a shot with speech is as long as its words need, not as long as the source's shot", near(ntl.shots[0].tlOutSec - ntl.shots[0].tlInSec, 0.2 + (4 * 60) / 160 + 0.3, 1e-9) && near(ntl.shots[1].tlOutSec - ntl.shots[1].tlInSec, 0.2 + (3 * 60) / 160 + 0.3, 1e-9), JSON.stringify(ntl.shots));
+  t.check("a shot with no speech keeps the source's length", near(ntl.shots[2].tlOutSec - ntl.shots[2].tlInSec, 3.5, 1e-9), JSON.stringify(ntl.shots));
   const speechSec = (l: { tlInSec: number; tlOutSec: number }, words: number) => near(l.tlOutSec - l.tlInSec, (words * 60) / 160, 1e-9);
   t.check("lines run at a normal pace, not the source's", speechSec(ntl.lines[0], 4) && speechSec(ntl.lines[1], 3));
   t.check("estimated words fill their line", ntl.lines[0].words.length === 4 && ntl.lines[0].words[0].tlStartSec === ntl.lines[0].tlInSec && near(ntl.lines[0].words[3].tlEndSec, ntl.lines[0].tlOutSec, 1e-9));

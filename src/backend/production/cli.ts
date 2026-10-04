@@ -165,7 +165,7 @@ const voice = async (c: Ctx, redo: boolean, tempo: number): Promise<Timeline> =>
     // Nothing to voice: the clips speak for themselves, so the source's own times are the timeline.
     const timeline = buildNativeTimeline(c.script, c.spec);
     await writeJson(c.k.timeline, timeline);
-    console.log(`native audio: no voice step. timeline: ${timeline.durationSec.toFixed(1)}s (source ${c.spec.media.durationSec.toFixed(1)}s, shots lengthened where the words need a normal pace), ${timeline.shots.length} shots`);
+    console.log(`native audio: no voice step. timeline: ${timeline.durationSec.toFixed(1)}s (source ${c.spec.media.durationSec.toFixed(1)}s, each shot sized to its words at a normal pace), ${timeline.shots.length} shots`);
     return timeline;
   }
   if (!c.character.voice) throw new Error("the character has no voice: run npm run character -- voice-pick first");
