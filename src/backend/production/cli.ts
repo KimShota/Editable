@@ -165,7 +165,7 @@ const voice = async (c: Ctx, redo: boolean, tempo: number): Promise<Timeline> =>
     // Nothing to voice: the clips speak for themselves, so the source's own times are the timeline.
     const timeline = buildNativeTimeline(c.script, c.spec);
     await writeJson(c.k.timeline, timeline);
-    console.log(`native audio: no voice step. timeline: ${timeline.durationSec.toFixed(1)}s (the source's own), ${timeline.shots.length} shots`);
+    console.log(`native audio: no voice step. timeline: ${timeline.durationSec.toFixed(1)}s (source ${c.spec.media.durationSec.toFixed(1)}s, shots lengthened where the words need a normal pace), ${timeline.shots.length} shots`);
     return timeline;
   }
   if (!c.character.voice) throw new Error("the character has no voice: run npm run character -- voice-pick first");
@@ -223,6 +223,8 @@ type ClipRecord = ClipFile & {
   lipSyncDriftSec?: number;
   /** Native audio: the share of the line the clip says. */
   spokenShare?: number;
+  /** Native audio: how fast she speaks, in words a minute. */
+  wordsPerMin?: number;
   /** Native audio: the words the clip says, in clip seconds, for caption timing. */
   heard?: { word: string; startSec: number; endSec: number }[];
   cleanUntilSec?: number;
@@ -319,11 +321,12 @@ const errorText = (err: unknown): string => {
  * and a flag instead of failing the video; without it (the editor's
  * Regenerate, where the current take stays) it throws.
  */
-/** The words a talking shot says: the script lines spoken during it. */
+/** The words a talking shot says: the script lines placed in it. A line belongs to the shot that
+ *  holds its midpoint, so a line that touches two shots is said once, not in both. */
 const lineOf = (c: Ctx, timeline: Timeline, shotId: string): string => {
   const at = timeline.shots.find((s) => s.shotId === shotId)!;
   return timeline.lines
-    .filter((l) => l.tlOutSec > at.tlInSec && l.tlInSec < at.tlOutSec)
+    .filter((l) => (l.tlInSec + l.tlOutSec) / 2 >= at.tlInSec && (l.tlInSec + l.tlOutSec) / 2 < at.tlOutSec)
     .map((l) => c.script.lines.find((s) => s.index === l.index)?.text ?? "")
     .join(" ");
 };
@@ -398,6 +401,9 @@ const makeClip = async (
           // No speech could be read: the clip is kept as a last resort, flagged.
         }
         const q: Quality = { spokenShare: heard.length ? spokenShare(expected, heard) : 0 };
+        // A shot with no line has nothing to say or to rush; a short line is too short to time.
+        if (!expected.trim()) q.spokenShare = 1;
+        else if (heard.length >= 8) q.wordsPerMin = (heard.length / Math.max(0.5, heard[heard.length - 1].endSec - heard[0].startSec)) * 60;
         const inSec = heard.length ? Math.max(0, heard[0].startSec - 0.15) : 0;
         normalize(raw, out, 0, true);
         return { ...q, problem: clipProblem(kind, len, q), out, raw, durationSec: durationOf(out), inSec, heard };
@@ -495,6 +501,7 @@ const makeClip = async (
     const record: ClipRecord = { kind, key: await keep(best.out), durationSec: best.durationSec, inSec: best.inSec, rate: best.rate, others };
     if (best.lipSyncDriftSec !== undefined && Number.isFinite(best.lipSyncDriftSec)) record.lipSyncDriftSec = best.lipSyncDriftSec;
     if (best.spokenShare !== undefined) record.spokenShare = best.spokenShare;
+    if (best.wordsPerMin !== undefined) record.wordsPerMin = best.wordsPerMin;
     if (best.heard) record.heard = best.heard;
     if (best.cleanUntilSec !== undefined && Number.isFinite(best.cleanUntilSec)) record.cleanUntilSec = best.cleanUntilSec;
     if (best.problem) {

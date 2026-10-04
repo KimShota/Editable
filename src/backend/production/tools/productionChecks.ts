@@ -146,10 +146,21 @@ const main = () => {
   t.throws("an unknown audio mode is an error", () => parseAudioMode({ audioMode: "dub" }), /audioMode/);
   const nativeScript = { ...script, lines: [{ index: 0, text: "If I lost everything," }, { index: 1, text: "Press Option. Done." }] } as unknown as AdaptedScript;
   const ntl = buildNativeTimeline(nativeScript, spec);
-  t.check("the native timeline is the source's own", ntl.durationSec === 10.5 && ntl.shots.map((x) => `${x.tlInSec}-${x.tlOutSec}`).join() === "0-2,2-7,7-10.5", JSON.stringify(ntl.shots));
-  t.check("lines take the source's speech slots", ntl.lines.map((l) => `${l.tlInSec}-${l.tlOutSec}`).join() === "0-4,4-10");
-  t.check("estimated words fill their slot", ntl.lines[0].words.length === 4 && ntl.lines[0].words[0].tlStartSec === 0 && near(ntl.lines[0].words[3].tlEndSec, 4, 1e-9));
+  // Line 0 (0-4s) sits in s0 (0-2s, 2s) and s1 (2-7s): s1 holds more of it, so s1 says it; line 1 (4-10s) is mostly s1/s2 too.
+  t.check("each line is said in exactly one shot", ntl.lines.length === 2 && ntl.lines.every((l) => ntl.shots.filter((s) => l.tlInSec >= s.tlInSec && l.tlOutSec <= s.tlOutSec + 1e-9).length === 1), JSON.stringify(ntl));
+  t.check("shots keep their order and run back to back", ntl.shots.map((x) => x.shotId).join() === "s0,s1,s2" && ntl.shots.every((x, i) => i === 0 || near(x.tlInSec, ntl.shots[i - 1].tlOutSec, 1e-9)) && near(ntl.shots[2].tlOutSec, ntl.durationSec, 1e-9));
+  t.check("a shot is never shorter than its source", ntl.shots.every((x, i) => x.tlOutSec - x.tlInSec >= [2, 5, 3.5][i] - 1e-9));
+  const speechSec = (l: { tlInSec: number; tlOutSec: number }, words: number) => near(l.tlOutSec - l.tlInSec, (words * 60) / 160, 1e-9);
+  t.check("lines run at a normal pace, not the source's", speechSec(ntl.lines[0], 4) && speechSec(ntl.lines[1], 3));
+  t.check("estimated words fill their line", ntl.lines[0].words.length === 4 && ntl.lines[0].words[0].tlStartSec === ntl.lines[0].tlInSec && near(ntl.lines[0].words[3].tlEndSec, ntl.lines[0].tlOutSec, 1e-9));
+  // A fast source: 30 words in a 4s shot need about 11.3s at 160 wpm.
+  const fastSpec = { ...spec, media: { ...spec.media, durationSec: 5 }, speech: { ...spec.speech, lines: [{ ...spec.speech.lines[0], startSec: 0, endSec: 4 }, { ...spec.speech.lines[1], startSec: 4, endSec: 4.5 }] }, shots: [{ id: "s0", startSec: 0, endSec: 4 }, { id: "s1", startSec: 4, endSec: 4.5 }, { id: "s2", startSec: 4.5, endSec: 5 }] } as unknown as RecreationSpec;
+  const words30 = Array.from({ length: 30 }, (_, i) => `w${i}`).join(" ");
+  const fast = buildNativeTimeline({ ...nativeScript, lines: [{ index: 0, text: words30 }, { index: 1, text: "Done." }] } as unknown as AdaptedScript, fastSpec);
+  t.check("a shot grows to fit its words, and the shots after it move later", fast.shots[0].tlOutSec - fast.shots[0].tlInSec > 10 && fast.shots[1].tlInSec === fast.shots[0].tlOutSec && fast.durationSec > 5, JSON.stringify(fast.shots));
+  t.check("a shot is never asked to run past the model's limit", fast.shots.every((x) => x.tlOutSec - x.tlInSec <= 12 + 1e-9));
   t.throws("a script with another line count is an error", () => buildNativeTimeline({ ...nativeScript, lines: [nativeScript.lines[0]] } as AdaptedScript, spec), /script lines/);
+  t.check("a clip that speaks at a normal pace passes and a rushed one is retried", clipProblem("talking", 6, { wordsPerMin: 170 }) === null && /too fast/.test(clipProblem("talking", 6, { wordsPerMin: 400 }) ?? ""));
   const heard3 = [{ startSec: 0.4, endSec: 0.8 }, { startSec: 0.9, endSec: 1.3 }, { startSec: 1.4, endSec: 2 }];
   const exact = alignWords("Press Option. Done.", heard3)!;
   t.check("script words take the heard times when the counts match", exact.map((x) => x.text).join(" ") === "Press Option. Done." && exact[1].tlStartSec === 0.9);
@@ -163,6 +174,9 @@ const main = () => {
   t.check("a clip with no speech is retried", /no speech/.test(clipProblem("talking", 4, { spokenShare: 0 }) ?? ""));
   t.check("with no passing attempt, the clip that says most of the line wins", pickBest("talking", [a("x", { spokenShare: 0.2 }, "1"), a("x", { spokenShare: 0.5 }, "2")])?.id === "2");
   const prompt = nativeTalkingPrompt(script.shots[0], "Nova", "Press Option.", "Female, cool and composed.");
+  const quiet = nativeTalkingPrompt(script.shots[0], "Nova", "", "x");
+  t.check("a shot with no line does not speak", /does not speak/.test(quiet) && !/says exactly/.test(quiet));
+  t.check("the native prompt asks for a natural pace", /natural relaxed conversational pace/.test(prompt));
   t.check("the native prompt carries the words and the voice, and supplies no audio reference", prompt.includes('"Press Option."') && prompt.includes("Female, cool and composed.") && !/audio 1/.test(prompt));
   const nativeEdl = EdlSchema.parse(
     compileEdl({ jobId: "j", script, spec, timeline: ntl, clips: new Map([["s0", clip("s0", 4)], ["s1", clip("s1", 6)], ["s2", clip("s2", 5)]]), voice: new Map(), speaking: new Set(["s0"]) }),

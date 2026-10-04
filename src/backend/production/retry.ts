@@ -27,6 +27,8 @@ export const MIN_GREEN_FRACTION = 0.04;
 export const MAX_LIP_DRIFT_SEC = 0.12;
 /** Native audio: below this share of the line's words in the clip's own speech, the clip does not say the line. */
 export const MIN_SPOKEN_SHARE = 0.6;
+/** Native audio: faster than this (words a minute) she is rushing, and the clip is retried. */
+export const MAX_NATIVE_WPM = 230;
 /** A green-screen clip whose clean part has to play slower than this to fill
  *  the shot looks like slow motion: retry it. (0.97× passed review on DbAJ.) */
 export const MIN_CLEAN_SPEED = 0.8;
@@ -39,6 +41,8 @@ export type Quality = {
   lipSyncDriftSec?: number;
   /** Talking clips with native audio: the share of the line's words the clip actually says (0 when nothing was heard). */
   spokenShare?: number;
+  /** Talking clips with native audio: how fast she speaks, in words a minute (absent for a short line). */
+  wordsPerMin?: number;
 };
 
 /** Why an attempt should be retried, or null when it passes. */
@@ -51,6 +55,9 @@ export const clipProblem = (kind: ClipKind, shotSec: number, q: Quality): string
   }
   if (kind === "talking" && q.spokenShare !== undefined && q.spokenShare < MIN_SPOKEN_SHARE) {
     return q.spokenShare === 0 ? "the clip has no speech" : `the clip says only ${Math.round(q.spokenShare * 100)}% of the line`;
+  }
+  if (kind === "talking" && q.wordsPerMin !== undefined && q.wordsPerMin > MAX_NATIVE_WPM) {
+    return `she speaks too fast (${Math.round(q.wordsPerMin)} words a minute)`;
   }
   return null;
 };

@@ -97,29 +97,70 @@ export const estimateWords = (text: string, fromSec: number, toSec: number): Tim
   });
 };
 
+/** A relaxed conversational pace. Native clips are given room for their words at this speed. */
+export const NATIVE_WPM = 160;
+/** Quiet before and after a shot's speech. */
+const NATIVE_LEAD = 0.2;
+const NATIVE_TAIL = 0.3;
+const NATIVE_GAP = 0.15;
+/** The longest a generated clip can be asked to run. */
+export const MAX_NATIVE_SHOT_SEC = 12;
+
+const wordCount = (text: string): number => text.split(/\s+/).filter(Boolean).length;
+
 /**
- * The timeline when the clips speak for themselves (audio mode "native"):
- * nothing is voiced first, so the source's own times are the timeline. Every
- * cut and every line sits exactly where it does in the source, and the
- * adapted lines take the source lines' speech slots.
+ * The timeline when the clips speak for themselves (audio mode "native").
+ *
+ * Each line is spoken in exactly one shot: the one that holds most of the
+ * line's source time. (A line shared between shots would be said in each.)
+ * The source's cuts and shot order are kept, but a shot is never shorter than
+ * its words need at a normal pace: where the source talked faster than that,
+ * the shot grows, and everything after it moves later, so the video runs
+ * longer than the source rather than rushing her.
  */
 export const buildNativeTimeline = (script: AdaptedScript, spec: RecreationSpec): Timeline => {
   const src = spec.speech.lines;
   if (script.lines.length !== src.length) throw new Error(`timeline: ${script.lines.length} script lines for ${src.length} source lines`);
   if (script.shots.length !== spec.shots.length) throw new Error(`timeline: ${script.shots.length} script shots for ${spec.shots.length} source shots`);
-  const durationSec = spec.media.durationSec;
-  const lines = script.lines.map((l, i) => ({
-    index: l.index,
-    tlInSec: src[i].startSec,
-    tlOutSec: src[i].endSec,
-    words: estimateWords(l.text, src[i].startSec, src[i].endSec),
-  }));
-  const edges = [...spec.shots.map((s) => s.startSec), durationSec];
-  const shots = script.shots.map((s, i) => ({ shotId: s.shotId, tlInSec: edges[i], tlOutSec: edges[i + 1] }));
+  const sourceEdges = [...spec.shots.map((s) => s.startSec), spec.media.durationSec];
+
+  // Which shot says each line: the one holding most of its source time.
+  const shotOfLine = src.map((l) => {
+    let best = 0;
+    let most = -1;
+    for (let i = 0; i < spec.shots.length; i++) {
+      const overlap = Math.min(l.endSec, sourceEdges[i + 1]) - Math.max(l.startSec, sourceEdges[i]);
+      if (overlap > most + 1e-9) {
+        most = overlap;
+        best = i;
+      }
+    }
+    return best;
+  });
+
+  const lines: Timeline["lines"] = [];
+  const shots: Timeline["shots"] = [];
+  let t = 0;
+  script.shots.forEach((shot, i) => {
+    const mine = script.lines.map((l, k) => ({ l, k })).filter(({ k }) => shotOfLine[k] === i);
+    const speech = mine.map(({ l }) => (wordCount(l.text) * 60) / NATIVE_WPM);
+    const needed = mine.length ? NATIVE_LEAD + speech.reduce((a, b) => a + b, 0) + NATIVE_GAP * (mine.length - 1) + NATIVE_TAIL : 0;
+    const sourceLen = sourceEdges[i + 1] - sourceEdges[i];
+    const len = Math.min(MAX_NATIVE_SHOT_SEC, Math.max(sourceLen, needed));
+    let at = t + NATIVE_LEAD;
+    mine.forEach(({ l }, n) => {
+      const d = speech[n];
+      lines.push({ index: l.index, tlInSec: at, tlOutSec: at + d, words: estimateWords(l.text, at, at + d) });
+      at += d + NATIVE_GAP;
+    });
+    shots.push({ shotId: shot.shotId, tlInSec: t, tlOutSec: t + len });
+    t += len;
+  });
+  lines.sort((a, b) => a.index - b.index);
   if (shots.some((s) => s.tlOutSec - s.tlInSec < MIN_SHOT_SEC - 1e-9)) {
     throw new Error(`timeline: a source shot is shorter than ${MIN_SHOT_SEC}s`);
   }
-  return { durationSec, lines, shots };
+  return { durationSec: t, lines, shots };
 };
 
 /**

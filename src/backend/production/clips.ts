@@ -54,9 +54,12 @@ export const talkingPrompt = (shot: AdaptedScript["shots"][number], name: string
  * clip to clip.
  */
 export const nativeTalkingPrompt = (shot: AdaptedScript["shots"][number], name: string, line: string, voice: string): string =>
-  `${name}, the woman in image 1, talks straight to the phone camera and says exactly these words, clearly and naturally, with precise lip-sync: "${line}" ` +
-  `Her voice: ${voice} ${shot.action} Same face, hair, outfit and room as image 1. Handheld phone camera, natural light, like a creator filming a selfie video. ` +
-  "She says only those words. No music, no captions or on-screen text.";
+  line.trim()
+    ? `${name}, the woman in image 1, talks straight to the phone camera and says exactly these words, clearly, at a natural relaxed conversational pace, not rushed, with precise lip-sync: "${line}" ` +
+      `Her voice: ${voice} ${shot.action} Same face, hair, outfit and room as image 1. Handheld phone camera, natural light, like a creator filming a selfie video. ` +
+      "She says only those words, once. No music, no captions or on-screen text."
+    : `${name}, the woman in image 1, does not speak in this shot. ${shot.action} Same face, hair, outfit and room as image 1. Handheld phone camera, natural light, like a creator filming a selfie video. ` +
+      "No speech, no music, no captions or on-screen text.";
 
 /**
  * A green-screen shot's prompt never mentions what is on the screen: asked
