@@ -19,9 +19,10 @@ public/formats
 # (root-anchored — src/backend/authoring/ and src/app/authoring/ are source code)
 /authoring
 
-# Next.js app
+# Next.js app (.next-* covers any NEXT_DIST_DIR, e.g. .next-test; Tailwind skips
+# gitignored paths, so an unignored build dir gets its compiled chunks scanned for classes)
 .next
-.next-test
+.next-*
 next-env.d.ts
 tsconfig.tsbuildinfo
 
