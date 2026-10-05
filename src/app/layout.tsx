@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Katalab",
-  description: "Proven viral video formats, turned into fill-in-the-blank templates.",
+  description: "An AI character your brand owns, posting proven viral formats every day. Built on the method that got its founder 200K followers.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

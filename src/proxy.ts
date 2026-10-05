@@ -57,7 +57,8 @@ import { safeDecode } from "./app/lib/mediaPaths";
 const PUBLIC_EXACT = new Set(["/", "/login", "/signup", "/pricing"]);
 // /api/billing/webhook: Stripe can't send our session cookie — its own
 // signature check (see that route) is the auth boundary, not this gate.
-const PUBLIC_PREFIXES = ["/api/auth/", "/api/billing/webhook"];
+// /api/leads and /landing/: the marketing page's lead form and its reel videos, visited before any login.
+const PUBLIC_PREFIXES = ["/api/auth/", "/api/billing/webhook", "/api/leads", "/landing/"];
 
 const ADMIN_PREFIXES = ["/authoring", "/api/authoring", "/reverse-engineer", "/api/media/authoring", "/admin", "/api/admin"];
 

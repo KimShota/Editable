@@ -97,3 +97,20 @@ export const sendPlanReadyEmail = async (to: string, brandName: string, link: st
     `,
   });
 };
+
+/** Tells the founder a landing-page visitor left their website and email. */
+export const sendLeadNotificationEmail = async (
+  to: string,
+  lead: { website: string; email: string; referrer: string | null; utm: Record<string, string> | null },
+): Promise<void> => {
+  const utm = lead.utm ? Object.entries(lead.utm).map(([k, v]) => `${escapeHtml(k)}=${escapeHtml(v)}`).join(", ") : "none";
+  await deliver({
+    to,
+    subject: `New Katalab lead: ${lead.website}`,
+    html: `
+      <p><strong>${escapeHtml(lead.email)}</strong> wants a character for <a href="${escapeHtml(lead.website)}">${escapeHtml(lead.website)}</a>.</p>
+      <p>Referrer: ${escapeHtml(lead.referrer ?? "direct")}<br>UTM: ${utm}</p>
+      <p>They were told you would send their character and first 14-day plan within 3 days.</p>
+    `,
+  });
+};

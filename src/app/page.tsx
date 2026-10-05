@@ -5,85 +5,75 @@ import Link from "next/link";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Lenis from "lenis";
+import { copy } from "./landing-copy";
+import { Bridge } from "./_landing/Bridge";
+import { FiveSames } from "./_landing/FiveSames";
+import { HeroWall } from "./_landing/HeroWall";
+import { LeadForm } from "./_landing/LeadForm";
+import { ProductPeek } from "./_landing/ProductPeek";
 import "./marketing.css";
 
+/** "It got me {200K} followers." → the braced part becomes an accent chip. */
+const withChip = (line: string): React.ReactNode =>
+  line.split(/(\{[^}]+\})/).map((part, i) =>
+    part.startsWith("{") ? <span className="chip" key={i}>{part.slice(1, -1)}</span> : part,
+  );
+
 /**
- * Marketing landing page. Ported from the standalone website/ static site
- * into the product's own Next.js app so the nav's app links are same-origin,
- * client-side navigation instead of a link out to a separate deploy.
+ * Marketing landing page (plan/landing-page-founder-proof.md). The first half
+ * is the founder's story in his own voice: the hero, the five things that
+ * never changed, and the same reel on a brand-new account. From the pivot on,
+ * Katalab takes over. One light palette throughout.
  */
 export default function Home() {
   const rootRef = useRef<HTMLDivElement>(null);
-  const glowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     gsap.registerPlugin(ScrollTrigger);
 
     const ctx = gsap.context(() => {
-      const lenis = new Lenis({ lerp: 0.09, smoothWheel: true });
-      lenis.on("scroll", ScrollTrigger.update);
-      const lenisTick = (time: number) => lenis.raf(time * 1000);
-      gsap.ticker.add(lenisTick);
-      gsap.ticker.lagSmoothing(0);
-
-      // Cursor-follow ambient glow, smoothed toward the pointer each tick.
-      let cleanupGlow = () => {};
-      if (!prefersReduced && glowRef.current) {
-        const glow = glowRef.current;
-        const pos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-        const target = { x: pos.x, y: pos.y };
-        const onPointerMove = (e: PointerEvent) => {
-          target.x = e.clientX;
-          target.y = e.clientY;
-        };
-        window.addEventListener("pointermove", onPointerMove);
-        const glowTick = () => {
-          pos.x += (target.x - pos.x) * 0.08;
-          pos.y += (target.y - pos.y) * 0.08;
-          glow.style.transform = `translate3d(${pos.x}px, ${pos.y}px, 0)`;
-        };
-        gsap.ticker.add(glowTick);
-        cleanupGlow = () => {
-          window.removeEventListener("pointermove", onPointerMove);
-          gsap.ticker.remove(glowTick);
-        };
+      let lenis: Lenis | null = null;
+      let lenisTick: ((time: number) => void) | null = null;
+      if (!prefersReduced) {
+        lenis = new Lenis({ lerp: 0.09, smoothWheel: true, anchors: true });
+        lenis.on("scroll", ScrollTrigger.update);
+        lenisTick = (time: number) => lenis?.raf(time * 1000);
+        gsap.ticker.add(lenisTick);
+        gsap.ticker.lagSmoothing(0);
       }
 
-      // Hero intro: letter/line reveal, then badge/sub/actions/mockup fade up.
       if (!prefersReduced) {
-        const tl = gsap.timeline({ delay: 0.15 });
-        tl.to(".hero__title .ch", { y: 0, duration: 1.1, ease: "power4.out", stagger: 0.055 })
-          .to(".line-mask .line", { y: 0, duration: 0.9, ease: "power3.out", stagger: 0.14 }, "-=0.55")
-          .from(".nav, .hero__badge", { opacity: 0, duration: 0.8 }, "-=0.5")
-          .from(
-            ".hero__sub, .hero__actions, .mockup",
-            { opacity: 0, y: 24, duration: 0.8, stagger: 0.1 },
-            "-=0.5",
-          );
-      }
+        // Hero intro: the two headline lines rise, then everything else fades up.
+        gsap
+          .timeline({ delay: 0.1 })
+          .to(".hero__title .line", { y: 0, duration: 1, ease: "power3.out", stagger: 0.16 })
+          .from(".nav", { opacity: 0, duration: 0.6 }, "-=0.6")
+          .from(".hero__sub, .hero__stats, .hero .lead, .wallwrap", { opacity: 0, y: 24, duration: 0.8, stagger: 0.1 }, "-=0.5");
 
-      // Scroll-triggered reveals for everything below the hero.
-      if (!prefersReduced) {
         gsap.utils.toArray<HTMLElement>("[data-reveal]").forEach((el) => {
           gsap.fromTo(
             el,
-            { opacity: 0, y: 56 },
+            { opacity: 0, y: 48 },
             {
               opacity: 1,
               y: 0,
-              duration: 1.05,
+              duration: 1,
               ease: "power3.out",
-              scrollTrigger: { trigger: el, start: "top 85%", toggleActions: "play none none none" },
+              scrollTrigger: { trigger: el, start: "top 88%", toggleActions: "play none none none" },
             },
           );
         });
       }
 
+      // Videos and the pinned section change the page height after first paint.
+      const refresh = () => ScrollTrigger.refresh();
+      window.addEventListener("load", refresh);
+
       return () => {
-        cleanupGlow();
-        gsap.ticker.remove(lenisTick);
-        lenis.destroy();
+        window.removeEventListener("load", refresh);
+        if (lenisTick) gsap.ticker.remove(lenisTick);
+        lenis?.destroy();
       };
     }, rootRef);
 
@@ -92,176 +82,107 @@ export default function Home() {
 
   return (
     <div className="marketing" ref={rootRef}>
-      <div className="cursor-glow" ref={glowRef} aria-hidden="true" />
-
       <nav className="nav">
         <div className="nav__logo">KATALAB</div>
-        <div className="nav__links">
-          <a href="#how">How it works</a>
-          <a href="#formats">Formats</a>
-        </div>
         <div className="nav__actions">
-          <Link className="nav__launch" href="/login">Log in</Link>
-          <Link className="nav__cta" href="/signup">Sign up</Link>
+          <Link className="nav__login" href="/login">{copy.nav.login}</Link>
+          <a className="nav__launch" href="#get-started">{copy.nav.cta}</a>
         </div>
       </nav>
 
-      {/* 01 · HERO */}
+      {/* 01 · HERO (founder's voice) */}
       <section className="hero" id="hero">
         <div className="hero__content">
-          <p className="hero__badge">
-            <span className="hero__dot" />
-            Rolling out format by format
-          </p>
-          <h1 className="hero__title" aria-label="KATALAB">
-            {"KATALAB".split("").map((ch, i) => (
-              <span className="ch" key={i}>{ch}</span>
+          <h1 className="hero__title">
+            {copy.hero.lines.map((line) => (
+              <span className="line-mask" key={line}>
+                <span className="line">{withChip(line)}</span>
+              </span>
             ))}
           </h1>
-          <p className="hero__tag">
-            <span className="line-mask"><span className="line">You bring the <span className="chip">content.</span></span></span>
-            <span className="line-mask"><span className="line">We bring the <span className="chip">format.</span></span></span>
-          </p>
-          <p className="hero__sub">
-            Proven viral video structures, turned into fill-in-the-blank templates.
-            Film the clips we tell you to. Drop them in. That&apos;s the edit.
-          </p>
-          <div className="hero__actions">
-            <Link className="btn btn--primary" href="/signup">Sign up</Link>
-            <a className="btn btn--ghost" href="#how">See how it works ↓</a>
-          </div>
+          <p className="hero__sub">{copy.hero.sub}</p>
 
-          <div className="mockup" aria-hidden="true">
-            <div className="mockup__frame">
-              <div className="mockup__bar">
-                <span className="mockup__dot" />
-                <span className="mockup__dot" />
-                <span className="mockup__dot" />
-                <span className="mockup__barlabel">The Hot Take</span>
-              </div>
-              <div className="mockup__body">
-                <div className="mockup__slot mockup__slot--done">
-                  <span className="mockup__slotlabel">HOOK</span>
-                  <span className="mockup__slotfile">hook_take_01.mp4</span>
-                  <span className="mockup__check">✓</span>
-                </div>
-                <div className="mockup__slot mockup__slot--done">
-                  <span className="mockup__slotlabel">TAKE</span>
-                  <span className="mockup__slotfile">desk_cam.mp4</span>
-                  <span className="mockup__check">✓</span>
-                </div>
-                <div className="mockup__slot mockup__slot--active">
-                  <span className="mockup__slotlabel">PROOF</span>
-                  <span className="mockup__slotfile">Drop clip here…</span>
-                </div>
-                <div className="mockup__slot">
-                  <span className="mockup__slotlabel">CTA</span>
-                  <span className="mockup__slotfile">Drop clip here…</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ul className="hero__stats">
+            {copy.hero.stats.map((stat, i) => (
+              <li className="stat" key={stat.value}>
+                <span className="stat__value">{stat.value}</span>
+                <span className="stat__label">{stat.label}</span>
+                <span className="stat__note">{stat.note}</span>
+                {i === 0 && <span className="stat__arrow" aria-hidden="true">→</span>}
+              </li>
+            ))}
+          </ul>
+
+          <LeadForm id="get-started" />
+          <HeroWall />
         </div>
       </section>
 
-      {/* 02 · STORY */}
-      <section className="story" id="story">
-        <div className="story__inner">
-          <h2 className="story__line" data-reveal>The edit takes hours.</h2>
-          <h2 className="story__line" data-reveal>Cracking the format takes weeks.</h2>
-          <h2 className="story__line story__line--accent" data-reveal>You&apos;d rather be creating.</h2>
-          <p className="story__sub" data-reveal>
-            Grinding in the timeline. Studying other creators, reverse-engineering why their videos work.
-            None of that is the value you bring your audience. The videos that blow up follow structures
-            that already worked a thousand times — you don&apos;t need to invent one. You need to fill one in.
-          </p>
+      {/* 02 · THE FIVE SAMES (pinned) */}
+      <FiveSames />
+
+      {/* 03 · SAME REEL, NEW ACCOUNT */}
+      <Bridge />
+
+      {/* 04 · PIVOT (Katalab's voice) */}
+      <section className="pivot" id="pivot">
+        <div className="pivot__inner">
+          <p className="kicker" data-reveal>{copy.pivot.kicker}</p>
+          <h2 className="pivot__title" data-reveal>{copy.pivot.title}</h2>
         </div>
       </section>
 
-      {/* 03 · HOW IT WORKS */}
+      {/* 05 · PRODUCT PEEK */}
+      <ProductPeek />
+
+      {/* 06 · THE FIVE SAMES, DONE FOR YOU */}
+      <section className="done" id="done">
+        <div className="done__inner">
+          <h2 className="done__title" data-reveal>{copy.done.title}</h2>
+          <ul className="done__rows">
+            {copy.done.rows.map((row) => (
+              <li className="done__row" key={row.same} data-reveal>
+                <span className="done__same">{row.same}</span>
+                <span className="done__arrow" aria-hidden="true">→</span>
+                <span className="done__feature">
+                  <strong>{row.feature}</strong>
+                  <span>{row.note}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {/* 07 · HOW IT WORKS */}
       <section className="how" id="how">
         <div className="how__inner">
-          <p className="how__kicker" data-reveal>How it works</p>
-          <h2 className="how__title" data-reveal>From blank timeline to posted, in four steps.</h2>
+          <h2 className="how__title" data-reveal>{copy.how.title}</h2>
           <div className="how__grid">
-            <div className="how__step" data-reveal>
-              <span className="how__num">01</span>
-              <h3>Pick a proven format</h3>
-              <p>Structures pulled from videos that already went viral.</p>
-            </div>
-            <div className="how__step" data-reveal>
-              <span className="how__num">02</span>
-              <h3>Film the clips we tell you to</h3>
-              <p>Each slot comes with a plain-English shot direction.</p>
-            </div>
-            <div className="how__step" data-reveal>
-              <span className="how__num">03</span>
-              <h3>Drop them in</h3>
-              <p>Your clips snap into the labeled slots. That&apos;s the edit.</p>
-            </div>
-            <div className="how__step" data-reveal>
-              <span className="how__num">04</span>
-              <h3>Post</h3>
-              <p>Cut, paced, and captioned. Out the door.</p>
-            </div>
+            {copy.how.steps.map((step, i) => (
+              <div className="how__step" key={step.name} data-reveal>
+                <span className="how__num">0{i + 1}</span>
+                <h3>{step.name}</h3>
+                <p>{step.line}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* 04 · FORMATS */}
-      <section className="pitch" id="formats">
-        <div className="pitch__inner">
-          <p className="pitch__kicker" data-reveal>Formats</p>
-          <h2 className="pitch__title" data-reveal>
-            Proven structures,<br /><span className="accent">ready to fill in.</span>
-          </h2>
-          <p className="pitch__sub" data-reveal>
-            Like practicing the problems that actually show up in the interview —
-            except it&apos;s the video structures that actually show up on your feed.
-          </p>
-          <div className="pitch__formats">
-            <div className="format" data-reveal>
-              <span className="format__name">The Hot Take</span>
-              <span className="format__slots"><i>HOOK</i><i>TAKE</i><i>PROOF</i><i>CTA</i></span>
-            </div>
-            <div className="format" data-reveal>
-              <span className="format__name">The 3-Point Breakdown</span>
-              <span className="format__slots"><i>HOOK</i><i>POINT 1</i><i>POINT 2</i><i>POINT 3</i><i>CTA</i></span>
-            </div>
-            <div className="format" data-reveal>
-              <span className="format__name">The Myth Bust</span>
-              <span className="format__slots"><i>MYTH</i><i>TRUTH</i><i>WHY</i><i>CTA</i></span>
-            </div>
-            <div className="format" data-reveal>
-              <span className="format__name">The Before / After</span>
-              <span className="format__slots"><i>BEFORE</i><i>TURN</i><i>AFTER</i><i>CTA</i></span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* 05 · WHO */}
-      <section className="who" id="who">
-        <div className="who__inner">
-          <h2 className="who__line" data-reveal>
-            For creators, experts, and small businesses
-            who have something to say —
-            <span className="accent"> but don&apos;t know how to make it land.</span>
-          </h2>
-        </div>
-      </section>
-
-      {/* 06 · CTA */}
+      {/* 08 · FINAL CTA */}
       <section className="cta" id="signup">
         <div className="cta__inner">
-          <h2 className="cta__title" data-reveal>Stop staring at the timeline.</h2>
-          <p className="cta__sub" data-reveal>Rolling out format by format.</p>
-          <Link className="btn btn--primary" href="/signup" data-reveal>Sign up</Link>
+          <h2 className="cta__title" data-reveal>{copy.cta.title}</h2>
+          <p className="cta__sub" data-reveal>{copy.cta.who}</p>
+          <div data-reveal>
+            <LeadForm />
+          </div>
         </div>
         <footer className="footer">
           <span>KATALAB</span>
-          <span>You bring the content. We bring the format.</span>
-          <span>© 2026</span>
+          <span>{copy.footer.tagline}</span>
+          <span>{copy.footer.rights}</span>
         </footer>
       </section>
     </div>
