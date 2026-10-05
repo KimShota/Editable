@@ -5,7 +5,7 @@ import Link from "next/link";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Lenis from "lenis";
-import { copy } from "./landing-copy";
+import { ASSETS, copy } from "./landing-copy";
 import { Bridge } from "./_landing/Bridge";
 import { FiveSames } from "./_landing/FiveSames";
 import { HeroWall } from "./_landing/HeroWall";
@@ -16,8 +16,35 @@ import "./marketing.css";
 /** "It got me {200K} followers." → the braced part becomes an accent chip. */
 const withChip = (line: string): React.ReactNode =>
   line.split(/(\{[^}]+\})/).map((part, i) =>
-    part.startsWith("{") ? <span className="chip" key={i}>{part.slice(1, -1)}</span> : part,
+    part.startsWith("{") ? (
+      // The real text is invisible and holds the chip's final width; ::after draws the number (data-live), which counts up.
+      <span className="chip" key={i} data-count={part.slice(1, -1)} data-live={part.slice(1, -1)}>
+        {part.slice(1, -1)}
+      </span>
+    ) : (
+      part
+    ),
   );
+
+/** A screenshot of one of the founder's real profiles, with its platform and follower count underneath. */
+function ProofShot({ src, platform, note, alt, mark }: { src: string; platform: string; note: string; alt: string; mark: { left: number; top: number; width: number; height: number } }) {
+  return (
+    <figure className="proofshot">
+      <div className="proofshot__frame">
+        <img src={src} alt={alt} width={720} loading="eager" />
+        <span
+          className="proofshot__mark"
+          aria-hidden="true"
+          style={{ left: `${mark.left}%`, top: `${mark.top}%`, width: `${mark.width}%`, height: `${mark.height}%` }}
+        />
+      </div>
+      <figcaption>
+        <strong>{platform}</strong>
+        <span>{note}</span>
+      </figcaption>
+    </figure>
+  );
+}
 
 /**
  * Marketing landing page (plan/landing-page-founder-proof.md). The first half
@@ -33,6 +60,7 @@ export default function Home() {
     gsap.registerPlugin(ScrollTrigger);
 
     const ctx = gsap.context(() => {
+      const cleanups: (() => void)[] = [];
       let lenis: Lenis | null = null;
       let lenisTick: ((time: number) => void) | null = null;
       if (!prefersReduced) {
@@ -44,12 +72,90 @@ export default function Home() {
       }
 
       if (!prefersReduced) {
-        // Hero intro: the two headline lines rise, then everything else fades up.
-        gsap
-          .timeline({ delay: 0.1 })
+        // Hero intro: the headline rises; the two profile photos land one after the other
+        // (a touch of tilt and blur that settles); the follower numbers get a marker; the rest fades up.
+        const intro = gsap.timeline({ delay: 0.1 });
+        intro
           .to(".hero__title .line", { y: 0, duration: 1, ease: "power3.out", stagger: 0.16 })
           .from(".nav", { opacity: 0, duration: 0.6 }, "-=0.6")
-          .from(".hero__sub, .hero__stats, .hero .lead, .wallwrap", { opacity: 0, y: 24, duration: 0.8, stagger: 0.1 }, "-=0.5");
+          .from(".hero__sub", { opacity: 0, y: 24, duration: 0.8, ease: "power3.out" }, "-=0.5")
+          .from(
+            ".proofshot",
+            {
+              opacity: 0,
+              y: 36,
+              scale: 0.96,
+              rotate: (i: number) => (i === 0 ? -2.5 : 2.5),
+              filter: "blur(8px)",
+              duration: 0.9,
+              ease: "power3.out",
+              stagger: 0.14,
+              clearProps: "filter",
+            },
+            "-=0.45",
+          )
+          .fromTo(
+            ".proofshot__mark",
+            { clipPath: "inset(-24px 100% -24px -24px)" },
+            { clipPath: "inset(-24px -24px -24px -24px)", duration: 0.55, ease: "power3.out", stagger: 0.14 },
+            "-=0.05",
+          )
+          .fromTo(
+            ".proofshot__mark",
+            { boxShadow: "0 0 0 0 rgba(37, 99, 235, 0.5)" },
+            { boxShadow: "0 0 0 16px rgba(37, 99, 235, 0)", duration: 0.9, ease: "power2.out", stagger: 0.14 },
+            "<0.4",
+          )
+          .from(".hero .lead, .wallwrap", { opacity: 0, y: 24, duration: 0.8, ease: "power3.out", stagger: 0.1 }, "-=0.9");
+
+        // The 200K counts up from 0 while the photos land (it keeps its final width, so nothing reflows).
+        const chip = rootRef.current?.querySelector<HTMLElement>(".chip[data-count]");
+        const counted = /^(\d+)(\D*)$/.exec(chip?.dataset.count ?? "");
+        if (chip && counted) {
+          const [, target, suffix] = counted;
+          const tick = { value: 0 };
+          chip.dataset.live = `0${suffix}`;
+          intro.to(
+            tick,
+            {
+              value: Number(target),
+              duration: 1.6,
+              ease: "power3.out",
+              onUpdate: () => {
+                chip.dataset.live = `${Math.round(tick.value)}${suffix}`;
+              },
+              onComplete: () => {
+                chip.dataset.live = chip.dataset.count ?? "";
+              },
+            },
+            0.55,
+          );
+        }
+
+        // Mouse only: the photos lean a few degrees toward the cursor and ease back when it leaves.
+        if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+          rootRef.current?.querySelectorAll<HTMLElement>(".proofshot").forEach((shot) => {
+            const frame = shot.querySelector<HTMLElement>(".proofshot__frame");
+            if (!frame) return;
+            const rotateX = gsap.quickTo(frame, "rotationX", { duration: 0.6, ease: "power3.out" });
+            const rotateY = gsap.quickTo(frame, "rotationY", { duration: 0.6, ease: "power3.out" });
+            const onMove = (e: PointerEvent) => {
+              const box = frame.getBoundingClientRect();
+              rotateY(((e.clientX - box.left) / box.width - 0.5) * 7);
+              rotateX(-((e.clientY - box.top) / box.height - 0.5) * 7);
+            };
+            const onLeave = () => {
+              rotateX(0);
+              rotateY(0);
+            };
+            shot.addEventListener("pointermove", onMove);
+            shot.addEventListener("pointerleave", onLeave);
+            cleanups.push(() => {
+              shot.removeEventListener("pointermove", onMove);
+              shot.removeEventListener("pointerleave", onLeave);
+            });
+          });
+        }
 
         gsap.utils.toArray<HTMLElement>("[data-reveal]").forEach((el) => {
           gsap.fromTo(
@@ -72,6 +178,7 @@ export default function Home() {
 
       return () => {
         window.removeEventListener("load", refresh);
+        cleanups.forEach((fn) => fn());
         if (lenisTick) gsap.ticker.remove(lenisTick);
         lenis?.destroy();
       };
@@ -102,16 +209,10 @@ export default function Home() {
           </h1>
           <p className="hero__sub">{copy.hero.sub}</p>
 
-          <ul className="hero__stats">
-            {copy.hero.stats.map((stat, i) => (
-              <li className="stat" key={stat.value}>
-                <span className="stat__value">{stat.value}</span>
-                <span className="stat__label">{stat.label}</span>
-                <span className="stat__note">{stat.note}</span>
-                {i === 0 && <span className="stat__arrow" aria-hidden="true">→</span>}
-              </li>
-            ))}
-          </ul>
+          <div className="hero__proof">
+            <ProofShot src={ASSETS.proofInstagram} {...copy.hero.proofs[0]} />
+            <ProofShot src={ASSETS.proofTikTok} {...copy.hero.proofs[1]} />
+          </div>
 
           <LeadForm id="get-started" />
           <HeroWall />

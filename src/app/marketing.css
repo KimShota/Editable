@@ -90,31 +90,39 @@
   }
   .hero__title {
     margin: 0; font-family: var(--display); font-weight: 700;
-    font-size: clamp(28px, 4.4vw, 64px); line-height: 1.08; letter-spacing: -0.02em;
+    font-size: clamp(28px, 4.2vw, 56px); line-height: 1.08; letter-spacing: -0.02em;
   }
   .line-mask { display: block; overflow: hidden; padding-bottom: 0.1em; }
   .line { display: block; transform: translateY(112%); }
-  .chip { background: var(--accent); color: var(--accent-ink); border-radius: 0.16em; padding: 0 0.14em; }
+  /* The chip's real text is transparent and only sets its width; ::after draws the number, so it can count up without reflowing. */
+  .chip {
+    position: relative; display: inline-block;
+    background: var(--accent); color: transparent;
+    border-radius: 0.16em; padding: 0 0.14em; font-variant-numeric: tabular-nums;
+  }
+  .chip::after { content: attr(data-live); position: absolute; inset: 0; padding: 0 0.14em; color: var(--accent-ink); text-align: center; }
   .hero__sub {
     max-width: 640px; margin: 24px 0 0;
     color: var(--ink-dim); font-size: clamp(16px, 1.4vw, 19px); line-height: 1.6;
   }
-  .hero__stats {
-    list-style: none; margin: 36px 0 0; padding: 0;
-    display: flex; flex-wrap: wrap; justify-content: center; gap: 28px;
+  /* ---------- proof: the founder's two real profiles ---------- */
+  .hero__proof {
+    margin-top: 40px; width: 100%;
+    display: grid; grid-template-columns: repeat(2, minmax(0, 500px));
+    justify-content: center; align-items: start; gap: 28px;
   }
-  .stat {
-    position: relative; min-width: 270px;
-    display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
-    padding: 18px 28px; border-radius: 18px;
-    border: 1px solid rgba(var(--ink-rgb), 0.14); background: rgba(var(--ink-rgb), 0.04);
+  .proofshot { display: flex; flex-direction: column; align-items: center; gap: 12px; perspective: 900px; }
+  .proofshot__frame { position: relative; width: 100%; will-change: transform; }
+  /* A marker drawn around the follower number (it wipes in from the left; the intro timeline runs it). */
+  .proofshot__mark {
+    position: absolute; pointer-events: none; box-sizing: border-box;
+    border: 2px solid var(--accent); border-radius: 10px; background: rgba(var(--accent-rgb), 0.08);
+    clip-path: inset(-24px 100% -24px -24px);
   }
-  .stat__value { font-family: var(--display); font-weight: 700; font-size: 46px; line-height: 1.1; letter-spacing: -0.02em; }
-  .stat__label { font-size: 16px; font-weight: 500; }
-  .stat__note { font-size: 13px; color: var(--ink-dim); }
-  .stat__arrow {
-    position: absolute; right: -27px; top: 50%; transform: translateY(-50%);
-    width: 26px; text-align: center; font-size: 22px; color: var(--accent);
+  .proofshot img {
+    display: block; width: 100%; height: auto; background: #fff;
+    border-radius: 16px; border: 1px solid rgba(var(--ink-rgb), 0.12);
+    box-shadow: 0 18px 40px -24px rgba(var(--ink-rgb), 0.4);
   }
 
   /* ---------- phone frames and reels ---------- */
@@ -306,8 +314,7 @@
   /* ---------- phone-sized screens ---------- */
   @media (max-width: 720px) {
     .hero { padding-top: 104px; }
-    .stat { min-width: 0; width: 100%; }
-    .stat__arrow { display: none; }
+    .hero__proof { grid-template-columns: 1fr; max-width: 440px; }
     .lead__row { flex-direction: column; }
     .sames__stage { padding-top: 72px; gap: 12px; }
     .sames__body { grid-template-columns: 1fr; gap: 14px; align-content: start; }
@@ -327,6 +334,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .line { transform: none; }
+    .proofshot__mark { clip-path: none; }
     * { transition-duration: 0.01ms !important; }
   }
 }

@@ -16,6 +16,8 @@ export const ASSETS = {
   peekOriginal: "/landing/peek-original-blur.jpg",
   novaVideo: "/landing/nova-peek.mp4",
   novaPoster: "/landing/nova-peek.jpg",
+  proofInstagram: "/landing/proof-instagram.jpg",
+  proofTikTok: "/landing/proof-tiktok.jpg",
 };
 
 export type ReelInfo = { src: string; poster: string; likes: string };
@@ -35,9 +37,21 @@ export const copy = {
   hero: {
     lines: ["I posted the same video again and again.", "It got me {200K} followers."],
     sub: "I found the format that worked for me and never stopped posting it. Then I posted it once on a brand-new app account, and it gained 4,200+ followers.",
-    stats: [
-      { value: "200K+", label: "followers", note: "@shotacademic · TikTok + Instagram" },
-      { value: "4,200+", label: "followers from 1 post", note: "@brainlot.app · a brand-new app account" },
+    /** Screenshots of the two @shotacademic profiles, cropped to the header and stats (no bio emails). */
+    proofs: [
+      {
+        platform: "Instagram",
+        note: "169K followers",
+        alt: "Instagram profile of @shotacademic: 169K followers, 391 posts",
+        /** Where the follower number sits in the screenshot, in percent: the marker that draws around it. */
+        mark: { left: 48, top: 36.5, width: 19, height: 15 },
+      },
+      {
+        platform: "TikTok",
+        note: "45.6K followers",
+        alt: "TikTok profile of @shotacademic: 45.6K followers, 1.5M likes",
+        mark: { left: 41, top: 66.5, width: 18, height: 15 },
+      },
     ],
     wallHandle: "@shota_matsumotooo",
     likesSuffix: "likes",

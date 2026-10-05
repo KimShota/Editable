@@ -26,13 +26,21 @@ const leads = () => sql("select website, email, referrer, utm, completed_at from
 const hero = (page: Page) => page.locator("#get-started");
 
 test.describe("the page", () => {
-  test("tells the story: headline, both numbers, five reels, no login needed", async ({ page }, info) => {
+  test("tells the story: headline, both profile photos, five reels, no login needed", async ({ page }, info) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("I posted the same video again and again.");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("200K followers");
-    await expect(page.getByText("200K+", { exact: true })).toBeVisible();
-    await expect(page.getByText("4,200+", { exact: true }).first()).toBeVisible();
+    await expect(page.locator(".hero__sub")).toContainText("4,200+ followers");
+    // The 200K counts up from 0 and lands on its final value.
+    await expect(page.locator(".chip")).toHaveAttribute("data-live", "200K", { timeout: 8_000 });
+    await expect(page.locator(".stat")).toHaveCount(0); // the two proof photos replaced the number cards
     await expect(page.locator(".wall__item")).toHaveCount(5);
+    // The two real profile screenshots are there and actually loaded.
+    for (const alt of [/Instagram profile of @shotacademic: 169K followers/, /TikTok profile of @shotacademic: 45\.6K followers/]) {
+      const shot = page.getByRole("img", { name: alt });
+      await expect(shot).toBeVisible();
+      expect(await shot.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+    }
     await expect(page.getByRole("link", { name: "Get your character" })).toBeVisible();
     await expect(page.getByRole("link", { name: "or talk to Shota" }).first()).toHaveAttribute("href", /calendar\.app\.google/);
     await expectNoHorizontalScroll(page);
@@ -40,7 +48,7 @@ test.describe("the page", () => {
   });
 
   test("the reels and clips are public files, served without a session", async ({ request }) => {
-    for (const file of ["reel-1.mp4", "reel-5.jpg", "nova-peek.mp4", "peek-original-blur.jpg", "brainlot-avatar.png"]) {
+    for (const file of ["reel-1.mp4", "reel-5.jpg", "nova-peek.mp4", "peek-original-blur.jpg", "brainlot-avatar.png", "proof-instagram.jpg", "proof-tiktok.jpg"]) {
       const res = await request.get(`/landing/${file}`);
       expect(res.status(), file).toBe(200);
     }
@@ -85,6 +93,21 @@ test.describe("the page", () => {
     expect(playing).toBe(0);
     await expect(page.locator(".wall video").first()).toHaveAttribute("controls", "");
     await expect(page.locator(".hero__title .line").first()).toBeVisible();
+    // No motion: the number is simply 200K and the markers are simply drawn.
+    await expect(page.locator(".chip")).toHaveAttribute("data-live", "200K");
+    for (const mark of await page.locator(".proofshot__mark").all()) expect(await mark.evaluate((el) => getComputedStyle(el).clipPath)).toBe("none");
+  });
+
+  test("the photos land, the markers draw around the follower numbers, and the numbers stay readable", async ({ page }, info) => {
+    await page.goto("/");
+    await expect(page.locator(".proofshot__mark")).toHaveCount(2);
+    // Once the intro has played, the markers are fully revealed and the photos are fully opaque.
+    await page.waitForTimeout(4_000);
+    for (const mark of await page.locator(".proofshot__mark").all()) {
+      expect(await mark.evaluate((el) => getComputedStyle(el).clipPath)).toMatch(/inset\(-24px -24px -24px -24px\)|inset\(-24px\)/);
+    }
+    for (const shot of await page.locator(".proofshot").all()) expect(await shot.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+    await shot(page, info, "landing", "hero-after-intro");
   });
 });
 
