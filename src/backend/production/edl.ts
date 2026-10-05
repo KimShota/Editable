@@ -38,6 +38,9 @@ const TEXT_BOX: Record<string, { y: number; height: number }> = {
   middle: { y: 0.22, height: 0.16 },
   bottom: { y: 0.7, height: 0.16 },
 };
+/** Shots whose frame is mostly a device screen. */
+const SCREEN_TREATMENTS = new Set(["screen_fill", "device_closeup"]);
+const LABEL_PILL = "rgba(17, 17, 17, 0.82)";
 
 export const captionGroups = (lines: Timeline["lines"]): Edl["captions"] => {
   const groups: Edl["captions"] = [];
@@ -123,15 +126,24 @@ export const compileEdl = (args: {
   const overlays = script.shots.flatMap((shot) =>
     shot.textOnScreen.map((t, k) => {
       const at = shotTimes.get(shot.shotId)!;
-      const box = TEXT_BOX[t.position] ?? TEXT_BOX.top;
+      const position = TEXT_BOX[t.position] ? t.position : "top";
+      const box = TEXT_BOX[position];
+      // Texts sharing a position in one shot are stacked, not drawn over each
+      // other: away from the frame edge, so the last bottom text sits lowest.
+      const same = shot.textOnScreen.filter((o) => (TEXT_BOX[o.position] ? o.position : "top") === position);
+      const n = same.indexOf(t);
+      const y = position === "bottom" ? box.y - (same.length - 1 - n) * box.height : box.y + n * box.height;
+      // On a screen recording (white UI, small type) bare white text is lost:
+      // its labels get a dark pill. A hook over a person keeps the plain style.
+      const onScreen = SCREEN_TREATMENTS.has(shot.treatment) && t.role !== "hook_title";
       return {
         id: `text-${shot.shotId}-${k}`,
         component: "TextOverlay",
-        params: { text: t.text, variant: TEXT_VARIANT[t.role] ?? "title" },
+        params: { text: t.text, variant: TEXT_VARIANT[t.role] ?? "title", ...(onScreen ? { background: LABEL_PILL } : {}) },
         tlInSec: at.tlInSec,
         tlOutSec: at.tlOutSec,
         x: 0.05,
-        y: box.y,
+        y,
         width: 0.9,
         height: box.height,
         states: [],

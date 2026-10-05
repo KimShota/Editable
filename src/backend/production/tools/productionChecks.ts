@@ -131,6 +131,24 @@ const main = () => {
   t.check("each voice line records where it was generated, for 'back to the original position'", edl.voiceovers.every((v) => v.original?.tlInSec === v.tlInSec && v.original?.tlOutSec === v.tlOutSec && v.original?.srcOutSec === v.srcOutSec));
   t.check("on-screen text is an editable overlay, not burned in", edl.overlays.length === 1 && edl.overlays[0].component === "TextOverlay" && edl.overlays[0].params.text === "HOOK");
   t.check("captions are editable groups", edl.captions.length === 4 && edl.captionStyle?.params.position === "center");
+  const labelled = compileEdl({
+    jobId: "j",
+    script: {
+      ...script,
+      shots: script.shots.map((s) =>
+        s.shotId === "s1"
+          ? { ...s, treatment: "screen_fill" as const, textOnScreen: [{ text: "Step", role: "label" as const, position: "bottom" as const }, { text: "Comment X", role: "cta" as const, position: "bottom" as const }] }
+          : s,
+      ),
+    },
+    spec,
+    timeline: tl,
+    clips: new Map([["s0", clip("s0", 4, 0.2)], ["s1", clip("s1", 0.9)], ["s2", clip("s2", 5)]]),
+    voice: new Map([[0, { src: "jobs/j/l0.mp3", file: "/abs/l0.mp3", durationSec: 2 }], [1, { src: "jobs/j/l1.mp3", file: "/abs/l1.mp3", durationSec: 3 }]]),
+  });
+  const [step, cta] = ["text-s1-0", "text-s1-1"].map((id) => labelled.overlays.find((o) => o.id === id)!);
+  t.check("two bottom texts in one shot stack, the last lowest", cta.y === 0.7 && near(step.y + step.height, cta.y, 1e-9), `${step.y} ${cta.y}`);
+  t.check("labels on a screen recording get a dark pill; a hook over a person does not", typeof step.params.background === "string" && typeof cta.params.background === "string" && labelled.overlays.find((o) => o.id === "text-s0-0")?.params.background === undefined);
   t.check("every file is staged", Object.keys(edl.assets).length === 5 && edl.assets["jobs/j/s0.mp4"] === "/abs/s0.mp4");
   // Regenerating one shot inside an edited timeline.
   const edited = { ...edl, overlays: [{ ...edl.overlays[0], params: { text: "EDITED" } }], video: [edl.video[0], { ...edl.video[1], id: "s1a", tlOutSec: 2 }, { ...edl.video[1], id: "s1b", tlInSec: 2 }, edl.video[2]] };
