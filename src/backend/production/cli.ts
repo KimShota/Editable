@@ -612,7 +612,9 @@ const publishToEditor = (c: Ctx) => {
   fs.writeFileSync(path.join(dir, "ai-video.json"), JSON.stringify({ brand: c.brand, source: c.id, card: c.id, sourceId: c.sourceId }, null, 2));
   const sidecar = path.join(dir, "project.json");
   if (!fs.existsSync(sidecar)) {
-    const hook = c.script.lines[0].text.split(/\s+/).slice(0, 6).join(" ");
+    // A music-only video has no spoken lines: its hook is the first on-screen text.
+    const first = c.script.lines[0]?.text ?? c.script.shots.flatMap((s) => s.textOnScreen.map((t) => t.text))[0] ?? c.script.angle;
+    const hook = first.replace(/^"|"$/g, "").split(/\s+/).slice(0, 6).join(" ");
     fs.writeFileSync(sidecar, JSON.stringify({ name: `${c.brand} · ${hook}…` }, null, 2));
   }
 };
