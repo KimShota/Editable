@@ -148,6 +148,13 @@ const main = () => {
   t.check("adapt prompt marks kept lines and lists the footage", prompt.includes('[0] hook · 1 words · 0.0s · KEEP VERBATIM: "Stop"') && prompt.includes("draft (3.0s)"));
   t.check("adapt prompt names the skeleton and the keyword", prompt.includes("indices 0-3") && prompt.includes("s0, s1, s2") && prompt.includes('"SHOGUN"'));
 
+  // A music-only source (words on screen, nobody speaking): no lines to answer.
+  const silent = { ...spec, speech: { ...spec.speech, lines: [] } };
+  const silentPrompt = buildAdaptText(silent, intake, character, footage);
+  t.check("a source with no speech asks for no lines and puts the words on screen", silentPrompt.includes("return an empty lines array") && !silentPrompt.includes("indices 0--1"));
+  t.check("a source with no speech assembles with no lines", assembleScript(silent, { ...adaptation, lines: [] }, footage, { brand: "b", language: "en" }, "m").lines.length === 0);
+  t.throws("invented lines for a source with no speech are an error", () => assembleScript(silent, adaptation, footage, { brand: "b", language: "en" }, "m"), /one line per source line/);
+
   // Storyboard frames.
   const locked = {
     ...character,

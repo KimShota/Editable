@@ -62,7 +62,9 @@ export const buildAdaptText = (spec: RecreationSpec, intake: BrandIntake, charac
     `PRODUCT FOOTAGE (real screen recordings; the ONLY way the product UI may appear):\n${clips}`,
     ``,
     `Rewrite this video for ${product.name}, presented by ${c.name}, in ${intake.language}.`,
-    `- Keep the skeleton: exactly one line per source line (indices 0-${spec.speech.lines.length - 1}), same role, close to the same word count, so the rhythm survives.`,
+    spec.speech.lines.length === 0
+      ? `- The source has no spoken lines (music and on-screen text only): return an empty lines array. The words live in each shot's textOnScreen; rewrite those for ${product.name}, same roles and positions.`
+      : `- Keep the skeleton: exactly one line per source line (indices 0-${spec.speech.lines.length - 1}), same role, close to the same word count, so the rhythm survives.`,
     `- Exactly one shot entry per source shot (${spec.shots.map((s) => s.id).join(", ")}), choosing how each is made. Talking shots become ${c.name} talking; screen shots show the product on its device using footageId, or a non-product screen via otherScreen.`,
     `- Keep the source's hook mechanism, pacing and CTA mechanism; swap the promise for what ${product.name} actually does.`,
     `- Mirror each source line's sentence shape, not just its length: an imperative step ("Go to X, look at Y") stays an imperative step a viewer could follow, a number reveal stays a reveal, an aside stays an aside.`,
