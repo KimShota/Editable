@@ -11,6 +11,7 @@ import { computeStyleFeatures } from "../features";
 import { probeMedia } from "../probe";
 import { StyleFeaturesSchema, VideoAnalysisSchema } from "../schemas";
 import { ANALYZER_VERSION } from "../version";
+import { SETUP_HINT, vocalsInstalled } from "../vocals";
 import { makeBeatVideo, makeHardCutVideo, makePunchInVideo, makeShakeVideo, makeSubjectVideo } from "./fixtures";
 
 /**
@@ -165,6 +166,16 @@ const main = async () => {
       const withSpeech = await analyzeVideoFile(f("beat.mp4"), { transcript: true, captions: false });
       t.check("a click track is not reported as speech (whisper says '[Beep…]')", (withSpeech.analysis.audio.speechRatio ?? 1) < 0.15, `speechRatio=${withSpeech.analysis.audio.speechRatio}`);
       t.check("…so its clicks are found as SFX onsets", (withSpeech.analysis.audio.sfxOnsetsSec.length ?? 0) > 15, `sfx=${withSpeech.analysis.audio.sfxOnsetsSec.length}`);
+      console.log("vocal separation (skipped when Demucs isn't installed)");
+      if (vocalsInstalled()) {
+        const separated = await analyzeVideoFile(f("beat.mp4"), { transcript: true, captions: false, vocals: true });
+        t.check("the transcript is taken from the vocals with the music removed", separated.analysis.transcript?.vocalsSeparated === true && !separated.analysis.warnings.some((w) => /vocal separation/.test(w)), JSON.stringify(separated.analysis.warnings));
+        t.check("a track with no voice has no words once the music is out", (separated.analysis.transcript?.words.length ?? 1) === 0, JSON.stringify(separated.analysis.transcript?.words.slice(0, 5)));
+      } else {
+        console.log(`  – skipped (${SETUP_HINT})`);
+      }
+      const full = await analyzeVideoFile(f("beat.mp4"), { transcript: true, captions: false, vocals: false });
+      t.check("with separation off, the full mix is transcribed and says so", full.analysis.transcript?.vocalsSeparated === false && !full.analysis.warnings.some((w) => /vocal separation/.test(w)));
     } else {
       console.log("  – skipped (no models/ggml-medium.bin)");
     }

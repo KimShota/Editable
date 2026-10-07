@@ -15,6 +15,14 @@ export const ShotKindSchema = z
       "broll: atmosphere or illustration with no one speaking to camera. text_only: a text card or graphic with no live footage.",
   );
 
+export const DeliverySchema = z
+  .enum(["on_camera", "voiceover", "lyrics"])
+  .describe(
+    "How the words reach the viewer. on_camera: a person visible in the shots it plays over is saying it (a person lip-syncing a sound counts). " +
+      "voiceover: said by someone who is not on screen, over other footage. " +
+      "lyrics: the words of a song or sound playing under the video, which nobody in it is saying.",
+  );
+
 export const FramingSchema = z.enum(["extreme_close", "close", "medium", "wide", "over_shoulder", "screen_fill"]);
 export const CameraSchema = z.enum(["static", "handheld", "push_in", "pull_out", "pan", "tilt", "selfie_handheld"]);
 
@@ -61,6 +69,7 @@ export const DecompositionSchema = z.object({
         fromWord: z.number().int().describe("Index of the first word of the line in the numbered transcript."),
         toWord: z.number().int().describe("Index of the last word (inclusive)."),
         role: z.enum(["hook", "setup", "problem", "demo", "proof", "payoff", "cta"]),
+        delivery: DeliverySchema,
       }),
     )
     .describe("The transcript split into spoken lines (a sentence or a breath each), contiguous and in order, covering every word."),
@@ -101,10 +110,15 @@ export const RecreationSpecSchema = z.object({
         startSec: z.number(),
         endSec: z.number(),
         role: DecompositionSchema.shape.speechLines.element.shape.role,
+        /** Only on_camera or voiceover: lyrics are not lines to adapt, they are listed in `lyrics`.
+         *  A spec made before this field existed has none, and its lines were all treated as on camera. */
+        delivery: DeliverySchema.default("on_camera"),
         shotIds: z.array(z.string()),
         wordCount: z.number().int(),
       }),
     ),
+    /** Words of a song under the video that nobody says: kept for the record, never adapted or voiced. */
+    lyrics: z.array(z.object({ text: z.string(), startSec: z.number(), endSec: z.number() })).default([]),
     wordsPerMin: z.number().nullable(),
   }),
   captionStyle: DecompositionSchema.shape.captionStyle,

@@ -47,7 +47,7 @@ import { planShotChange } from "./shotChange";
 import { addTake, takesForClip } from "./takes";
 import { estimateUsd, generate, seedanceUsd, uploadFile, waitFor, download } from "./higgsfield";
 import { clipProblem, GREEN_STILL_ATTEMPTS, MIN_GREEN_FRACTION, pickBest, type Quality, RETRY_CAP, usable, worstCaseUsd } from "./retry";
-import { alignWords, buildNativeTimeline, buildTimeline, speakingShots, type Timeline } from "./timeline";
+import { alignWords, buildNativeTimeline, buildTimeline, onCameraLines, speakingShots, type Timeline } from "./timeline";
 
 /**
  * An adapted script → a finished, editable video (M1 day 5-6), run by hand
@@ -545,7 +545,7 @@ const clips = async (c: Ctx, args: string[]) => {
   const records: Record<string, ClipRecord> = (await storage.exists(c.k.clips)) ? ((await readJson(c.k.clips, "clips")) as Record<string, ClipRecord>) : {};
 
   const todo: { shot: Ctx["script"]["shots"][number]; kind: ClipKind }[] = [];
-  const speaks = speakingShots(timeline);
+  const speaks = speakingShots(timeline, onCameraLines(c.spec));
   for (const shot of c.script.shots) {
     if (only && !only.includes(shot.shotId)) continue;
     if (!redo && records[shot.shotId] && (await storage.exists(records[shot.shotId].key))) continue;
@@ -630,7 +630,7 @@ const renderVideo = async (c: Ctx, args: string[]) => {
   // Native audio: the shots that speak play their own clip audio, and there is no voice track.
   let speaking: Set<string> | undefined;
   if (c.audioMode === "native") {
-    const speaks = speakingShots(timeline);
+    const speaks = speakingShots(timeline, onCameraLines(c.spec));
     speaking = new Set(c.script.shots.filter((s) => planClip(s, speaks.has(s.shotId)) === "talking" && !records[s.shotId]?.flag?.includes("instead")).map((s) => s.shotId));
     // Captions follow what each clip said: the script's words at the heard times.
     for (const l of timeline.lines) {
@@ -719,7 +719,7 @@ const clipContext = async (args: string[]) => {
   if (!shot) throw new Error("this clip was added by hand, not generated: there is nothing to regenerate");
   if (!isRegenerable(shot)) throw new Error("this shot is the product's own footage, not AI: regenerating would give the same clip");
   const timeline = (await readJson(c.k.timeline, "timeline")) as Timeline;
-  const kind = planClip(shot, speakingShots(timeline).has(shot.shotId));
+  const kind = planClip(shot, speakingShots(timeline, onCameraLines(c.spec)).has(shot.shotId));
   // The take on the timeline: a change builds on its prompt and still.
   const takes = takesForClip(jobId, clipId);
   const take = takes.takes.find((t) => t.id === takes.currentTakeId);

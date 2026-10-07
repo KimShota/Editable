@@ -11,6 +11,7 @@ import { probeMedia } from "./probe";
 import { type StyleFeatures, type VideoAnalysis, VideoAnalysisSchema } from "./schemas";
 import type { SemanticProvider } from "./semantic";
 import { ANALYZER_VERSION } from "./version";
+import { SETUP_HINT, separateVocals, vocalsInstalled } from "./vocals";
 import { measureVisual } from "./visual";
 
 /**
@@ -32,6 +33,9 @@ export type AnalyzeOptions = {
   contentHash?: string | null;
   /** "auto": transcribe if the whisper model is installed. false: skip. */
   transcript?: "auto" | boolean;
+  /** Take the music out before transcribing (Demucs), so music is not heard as speech.
+   *  "auto": do it if Demucs is installed. true: same, but warn loudly if it is missing. false: transcribe the full mix. */
+  vocals?: "auto" | boolean;
   /** "auto": run OCR if tesseract is installed. false: skip. */
   captions?: "auto" | boolean;
   /** Omit to skip the semantic pass (it costs an API call). */
@@ -71,9 +75,24 @@ export const analyzeVideoFile = async (filePath: string, opts: AnalyzeOptions = 
     if (fs.existsSync(MODEL_FILE)) {
       const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "editable-analysis-"));
       try {
-        const words = dropNonSpeechTags(transcribeFile(filePath, workDir));
+        // The vocals alone, when Demucs can give them: otherwise the full mix, music included.
+        let from = filePath;
+        let vocalsSeparated = false;
+        if (opts.vocals !== false) {
+          if (vocalsInstalled()) {
+            try {
+              from = separateVocals(filePath, workDir);
+              vocalsSeparated = true;
+            } catch (e) {
+              warnings.push(`vocal separation failed, transcribed the full mix instead: ${errMessage(e)}`);
+            }
+          } else {
+            warnings.push(`vocal separation (Demucs) is not installed, so music can be heard as speech: ${SETUP_HINT}`);
+          }
+        }
+        const words = dropNonSpeechTags(transcribeFile(from, workDir));
         const speechSec = speechIntervalsFromWords(words).reduce((s, [a, b]) => s + (b - a), 0);
-        transcript = { words, wordsPerMin: wordsPerMin(words, speechSec) };
+        transcript = { words, wordsPerMin: wordsPerMin(words, speechSec), vocalsSeparated };
       } catch (e) {
         warnings.push(`transcript failed: ${errMessage(e)}`);
       } finally {

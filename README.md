@@ -76,6 +76,11 @@ brew install ffmpeg whisper-cpp
 curl -L -o models/ggml-medium.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
 
+# Vocal separation (Demucs) — optional but recommended: the analyzer takes the
+# music out before transcribing, so a music-only reel is not read as speech
+# and no talking clip is paid for. Installs into ~/.cache/editable (1-2 GB).
+brew install uv && npm run setup:vocals
+
 # RVM (video-native matting for backgroundReplace formats) — optional:
 # falls back to Apple Vision + temporal median if the model file is
 # missing, so this step can be skipped, at a real cost to hair-edge

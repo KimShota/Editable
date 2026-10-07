@@ -48,7 +48,11 @@ export const buildDecompositionText = (analysis: VideoAnalysis): string => {
     `\nNUMBERED TRANSCRIPT (${words.length} words):\n${numbered || "(no speech)"}`,
     `\nDecompose this video so it can be recreated shot by shot with a different presenter and product. ` +
       `Give exactly one shots[] entry per measured shot (shotIndex 0-${analysis.shots.length - 1}). ` +
-      `Split the transcript into spoken lines by word index, covering every word in order.`,
+      `Split the transcript into spoken lines by word index, covering every word in order. ` +
+      `The transcript was taken from the vocal track with the music removed, so the words of a SONG are in it too. ` +
+      `Say how each line is delivered: on_camera (a visible person says it, or lip-syncs it), voiceover (someone off screen over other footage), ` +
+      `or lyrics (sung words of a song playing under the video that nobody in it says). Judge from the words (sung lyrics rhyme, repeat and do not address the viewer), ` +
+      `the frames (is a mouth visibly speaking?) and the speech and music ratios. When nobody in the video is speaking, mark every line lyrics.`,
   ].join("\n");
 };
 
@@ -117,11 +121,11 @@ export const assembleSpec = (analysis: VideoAnalysis, d: Decomposition, keyframe
   });
 
   const words = analysis.transcript?.words ?? [];
-  const starts = [...new Map(d.speechLines.filter((l) => l.fromWord >= 0 && l.fromWord < words.length).map((l) => [l.fromWord, l.role])).entries()].sort(
-    (a, b) => a[0] - b[0],
-  );
-  if (words.length > 0 && (starts.length === 0 || starts[0][0] !== 0)) starts.unshift([0, starts[0]?.[1] ?? "hook"]);
-  const lines = starts.map(([from, role], i) => {
+  const starts = [
+    ...new Map(d.speechLines.filter((l) => l.fromWord >= 0 && l.fromWord < words.length).map((l) => [l.fromWord, { role: l.role, delivery: l.delivery }])).entries(),
+  ].sort((a, b) => a[0] - b[0]);
+  if (words.length > 0 && (starts.length === 0 || starts[0][0] !== 0)) starts.unshift([0, starts[0]?.[1] ?? { role: "hook" as const, delivery: "on_camera" as const }]);
+  const all = starts.map(([from, { role, delivery }], i) => {
     const to = (starts[i + 1]?.[0] ?? words.length) - 1;
     const ws = words.slice(from, to + 1);
     const startSec = ws[0].startSec;
@@ -131,10 +135,14 @@ export const assembleSpec = (analysis: VideoAnalysis, d: Decomposition, keyframe
       startSec,
       endSec,
       role,
+      delivery,
       shotIds: shots.filter((s) => s.startSec < endSec && s.endSec > startSec).map((s) => s.id),
       wordCount: ws.length,
     };
   });
+  // Sung words are not lines of the script: nobody says them, so there is nothing to adapt or voice.
+  const lines = all.flatMap((l) => (l.delivery === "lyrics" ? [] : [{ ...l, delivery: l.delivery }]));
+  const lyrics = all.filter((l) => l.delivery === "lyrics").map((l) => ({ text: l.text, startSec: l.startSec, endSec: l.endSec }));
 
   return {
     sourceId: meta.sourceId,
@@ -149,7 +157,7 @@ export const assembleSpec = (analysis: VideoAnalysis, d: Decomposition, keyframe
     soundDependent: d.soundDependent,
     structure: d.structure.map((b) => ({ ...b, shotIndices: b.shotIndices.filter((i) => i >= 0 && i < n) })),
     shots,
-    speech: { lines, wordsPerMin: analysis.transcript?.wordsPerMin ?? null },
+    speech: { lines, lyrics, wordsPerMin: analysis.transcript?.wordsPerMin ?? null },
     captionStyle: d.captionStyle,
     audioBed: {
       musicRatio: analysis.audio.musicRatio,

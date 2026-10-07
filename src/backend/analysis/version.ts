@@ -7,4 +7,4 @@
  * otherwise be served forever as if it were current. Bumping adds new rows
  * alongside the old ones; nothing is deleted.
  */
-export const ANALYZER_VERSION = "2026-09-29.1";
+export const ANALYZER_VERSION = "2026-10-07.1";

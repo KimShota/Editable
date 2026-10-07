@@ -102,6 +102,8 @@ export const VideoAnalysisSchema = z.object({
     .object({
       words: z.array(WordSchema),
       wordsPerMin: z.number().nullable(),
+      /** Transcribed from the vocals alone (music removed by Demucs), not the full mix. Absent on analyses made before. */
+      vocalsSeparated: z.boolean().optional(),
     })
     .nullable(),
   captions: z.object({

@@ -56,10 +56,10 @@ const decomposition: Decomposition = {
   // Out of order, a duplicate start, and the first line not starting at 0:
   // assembly must still tile the transcript.
   speechLines: [
-    { fromWord: 5, toWord: 6, role: "cta" },
-    { fromWord: 2, toWord: 4, role: "demo" },
-    { fromWord: 2, toWord: 3, role: "demo" },
-    { fromWord: 1, toWord: 1, role: "hook" },
+    { fromWord: 5, toWord: 6, role: "cta", delivery: "on_camera" },
+    { fromWord: 2, toWord: 4, role: "demo", delivery: "on_camera" },
+    { fromWord: 2, toWord: 3, role: "demo", delivery: "voiceover" },
+    { fromWord: 1, toWord: 1, role: "hook", delivery: "on_camera" },
   ],
   captionStyle: { present: true, mode: "phrase", position: "middle", look: "white" },
 };
@@ -96,6 +96,22 @@ const main = () => {
   t.check("lines know which shots they play over", spec.speech.lines[2].shotIds.join() === "s1" && spec.speech.lines[3].shotIds.join() === "s2");
   t.check("out-of-range beat shots are dropped", spec.structure[1].shotIndices.join() === "1");
   t.check("the audio bed is measured", spec.audioBed.musicRatio === 0.05 && spec.audioBed.bpm === null);
+
+  t.check("each line carries how it is delivered", spec.speech.lines.map((l) => l.delivery).join() === "on_camera,on_camera,voiceover,on_camera" && spec.speech.lyrics.length === 0);
+
+  // Sung words are lyrics: nobody says them, so they are not lines of the script.
+  const sung = RecreationSpecSchema.parse(
+    assembleSpec(analysis, { ...decomposition, speechLines: decomposition.speechLines.map((l) => (l.fromWord === 2 ? { ...l, delivery: "lyrics" as const } : l)) }, keyframes, meta, "m"),
+  );
+  t.check("lyrics are taken out of the lines", sung.speech.lines.map((l) => l.text).join(" | ") === "Stop | scrolling. | Comment now.", sung.speech.lines.map((l) => l.text).join(" | "));
+  t.check("…and listed with their measured times", sung.speech.lyrics.length === 1 && sung.speech.lyrics[0].text === "Open the app." && sung.speech.lyrics[0].startSec === 3.2);
+  const allSung = RecreationSpecSchema.parse(assembleSpec(analysis, { ...decomposition, speechLines: decomposition.speechLines.map((l) => ({ ...l, delivery: "lyrics" as const })) }, keyframes, meta, "m"));
+  t.check("a video where nobody speaks has no lines at all, so it takes the music-only path", allSung.speech.lines.length === 0 && allSung.speech.lyrics.length === 4);
+  const { delivery: _old, ...oldLine } = spec.speech.lines[0];
+  void _old;
+  const oldSpec = RecreationSpecSchema.parse({ ...spec, speech: { lines: [oldLine], wordsPerMin: null } });
+  t.check("a spec made before delivery existed counts its lines as on camera", oldSpec.speech.lines[0].delivery === "on_camera" && oldSpec.speech.lyrics.length === 0);
+  t.check("the prompt asks how each line is delivered and warns that song words are in the transcript", text.includes("lyrics") && text.includes("voiceover") && text.includes("music removed"));
 
   t.throws("a missing shot label is an error, not a guess", () => assembleSpec(analysis, { ...decomposition, shots: decomposition.shots.slice(1) }, keyframes, meta, "m"), /one label per shot/);
 

@@ -178,16 +178,24 @@ export const alignWords = (text: string, heard: { startSec: number; endSec: numb
   return estimateWords(text, heard[0].startSec, heard[heard.length - 1].endSec);
 };
 
-/** The shots a line is spoken in: a line overlapping a shot by more than this counts. */
+/** A line overlapping a shot by more than this counts as spoken in it. */
 const SPEAKING_OVERLAP_SEC = 0.1;
 
+/** The indices of the lines a visible person says. Voiceover is said by someone off screen, so it
+ *  never makes a person on screen talk. A spec made before `delivery` existed counts every line. */
+export const onCameraLines = (spec: RecreationSpec): Set<number> =>
+  new Set(spec.speech.lines.flatMap((l, i) => ((l.delivery ?? "on_camera") === "on_camera" ? [i] : [])));
+
 /**
- * The shots in which someone speaks, from where the timeline puts each line.
- * A music-only video has none; in native audio each line sits in one shot.
+ * The shots in which a visible person speaks, from where the timeline puts each line:
+ * the shots that get a paid talking clip. A music-only video has none, and neither does
+ * a shot over a voiceover. Without `onCamera`, every line counts.
  */
-export const speakingShots = (timeline: Timeline): Set<string> =>
+export const speakingShots = (timeline: Timeline, onCamera?: ReadonlySet<number>): Set<string> =>
   new Set(
     timeline.shots
-      .filter((s) => timeline.lines.some((l) => Math.min(l.tlOutSec, s.tlOutSec) - Math.max(l.tlInSec, s.tlInSec) > SPEAKING_OVERLAP_SEC))
+      .filter((s) =>
+        timeline.lines.some((l) => (!onCamera || onCamera.has(l.index)) && Math.min(l.tlOutSec, s.tlOutSec) - Math.max(l.tlInSec, s.tlInSec) > SPEAKING_OVERLAP_SEC),
+      )
       .map((s) => s.shotId),
   );

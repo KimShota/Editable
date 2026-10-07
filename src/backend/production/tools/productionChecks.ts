@@ -10,7 +10,7 @@ import { animatePrompt, nativeTalkingPrompt, planClip, requestSeconds, spokenSha
 import { captionGroups, compileEdl, type MadeClip, playRawClipAudio, swapShotClip } from "../edl";
 import { seedanceUsd } from "../higgsfield";
 import { clipProblem, pickBest, RETRY_CAP, usable, worstCaseUsd } from "../retry";
-import { alignWords, buildNativeTimeline, buildTimeline, MIN_SHOT_SEC, speakingShots } from "../timeline";
+import { alignWords, buildNativeTimeline, buildTimeline, MIN_SHOT_SEC, onCameraLines, speakingShots } from "../timeline";
 
 /**
  * Production planning with no network, no provider and no ffmpeg: the
@@ -82,6 +82,11 @@ const main = () => {
   t.check("product footage filling the frame is not generated", planClip(script.shots[1], true) === "footage");
   t.check("a device showing the product plays the footage itself, never the green screen", planClip(script.shots[2], true) === "footage");
   t.check("a device with a non-product screen is just animated", planClip({ ...script.shots[2], footageId: null }, true) === "animate");
+  const withDelivery = (d: string[]) => ({ ...spec, speech: { ...spec.speech, lines: spec.speech.lines.map((l, i) => ({ ...l, delivery: d[i] })) } }) as unknown as RecreationSpec;
+  t.check("only lines a visible person says count as on camera", [...onCameraLines(withDelivery(["on_camera", "voiceover"]))].join() === "0");
+  t.check("a spec without delivery counts every line", [...onCameraLines(spec)].join() === "0,1");
+  t.check("a shot under a voiceover gets no talking clip", [...speakingShots(tl, onCameraLines(withDelivery(["voiceover", "voiceover"])))].length === 0);
+  t.check("only the shots a visible person speaks in are talking shots", [...speakingShots(tl, onCameraLines(withDelivery(["on_camera", "voiceover"])))].join() === "s0,s1", JSON.stringify(tl.shots));
   t.check("every shot a voiced line overlaps speaks", [...speakingShots(tl)].join() === "s0,s1,s2");
   t.check("requests respect each model's minimum length", requestSeconds("talking", 1.2) === 4 && requestSeconds("animate", 1.2) === 3 && requestSeconds("animate", 4.9) === 6);
   t.check("seedance price follows its token formula (720p 9:16, 8s)", near(seedanceUsd({ resolution: "720p", aspect_ratio: "9:16", duration: 8 }), 3.6979, 1e-3));

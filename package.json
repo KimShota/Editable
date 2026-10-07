@@ -52,6 +52,7 @@
     "reels:sync": "tsx src/backend/tools/reelsSync.ts",
     "db:migrate": "tsx src/backend/tools/migrate.ts",
     "analyze": "tsx src/backend/analysis/cli.ts",
+    "setup:vocals": "sh src/backend/analysis/tools/setupVocals.sh",
     "intake": "tsx src/backend/brand/intake/cli.ts",
     "character": "tsx src/backend/character/cli.ts",
     "recreate": "tsx src/backend/recreation/cli.ts",
