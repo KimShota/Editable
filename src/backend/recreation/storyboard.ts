@@ -57,7 +57,7 @@ export const framePrompt = (
       `The screen shows: ${shot.otherScreen ?? shot.action}. One single screen, sharp, upright and horizontal: a generic interface with no real brand logos or product names, with short, large, plain-English text that stays legible. If the action describes several screens in turn, show only the first.`,
       `Action: ${shot.action}`,
       `Setting: ${set}.`,
-      "No captions, subtitles, text overlays or watermarks.",
+      "No captions, subtitles, text overlays or watermarks. No logos, app icons or badges anywhere in the frame, even if the composition reference shows some.",
     ].join("\n");
   }
   const lines = [
@@ -72,7 +72,7 @@ export const framePrompt = (
   else if (shot.otherScreen) lines.push(`The laptop screen shows: ${shot.otherScreen}. Generic interface, no real brand logos.`);
   lines.push(`Action: ${shot.action}`);
   if (shot.treatment !== "device_closeup") lines.push(`Setting: ${set}.`);
-  lines.push("No captions, subtitles, text overlays or watermarks.");
+  lines.push("No captions, subtitles, text overlays or watermarks. No logos, app icons or badges anywhere in the frame, even if the composition reference shows some.");
   return lines.join("\n");
 };
 
@@ -87,7 +87,8 @@ export const planFrames = (
   screenRefKey?: string,
 ): FramePlan[] =>
   script.shots.map((shot) => {
-    if (shot.treatment === "screen_fill" && shot.footageId) return { shotId: shot.shotId, mode: "footage", footageId: shot.footageId };
+    // Product footage is shown as is (production plays it full frame), so its still is a footage frame, never generated.
+    if (shot.footageId) return { shotId: shot.shotId, mode: "footage", footageId: shot.footageId };
     if (shot.treatment === "text_card") return { shotId: shot.shotId, mode: "text" };
 
     const refs: FrameRef[] = [];

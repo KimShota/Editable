@@ -5,7 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { productionKeys } from "../brand/keys";
 import { LockedCharacterSchema } from "../character/schemas";
-import { consoleSink, type CostSink, googleImageCostEntry } from "../cost/ledger";
+import { fileCostSink } from "../cost/fileSink";
+import { type CostSink, googleImageCostEntry } from "../cost/ledger";
+import { costReport, parseCostLog } from "../cost/report";
 import { GEMINI_IMAGE_MODEL, generateImage } from "../pipeline/generation/geminiImage";
 import { artifactsDir, repoRoot } from "../pipeline/paths";
 import { render, stageAssets } from "../pipeline/render";
@@ -45,7 +47,7 @@ import { planShotChange } from "./shotChange";
 import { addTake, takesForClip } from "./takes";
 import { estimateUsd, generate, seedanceUsd, uploadFile, waitFor, download } from "./higgsfield";
 import { clipProblem, GREEN_STILL_ATTEMPTS, MIN_GREEN_FRACTION, pickBest, type Quality, RETRY_CAP, usable, worstCaseUsd } from "./retry";
-import { alignWords, buildNativeTimeline, buildTimeline, type Timeline } from "./timeline";
+import { alignWords, buildNativeTimeline, buildTimeline, speakingShots, type Timeline } from "./timeline";
 
 /**
  * An adapted script → a finished, editable video (M1 day 5-6), run by hand
@@ -69,6 +71,8 @@ import { alignWords, buildNativeTimeline, buildTimeline, type Timeline } from ".
  *   npm run produce -- shot-chat --job <jobId> --clip <clipId> --message "…"
  *       what the user wants changed in a shot → Claude's plan for a new take, priced, not generated
  *   npm run produce -- all    --brand <slug> --source <id> [--dry]
+ *   npm run produce -- costs  --brand <slug> --card <id> | --source <id>
+ *       every paid call so far for the video, in order, with totals by step and provider
  *
  *   voice/line-<i>.tts.mp3/.json each line as ElevenLabs spoke it, with word timings
  *   voice/line-<i>.mp3 + .json   the same at the video's tempo (what plays)
@@ -82,7 +86,7 @@ import { alignWords, buildNativeTimeline, buildTimeline, type Timeline } from ".
  *   edl.json, final.mp4          the editable timeline and its render
  */
 
-const USAGE = "usage: npm run produce -- <voice|clips|render|all> --brand <slug> --source <id> [options], or regen-clip|shot-chat --job <id> --clip <id>  (see cli.ts)";
+const USAGE = "usage: npm run produce -- <voice|clips|render|all|costs> --brand <slug> --source <id> [options], or regen-clip|shot-chat --job <id> --clip <id>  (see cli.ts)";
 
 const option = (args: string[], name: string): string | undefined => {
   const i = args.indexOf(name);
@@ -104,20 +108,7 @@ const writeJson = (key: string, value: unknown) => storage.putBuffer(key, Buffer
 
 /** Every paid call is printed and appended to the video's costs.jsonl, so the
  *  cost per video (retries and re-takes included) is read, not rebuilt. */
-const costLog = (key: string): CostSink => {
-  let queue = Promise.resolve();
-  return (entry) => {
-    void consoleSink(entry);
-    // One append at a time: shots are made in parallel.
-    queue = queue
-      .then(async () => {
-        const before = (await storage.exists(key)) ? fs.readFileSync(await storage.localPath(key), "utf8") : "";
-        await storage.putBuffer(key, Buffer.from(`${before}${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`));
-      })
-      .catch((err) => console.warn(`cost log: ${err instanceof Error ? err.message : err}`));
-    return queue;
-  };
-};
+const costLog = (key: string): CostSink => fileCostSink(storage, key);
 
 let lastStamp = 0;
 /** Date.now(), but never the same twice: every take is its own file. */
@@ -138,7 +129,10 @@ const context = async (args: string[]) => {
   const footage = ProductFootageSchema.parse(await readJson(`brands/${brand}/product/footage.json`, "product footage"));
   // --audio native|revoice overrides the brand's setting for one run.
   const audioOverride = option(args, "--audio");
-  const audioMode: AudioMode = audioOverride ? parseAudioMode({ audioMode: audioOverride }) : await readAudioMode(storage, brand);
+  // A script with no lines (music under on-screen words) has nothing to voice, so it always
+  // takes the native timeline, which follows the source's own cuts; revoice would need a first line.
+  const audioMode: AudioMode =
+    script.lines.length === 0 ? "native" : audioOverride ? parseAudioMode({ audioMode: audioOverride }) : await readAudioMode(storage, brand);
   return { brand, id, sourceId, k, script, spec, character, footage, audioMode, cost: costLog(k.costs), jobId: `${brand}-${id}`, ref: (s: string) => `${brand}/${id}/${s}` };
 };
 type Ctx = Awaited<ReturnType<typeof context>>;
@@ -551,10 +545,11 @@ const clips = async (c: Ctx, args: string[]) => {
   const records: Record<string, ClipRecord> = (await storage.exists(c.k.clips)) ? ((await readJson(c.k.clips, "clips")) as Record<string, ClipRecord>) : {};
 
   const todo: { shot: Ctx["script"]["shots"][number]; kind: ClipKind }[] = [];
+  const speaks = speakingShots(timeline);
   for (const shot of c.script.shots) {
     if (only && !only.includes(shot.shotId)) continue;
     if (!redo && records[shot.shotId] && (await storage.exists(records[shot.shotId].key))) continue;
-    const kind = planClip(shot);
+    const kind = planClip(shot, speaks.has(shot.shotId));
     if ((kind === "talking" || kind === "animate") && !(await storage.exists(c.k.still(shot.shotId)))) {
       throw new Error(`${shot.shotId} needs its storyboard still: run npm run recreate -- storyboard first`);
     }
@@ -635,7 +630,8 @@ const renderVideo = async (c: Ctx, args: string[]) => {
   // Native audio: the shots that speak play their own clip audio, and there is no voice track.
   let speaking: Set<string> | undefined;
   if (c.audioMode === "native") {
-    speaking = new Set(c.script.shots.filter((s) => planClip(s) === "talking" && !records[s.shotId]?.flag?.includes("instead")).map((s) => s.shotId));
+    const speaks = speakingShots(timeline);
+    speaking = new Set(c.script.shots.filter((s) => planClip(s, speaks.has(s.shotId)) === "talking" && !records[s.shotId]?.flag?.includes("instead")).map((s) => s.shotId));
     // Captions follow what each clip said: the script's words at the heard times.
     for (const l of timeline.lines) {
       const at = timeline.shots.find((s) => s.tlInSec <= l.tlInSec + 1e-6 && l.tlInSec < s.tlOutSec);
@@ -696,7 +692,7 @@ const renderVideo = async (c: Ctx, args: string[]) => {
 };
 
 /** Only generated shots get new takes: the product's own footage would come out the same. */
-const isRegenerable = (shot: Ctx["script"]["shots"][number]) => !["footage", "text"].includes(planClip(shot));
+const isRegenerable = (shot: Ctx["script"]["shots"][number]) => !["footage", "text"].includes(planClip(shot, false));
 
 /**
  * The editor's Regenerate button (api/jobs/[jobId]/regenerate-clip): a new
@@ -721,9 +717,9 @@ const clipContext = async (args: string[]) => {
   if (!segment) throw new Error(`no clip ${clipId} on the timeline`);
   const shot = c.script.shots.find((s) => s.shotId === segment.blockId);
   if (!shot) throw new Error("this clip was added by hand, not generated: there is nothing to regenerate");
-  const kind = planClip(shot);
   if (!isRegenerable(shot)) throw new Error("this shot is the product's own footage, not AI: regenerating would give the same clip");
   const timeline = (await readJson(c.k.timeline, "timeline")) as Timeline;
+  const kind = planClip(shot, speakingShots(timeline).has(shot.shotId));
   // The take on the timeline: a change builds on its prompt and still.
   const takes = takesForClip(jobId, clipId);
   const take = takes.takes.find((t) => t.id === takes.currentTakeId);
@@ -889,8 +885,18 @@ const shotChat = async (args: string[]) => {
   console.log(`RESULT ${JSON.stringify({ shotId: shot.shotId, messages })}`);
 };
 
+/** What the video has cost so far, step by step. Reads only costs.jsonl. */
+const costs = async (args: string[]) => {
+  const brand = required(args, "--brand");
+  const id = option(args, "--card") ?? required(args, "--source");
+  const key = productionKeys(brand, id).costs;
+  const text = (await storage.exists(key)) ? fs.readFileSync(await storage.localPath(key), "utf8") : "";
+  console.log(costReport(`${brand}/${id}`, parseCostLog(text)));
+};
+
 const main = async () => {
   const [command, ...args] = process.argv.slice(2);
+  if (command === "costs") return costs(args);
   if (command === "regen-clip") return regenClip(args);
   if (command === "shot-chat") return shotChat(args);
   if (!["voice", "clips", "render", "all"].includes(command)) {

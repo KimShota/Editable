@@ -146,7 +146,9 @@ export const buildNativeTimeline = (script: AdaptedScript, spec: RecreationSpec)
     const speech = mine.map(({ l }) => (wordCount(l.text) * 60) / NATIVE_WPM);
     const needed = mine.length ? NATIVE_LEAD + speech.reduce((a, b) => a + b, 0) + NATIVE_GAP * (mine.length - 1) + NATIVE_TAIL : 0;
     const sourceLen = sourceEdges[i + 1] - sourceEdges[i];
-    const len = mine.length ? Math.min(MAX_NATIVE_SHOT_SEC, Math.max(MIN_SHOT_SEC, needed)) : sourceLen;
+    // A silent shot keeps the source's length, but a flash cut shorter than the minimum (a 0.1s blur
+    // between two shots) is stretched to it: the video runs a touch longer rather than failing to build.
+    const len = mine.length ? Math.min(MAX_NATIVE_SHOT_SEC, Math.max(MIN_SHOT_SEC, needed)) : Math.max(MIN_SHOT_SEC, sourceLen);
     let at = t + NATIVE_LEAD;
     mine.forEach(({ l }, n) => {
       const d = speech[n];
@@ -175,3 +177,17 @@ export const alignWords = (text: string, heard: { startSec: number; endSec: numb
   if (heard.length === words.length) return words.map((w, i) => ({ text: w, tlStartSec: heard[i].startSec, tlEndSec: heard[i].endSec }));
   return estimateWords(text, heard[0].startSec, heard[heard.length - 1].endSec);
 };
+
+/** The shots a line is spoken in: a line overlapping a shot by more than this counts. */
+const SPEAKING_OVERLAP_SEC = 0.1;
+
+/**
+ * The shots in which someone speaks, from where the timeline puts each line.
+ * A music-only video has none; in native audio each line sits in one shot.
+ */
+export const speakingShots = (timeline: Timeline): Set<string> =>
+  new Set(
+    timeline.shots
+      .filter((s) => timeline.lines.some((l) => Math.min(l.tlOutSec, s.tlOutSec) - Math.max(l.tlInSec, s.tlInSec) > SPEAKING_OVERLAP_SEC))
+      .map((s) => s.shotId),
+  );

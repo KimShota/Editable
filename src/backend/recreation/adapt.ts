@@ -11,7 +11,7 @@ import { type Adaptation, AdaptationSchema, type AdaptedScript, type ProductFoot
  * Claude writes the words and says how each shot is made; `assembleScript`
  * holds it to the skeleton: one line per source line, one treatment per
  * source shot, requested lines verbatim, and product UI only from real
- * footage.
+ * footage. Every source screen shot becomes our own demo footage, full frame.
  */
 
 const DEFAULT_MODEL = "claude-opus-5-5";
@@ -65,7 +65,9 @@ export const buildAdaptText = (spec: RecreationSpec, intake: BrandIntake, charac
     spec.speech.lines.length === 0
       ? `- The source has no spoken lines (music and on-screen text only): return an empty lines array. The words live in each shot's textOnScreen; rewrite those for ${product.name}, same roles and positions.`
       : `- Keep the skeleton: exactly one line per source line (indices 0-${spec.speech.lines.length - 1}), same role, close to the same word count, so the rhythm survives.`,
-    `- Exactly one shot entry per source shot (${spec.shots.map((s) => s.id).join(", ")}), choosing how each is made. Talking shots become ${c.name} talking; screen shots show the product on its device using footageId, or a non-product screen via otherScreen.`,
+    `- Exactly one shot entry per source shot (${spec.shots.map((s) => s.id).join(", ")}), choosing how each is made. Talking shots become ${c.name} talking.`,
+    `- Every screen shot in the source (kind "screen": the creator demoing their own app or tools) is replaced by our demo: treatment screen_fill with the footage clip that best fits that step. Never a generated screen, and never device_closeup or character_with_device for it.`,
+    `- The source may show logos (app icons, a "logo + logo = ..." equation, watermarks). Never recreate them: leave them out of every action, and write on-screen text in plain words, never "X logo".`,
     `- Keep the source's hook mechanism, pacing and CTA mechanism; swap the promise for what ${product.name} actually does.`,
     `- Mirror each source line's sentence shape, not just its length: an imperative step ("Go to X, look at Y") stays an imperative step a viewer could follow, a number reveal stays a reveal, an aside stays an aside.`,
     `- The payoff must answer the hook's stakes, not restate a feature. If the hook promises money or a goal, connect ${product.name} to reaching it (the hours it gives back go to the thing that earns), without promising earnings.`,
@@ -107,6 +109,15 @@ export const adapt = async (
 };
 
 const countWords = (text: string) => text.split(/\s+/).filter(Boolean).length;
+
+/** The footage clip of the nearest earlier shot that has one. */
+const previousFootage = (a: Adaptation, spec: RecreationSpec, before: number): string | null => {
+  for (let i = before - 1; i >= 0; i--) {
+    const id = a.shots.find((s) => s.shotId === spec.shots[i].id)?.footageId;
+    if (id) return id;
+  }
+  return null;
+};
 
 /**
  * Holds the adaptation to the source skeleton. Strict: every source line and
@@ -159,7 +170,23 @@ export const assembleScript = (
         sourceWordCount: src.wordCount,
       };
     }),
-    shots: spec.shots.map((src) => ({ ...byShot.get(src.id)!, sourceStartSec: src.startSec, sourceEndSec: src.endSec, sourceKind: src.kind })),
+    shots: spec.shots.map((src, i) => {
+      const shot = byShot.get(src.id)!;
+      // A screen in the source (the creator demoing their app) is replaced by our demo footage,
+      // full frame: never a generated screen or the green screen. If the model left one without
+      // footage, it continues the clip of the shot before it (or the first clip).
+      const footageId = shot.footageId ?? (src.kind === "screen" ? (previousFootage(a, spec, i) ?? footage.clips[0]?.id ?? null) : null);
+      const fills = footageId !== null;
+      return {
+        ...shot,
+        treatment: fills ? ("screen_fill" as const) : shot.treatment,
+        footageId,
+        otherScreen: fills ? null : shot.otherScreen,
+        sourceStartSec: src.startSec,
+        sourceEndSec: src.endSec,
+        sourceKind: src.kind,
+      };
+    }),
     postCaption: a.postCaption,
     hashtags: a.hashtags.map((h) => h.replace(/^#/, "")).slice(0, 5),
     createdAt: new Date().toISOString(),

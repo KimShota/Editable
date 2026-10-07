@@ -1,9 +1,9 @@
 import path from "node:path";
 import "dotenv/config";
 import fs from "node:fs";
-import { consoleSink } from "../cost/ledger";
+import { fileCostSink } from "../cost/fileSink";
 import { getStorage } from "../storage";
-import { recreationKeys } from "../brand/keys";
+import { productionKeys, recreationKeys } from "../brand/keys";
 import { sourceIdForCard } from "../plan/store";
 import { sourceIdFromUrl } from "./decompose";
 import { adaptCard, buildSpec, ingestSource, storyboardCard } from "./ops";
@@ -18,12 +18,15 @@ import { type AdaptedScript, AdaptedScriptSchema, type RecreationSpec, Recreatio
  *   keyframes/<id>/s<i>-<k>.jpg   composition references per shot
  *   specs/<id>.json               the RecreationSpec
  *
+ * Paid calls are logged to brands/<brand>/videos/<card>/costs.jsonl (spec without
+ * --card: sources/<id>.costs.jsonl); see `npm run produce -- costs`.
+ *
  * and, per brand, brands/<brand>/scripts/<id>.json: the spec rewritten for the
  * brand's product and character (day 4), from brands/<brand>/intake.json,
  * character/character.json and product/footage.json.
  *
  *   npm run recreate -- ingest --brand <slug> --url <url> [--url <url> …]
- *   npm run recreate -- spec   --brand <slug> [--source <id>]     (all downloaded sources when omitted)
+ *   npm run recreate -- spec   --brand <slug> [--source <id>] [--card <id>]     (all downloaded sources when omitted)
  *   npm run recreate -- show   --brand <slug> [--source <id>]
  *   npm run recreate -- adapt  --brand <slug> [--source <id> | --card <id>] [--keep 0,3] [--cta WORD] [--direction "…"]
  *   npm run recreate -- script --brand <slug> [--source <id>]     (print adapted scripts)
@@ -46,6 +49,13 @@ const required = (args: string[], name: string): string => {
 const storage = getStorage();
 
 const keys = recreationKeys;
+
+/** Paid calls land in the video's own costs.jsonl, the same file production
+ *  writes, so one file holds everything the video cost, from reading its
+ *  source on. A source-level step with no card (spec without --card) logs
+ *  beside the source instead. */
+const costSinkFor = (brand: string, cardId?: string, sourceId?: string) =>
+  fileCostSink(storage, cardId ? productionKeys(brand, cardId).costs : `${keys(brand).root}/${sourceId}.costs.jsonl`);
 
 const sourceIds = async (brand: string, only?: string): Promise<string[]> => {
   if (only) return [only];
@@ -77,7 +87,7 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
     const brand = required(args, "--brand");
     for (const id of await sourceIds(brand, option(args, "--source"))) {
       console.log(`\n${id}`);
-      const spec = await buildSpec({ storage, costSink: consoleSink, report: (p) => console.log(`  ${p.stage}${p.message ? `: ${p.message}` : ""}`) }, brand, id);
+      const spec = await buildSpec({ storage, costSink: costSinkFor(brand, option(args, "--card"), id), report: (p) => console.log(`  ${p.stage}${p.message ? `: ${p.message}` : ""}`) }, brand, id);
       printSpec(spec);
       console.log(`  saved ${keys(brand).spec(id)}`);
     }
@@ -111,7 +121,7 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
         console.log(`\n${sourceId}: no spec yet, run spec first`);
         continue;
       }
-      const script = await adaptCard({ storage, costSink: consoleSink }, brand, id, sourceId, { keep, cta: option(args, "--cta"), direction: option(args, "--direction") });
+      const script = await adaptCard({ storage, costSink: costSinkFor(brand, id) }, brand, id, sourceId, { keep, cta: option(args, "--cta"), direction: option(args, "--direction") });
       printScript(script);
       console.log(`  saved ${k.script(id)}`);
     }
@@ -140,7 +150,7 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
       await storage.putFile(screenRefKey, screenRefFile);
     }
     const result = await storyboardCard(
-      { storage, costSink: consoleSink, report: (p) => p.message && console.log(`  ${p.stage}: ${p.message}${p.total ? ` (${p.done}/${p.total})` : ""}`) },
+      { storage, costSink: costSinkFor(brand, id), report: (p) => p.message && console.log(`  ${p.stage}: ${p.message}${p.total ? ` (${p.done}/${p.total})` : ""}`) },
       brand,
       id,
       sourceId,

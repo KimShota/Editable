@@ -131,6 +131,10 @@ const main = () => {
   t.throws("a missing line is an error", () => assembleScript(spec, { ...adaptation, lines: adaptation.lines.slice(1) }, footage, { brand: "b", language: "en" }, "m"), /one line per source line/);
   t.throws("a missing shot is an error", () => assembleScript(spec, { ...adaptation, shots: adaptation.shots.slice(1) }, footage, { brand: "b", language: "en" }, "m"), /one entry per source shot/);
   t.throws("product UI only from real footage", () => assembleScript(spec, { ...adaptation, shots: [shotPlan("s0"), shotPlan("s1", "made-up"), shotPlan("s2")] }, footage, { brand: "b", language: "en" }, "m"), /unknown footage/);
+  t.check("a source screen shot with product footage plays it full frame, no green screen", script.shots[1].treatment === "screen_fill" && script.shots[1].otherScreen === null);
+  const generatedScreen = assembleScript(spec, { ...adaptation, shots: [shotPlan("s0"), { ...shotPlan("s1"), treatment: "device_closeup", otherScreen: "an app" }, shotPlan("s2")] }, footage, { brand: "b", language: "en" }, "m");
+  t.check("a source screen shot left without footage still gets our demo, not a generated screen", generatedScreen.shots[1].footageId === "draft" && generatedScreen.shots[1].treatment === "screen_fill" && generatedScreen.shots[1].otherScreen === null);
+  t.check("a talking shot stays generated", generatedScreen.shots[0].treatment === "character_talking" && generatedScreen.shots[0].footageId === null);
   t.throws("an out-of-range keep is an error", () => assembleScript(spec, adaptation, footage, { brand: "b", language: "en", keep: [9] }, "m"), /out of range/);
 
   const intake = {
@@ -146,6 +150,7 @@ const main = () => {
   } as unknown as Parameters<typeof buildAdaptText>[2];
   const prompt = buildAdaptText(spec, intake, character, footage, { keep: [0], cta: "SHOGUN" });
   t.check("adapt prompt marks kept lines and lists the footage", prompt.includes('[0] hook · 1 words · 0.0s · KEEP VERBATIM: "Stop"') && prompt.includes("draft (3.0s)"));
+  t.check("adapt prompt replaces source screens with our demo and drops logos", prompt.includes("is replaced by our demo: treatment screen_fill") && prompt.includes("Never recreate them") && prompt.includes('never "X logo"'));
   t.check("adapt prompt names the skeleton and the keyword", prompt.includes("indices 0-3") && prompt.includes("s0, s1, s2") && prompt.includes('"SHOGUN"'));
 
   // A music-only source (words on screen, nobody speaking): no lines to answer.
@@ -173,8 +178,7 @@ const main = () => {
   t.check("product footage that fills the frame is not generated", plans[1].mode === "footage");
   const talk = plans[0].mode === "generate" ? plans[0] : null;
   t.check("a talking shot uses the front view and the source composition", talk?.refs.map((r) => `${r.role}:${r.key}`).join() === "character:front.png,composition:k0");
-  const close = plans[2].mode === "generate" ? plans[2] : null;
-  t.check("a device close-up shows the real footage on screen", close?.refs[close.refs.length - 1]?.key === "f/draft.jpg" && /screen in image 2/.test(close?.prompt ?? ""), close?.prompt);
+  t.check("any shot with product footage shows the footage itself, never a generated device", plans[2].mode === "footage" && plans[2].footageId === "draft");
   t.check("prompts never let the composition ref leak its person", /Do not copy its person/.test(talk?.prompt ?? ""));
   // A screen shot with no product footage: a laptop on a table, her hand and a pen. Never a zoomed-in screen.
   const screenScript = AdaptedScriptSchema.parse({ ...script, shots: [{ ...script.shots[1], treatment: "screen_fill", footageId: null, otherScreen: "a packed inbox", action: "Unread threads pile up." }, script.shots[0], script.shots[2]] });
@@ -185,6 +189,7 @@ const main = () => {
   t.check("a screen shot says what the screen shows, on one screen", /The screen shows: a packed inbox/.test(screenPrompt) && /One single screen/.test(screenPrompt));
   const noRef = planFrames(screenScript, spec, locked, (id) => `f/${id}.jpg`)[0];
   t.check("without a reference a screen shot gets no composition, so the source's screen cannot leak", noRef.mode === "generate" && noRef.refs.every((r) => r.role !== "composition"));
+  t.check("no frame draws the source's logos", /No logos, app icons or badges/.test(talk?.prompt ?? "") && /No logos, app icons or badges/.test(screenPrompt));
   t.check("a character shot still names its person", /The person is Rin/.test(talk?.prompt ?? "") && /Setting:/.test(talk?.prompt ?? ""));
   const html = boardHtml({ ...boardScript, angle: "<b>x</b>" }, (id) => (id === "s0" ? "s0.png" : null));
   t.check("the board escapes text and marks missing stills", html.includes("&lt;b&gt;x&lt;/b&gt;") && html.includes('src="s0.png"') && html.includes("no still"));

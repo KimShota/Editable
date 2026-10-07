@@ -30,11 +30,19 @@ export const ANIMATE_MIN_SEC = 3;
 
 export type ClipKind = "footage" | "talking" | "green" | "animate" | "text";
 
-export const planClip = (shot: AdaptedScript["shots"][number]): ClipKind => {
+/**
+ * How a shot is made. `speaks` is whether any line is spoken during it (see
+ * speakingShots): a talking clip (Seedance, ~$0.46/s, 4s minimum) is only paid
+ * for when there are words to say. A character shot with none, like a silent
+ * reaction over music, is a silent animated clip from its still (~$0.07/s).
+ */
+export const planClip = (shot: AdaptedScript["shots"][number], speaks: boolean): ClipKind => {
   if (shot.treatment === "text_card") return "text";
-  if (shot.treatment === "character_talking") return "talking";
-  if (shot.footageId && shot.treatment === "screen_fill") return "footage";
-  if (shot.footageId) return "green";
+  if (shot.treatment === "character_talking") return speaks ? "talking" : "animate";
+  // Any shot with product footage plays the footage itself, filling the frame. The green screen
+  // (a generated device with the footage keyed onto it) is off for now: it distorts the picture
+  // too often. Its code stays (greenscreen.py, retry.ts) for when it is turned back on.
+  if (shot.footageId) return "footage";
   return "animate";
 };
 
@@ -57,9 +65,9 @@ export const nativeTalkingPrompt = (shot: AdaptedScript["shots"][number], name: 
   line.trim()
     ? `${name}, the woman in image 1, talks straight to the phone camera and says exactly these words, clearly, at a natural relaxed conversational pace, not rushed, with precise lip-sync: "${line}" ` +
       `Her voice: ${voice} ${shot.action} Same face, hair, outfit and room as image 1. Handheld phone camera, natural light, like a creator filming a selfie video. ` +
-      "She says only those words, once. No music, no captions or on-screen text."
+      "She says only those words, once. No music, no captions, logos, icons or on-screen text."
     : `${name}, the woman in image 1, does not speak in this shot. ${shot.action} Same face, hair, outfit and room as image 1. Handheld phone camera, natural light, like a creator filming a selfie video. ` +
-      "No speech, no music, no captions or on-screen text.";
+      "No speech, no music, no captions, logos, icons or on-screen text.";
 
 /**
  * A green-screen shot's prompt never mentions what is on the screen: asked
@@ -75,6 +83,8 @@ export const animatePrompt = (shot: AdaptedScript["shots"][number], kind: ClipKi
   [
     "Filmed on a phone, natural subtle handheld motion.",
     kind === "green" ? (GREEN_MOTION[shot.treatment] ?? "Small natural movement.") : shot.action,
+    // A character_talking shot only animates when it has no words: she reacts, she does not talk.
+    shot.treatment === "character_talking" ? "She does not speak: her lips stay still apart from her expression." : "",
     kind === "green" ? "The laptop display stays a flat, solid green the entire time: nothing appears on it, no windows, text or cursor." : "",
     "Keep every face, hand and object consistent. No captions or added text.",
   ]

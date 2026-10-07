@@ -1,3 +1,4 @@
+import { costReport, parseCostLog } from "../../cost/report";
 import { EdlSchema } from "../../pipeline/schemas";
 import { applyOp } from "../../pipeline/timelineOps";
 import type { Edl } from "../../pipeline/types";
@@ -5,11 +6,11 @@ import type { AdaptedScript, RecreationSpec } from "../../recreation/schemas";
 import { makeChecker } from "../../tools/checks";
 import { wordsFromAlignment } from "../../voice/elevenlabs";
 import { DEFAULT_AUDIO_MODE, parseAudioMode } from "../audioMode";
-import { nativeTalkingPrompt, planClip, requestSeconds, spokenShare } from "../clips";
+import { animatePrompt, nativeTalkingPrompt, planClip, requestSeconds, spokenShare } from "../clips";
 import { captionGroups, compileEdl, type MadeClip, playRawClipAudio, swapShotClip } from "../edl";
 import { seedanceUsd } from "../higgsfield";
 import { clipProblem, pickBest, RETRY_CAP, usable, worstCaseUsd } from "../retry";
-import { alignWords, buildNativeTimeline, buildTimeline, MIN_SHOT_SEC } from "../timeline";
+import { alignWords, buildNativeTimeline, buildTimeline, MIN_SHOT_SEC, speakingShots } from "../timeline";
 
 /**
  * Production planning with no network, no provider and no ffmpeg: the
@@ -75,10 +76,13 @@ const main = () => {
   t.check("no shot is shorter than the minimum", tight.shots.every((s) => s.tlOutSec - s.tlInSec >= MIN_SHOT_SEC - 1e-9), JSON.stringify(tight.shots));
   t.throws("a missing voiced line is an error", () => buildTimeline(script, spec, voiced.slice(1)), /voiced lines/);
 
-  t.check("talking shots are lip-synced", planClip(script.shots[0]) === "talking");
-  t.check("product footage filling the frame is not generated", planClip(script.shots[1]) === "footage");
-  t.check("a device showing the product goes through the green screen", planClip(script.shots[2]) === "green");
-  t.check("a device with a non-product screen is just animated", planClip({ ...script.shots[2], footageId: null }) === "animate");
+  t.check("talking shots with words are lip-synced", planClip(script.shots[0], true) === "talking");
+  t.check("a talking shot with no words is a silent animated clip, never a paid talking clip", planClip(script.shots[0], false) === "animate");
+  t.check("the silent clip is told she does not speak", /does not speak/.test(animatePrompt(script.shots[0], "animate")) && !/does not speak/.test(animatePrompt({ ...script.shots[2], footageId: null }, "animate")));
+  t.check("product footage filling the frame is not generated", planClip(script.shots[1], true) === "footage");
+  t.check("a device showing the product plays the footage itself, never the green screen", planClip(script.shots[2], true) === "footage");
+  t.check("a device with a non-product screen is just animated", planClip({ ...script.shots[2], footageId: null }, true) === "animate");
+  t.check("every shot a voiced line overlaps speaks", [...speakingShots(tl)].join() === "s0,s1,s2");
   t.check("requests respect each model's minimum length", requestSeconds("talking", 1.2) === 4 && requestSeconds("animate", 1.2) === 3 && requestSeconds("animate", 4.9) === 6);
   t.check("seedance price follows its token formula (720p 9:16, 8s)", near(seedanceUsd({ resolution: "720p", aspect_ratio: "9:16", duration: 8 }), 3.6979, 1e-3));
 
@@ -169,6 +173,7 @@ const main = () => {
   t.check("shots keep their order and run back to back", ntl.shots.map((x) => x.shotId).join() === "s0,s1,s2" && ntl.shots.every((x, i) => i === 0 || near(x.tlInSec, ntl.shots[i - 1].tlOutSec, 1e-9)) && near(ntl.shots[2].tlOutSec, ntl.durationSec, 1e-9));
   t.check("a shot with speech is as long as its words need, not as long as the source's shot", near(ntl.shots[0].tlOutSec - ntl.shots[0].tlInSec, 0.2 + (4 * 60) / 160 + 0.3, 1e-9) && near(ntl.shots[1].tlOutSec - ntl.shots[1].tlInSec, 0.2 + (3 * 60) / 160 + 0.3, 1e-9), JSON.stringify(ntl.shots));
   t.check("a shot with no speech keeps the source's length", near(ntl.shots[2].tlOutSec - ntl.shots[2].tlInSec, 3.5, 1e-9), JSON.stringify(ntl.shots));
+  t.check("in native audio only the shots that say a line speak", [...speakingShots(ntl)].join() === "s0,s1", JSON.stringify([...speakingShots(ntl)]));
   const speechSec = (l: { tlInSec: number; tlOutSec: number }, words: number) => near(l.tlOutSec - l.tlInSec, (words * 60) / 160, 1e-9);
   t.check("lines run at a normal pace, not the source's", speechSec(ntl.lines[0], 4) && speechSec(ntl.lines[1], 3));
   t.check("estimated words fill their line", ntl.lines[0].words.length === 4 && ntl.lines[0].words[0].tlStartSec === ntl.lines[0].tlInSec && near(ntl.lines[0].words[3].tlEndSec, ntl.lines[0].tlOutSec, 1e-9));
@@ -366,6 +371,35 @@ const main = () => {
 
     const untouched = applyOp(doc, { type: "move", track: "captions", id: "cc", tlInSec: 7 });
     t.check("an edit off the main track moves nothing else", near(voice(untouched, "vc").tlInSec, 5.5) && near(untouched.durationSec, 9));
+  }
+
+  {
+    // A music-only source: no lines, and a 0.1s flash cut between two shots.
+    const silentSpec = { media: { durationSec: 3, width: 720, height: 1280, fps: 30 }, speech: { lines: [], wordsPerMin: 0 }, shots: [{ id: "s0", startSec: 0, endSec: 1.4 }, { id: "s1", startSec: 1.4, endSec: 1.5 }, { id: "s2", startSec: 1.5, endSec: 3 }] } as unknown as RecreationSpec;
+    const silentScript = { lines: [], shots: [shot("s0", "character_talking"), shot("s1", "character_talking"), shot("s2", "screen_fill")] } as unknown as AdaptedScript;
+    const silent = buildNativeTimeline(silentScript, silentSpec);
+    t.check("a music-only source has a timeline with no lines", silent.lines.length === 0 && silent.shots.length === 3);
+    t.check("in a music-only video nobody speaks, so no shot pays for a talking clip", speakingShots(silent).size === 0 && silentScript.shots.every((sh) => planClip(sh, speakingShots(silent).has(sh.shotId)) !== "talking"));
+    t.check("a flash cut shorter than the minimum is stretched to it, not refused", near(silent.shots[1].tlOutSec - silent.shots[1].tlInSec, MIN_SHOT_SEC, 1e-9) && near(silent.durationSec, 1.4 + MIN_SHOT_SEC + 1.5, 1e-9));
+  }
+
+  {
+    // The per-video cost report: every call in order, totals by step and provider, unpriced calls flagged.
+    const log = [
+      JSON.stringify({ at: "2026-10-07T10:00:00.000Z", provider: "anthropic", model: "claude-opus-5-5", operation: "adapt", ref: "b/c", units: {}, usd: 0.0123 }),
+      JSON.stringify({ at: "2026-10-07T10:01:00.000Z", provider: "google", model: "gemini-3-pro-image", operation: "storyboard_frame", usd: 0.134 }),
+      JSON.stringify({ at: "2026-10-07T10:01:05.000Z", provider: "google", model: "gemini-3-pro-image", operation: "storyboard_frame", usd: 0.134 }),
+      JSON.stringify({ at: "2026-10-07T10:02:00.000Z", provider: "higgsfield", model: "m", operation: "motion_transfer_shot", usd: 0, note: "price unknown" }),
+      '{"usd": 9',
+      "",
+    ].join("\n");
+    const entries = parseCostLog(log);
+    t.check("a half-written last line and blanks are skipped", entries.length === 4);
+    const report = costReport("b/c", entries);
+    t.check("the report totals every call", report.includes("TOTAL $0.2803 across 4 paid calls"));
+    t.check("the report groups calls by step", report.includes("2 calls  google/storyboard_frame") && report.includes("1 call   anthropic/adapt"));
+    t.check("a call with no price is flagged, not passed off as free", report.includes("(unpriced: price unknown)") && report.includes("1 call has no price"));
+    t.check("a video with no paid calls says so", costReport("b/c", []).includes("no paid calls recorded"));
   }
 
   t.finish("production");
