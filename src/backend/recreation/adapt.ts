@@ -3,6 +3,7 @@ import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { BrandIntake } from "../brand/intake/schemas";
 import type { LockedCharacter } from "../character/schemas";
 import { anthropicCostEntry, type CostSink } from "../cost/ledger";
+import { fallbackOptions } from "./models";
 import { type Adaptation, AdaptationSchema, type AdaptedScript, type ProductFootage, type RecreationSpec } from "./schemas";
 
 /**
@@ -14,8 +15,8 @@ import { type Adaptation, AdaptationSchema, type AdaptedScript, type ProductFoot
  * footage. Every source screen shot becomes our own demo footage, full frame.
  */
 
-const DEFAULT_MODEL = "claude-opus-5-5";
-const FALLBACK_MODEL = "claude-opus-4-8";
+// Sonnet for now, to cut cost (Opus 5.5 is 2x the price): set RECREATION_MODEL=claude-opus-5-5 to go back.
+const DEFAULT_MODEL = "claude-sonnet-5-5";
 
 export type AdaptOptions = {
   /** Source line indices to keep word for word (e.g. a hook that works as is). */
@@ -92,8 +93,7 @@ export const adapt = async (
   const response = await client.beta.messages.parse({
     model,
     max_tokens: 16_000,
-    betas: ["server-side-fallback-2026-06-01"],
-    fallbacks: [{ model: FALLBACK_MODEL }],
+    ...fallbackOptions(model),
     output_config: { effort: "medium", format: betaZodOutputFormat(AdaptationSchema) },
     system:
       "You adapt viral short-form videos for a brand: same skeleton, the brand's product and recurring character. " +

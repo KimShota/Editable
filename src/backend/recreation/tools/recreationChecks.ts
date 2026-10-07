@@ -2,6 +2,8 @@ import type { VideoAnalysis } from "../../analysis/schemas";
 import { makeChecker } from "../../tools/checks";
 import { assembleSpec, buildDecompositionText, type Keyframe, keyframeTimes, sourceIdFromUrl } from "../decompose";
 import { assembleScript, buildAdaptText } from "../adapt";
+import { anthropicCostUsd } from "../../cost/ledger";
+import { fallbackOptions } from "../models";
 import { boardHtml, planFrames } from "../storyboard";
 import { type Adaptation, AdaptedScriptSchema, type Decomposition, type ProductFootage, RecreationSpecSchema } from "../schemas";
 
@@ -112,6 +114,10 @@ const main = () => {
   const oldSpec = RecreationSpecSchema.parse({ ...spec, speech: { lines: [oldLine], wordsPerMin: null } });
   t.check("a spec made before delivery existed counts its lines as on camera", oldSpec.speech.lines[0].delivery === "on_camera" && oldSpec.speech.lyrics.length === 0);
   t.check("the prompt asks how each line is delivered and warns that song words are in the transcript", text.includes("lyrics") && text.includes("voiceover") && text.includes("music removed"));
+
+  t.check("Opus falls back to Opus 4.8", fallbackOptions("claude-opus-5-5").fallbacks?.[0].model === "claude-opus-4-8" && fallbackOptions("claude-opus-5-5").betas.length === 1);
+  t.check("Sonnet has no fallback: the API allows only claude-sonnet-5, which the ledger cannot price", fallbackOptions("claude-sonnet-5-5").fallbacks === undefined && fallbackOptions("claude-sonnet-5-5").betas.length === 0);
+  t.check("every fallback model has a price, so its cost can be recorded", ["claude-opus-5-5"].every((m) => { const to = fallbackOptions(m).fallbacks?.[0].model; return !!to && Number.isFinite(anthropicCostUsd(to, { input_tokens: 1, output_tokens: 1 })); }));
 
   t.throws("a missing shot label is an error, not a guess", () => assembleSpec(analysis, { ...decomposition, shots: decomposition.shots.slice(1) }, keyframes, meta, "m"), /one label per shot/);
 

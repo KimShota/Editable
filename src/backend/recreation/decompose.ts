@@ -4,6 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { VideoAnalysis } from "../analysis/schemas";
 import { anthropicCostEntry, type CostSink } from "../cost/ledger";
+import { fallbackOptions } from "./models";
 import { type Decomposition, DecompositionSchema, type RecreationSpec } from "./schemas";
 
 /**
@@ -15,8 +16,8 @@ import { type Decomposition, DecompositionSchema, type RecreationSpec } from "./
  * back into measured times, so no timestamp in the spec comes from the model.
  */
 
-const DEFAULT_MODEL = "claude-opus-5-5";
-const FALLBACK_MODEL = "claude-opus-4-8";
+// Sonnet for now, to cut cost (Opus 5.5 is 2x the price): set RECREATION_MODEL=claude-opus-5-5 to go back.
+const DEFAULT_MODEL = "claude-sonnet-5-5";
 
 /** A stable source id from the platform's own video id, else a hash of the URL. */
 export const sourceIdFromUrl = (url: string): string => {
@@ -77,8 +78,7 @@ export const decompose = async (
   const response = await client.beta.messages.parse({
     model,
     max_tokens: 16_000,
-    betas: ["server-side-fallback-2026-06-01"],
-    fallbacks: [{ model: FALLBACK_MODEL }],
+    ...fallbackOptions(model),
     output_config: { effort: "medium", format: betaZodOutputFormat(DecompositionSchema) },
     system:
       "You decompose viral short-form videos for faithful shot-by-shot recreation. Describe only what is visible in the frames or present in the transcript. Never invent times: shots and word indices are given.",
