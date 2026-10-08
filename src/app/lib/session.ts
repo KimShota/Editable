@@ -111,9 +111,15 @@ export const getSessionUser = async (token: string | undefined): Promise<Session
       }
     : null;
 
-  sessionCache.set(tokenHash, {
-    user,
-    expiresAt: Date.now() + (user ? SESSION_CACHE_POSITIVE_TTL_MS : SESSION_CACHE_NEGATIVE_TTL_MS),
-  });
+  // An account that has not confirmed its email is never cached: the request
+  // proxy and the route handlers are separate bundles with separate caches, so
+  // nothing could clear this one when the person clicks the link, and they
+  // would be held at /verify-email for up to the TTL after confirming.
+  if (!user || user.isAdmin || user.emailVerifiedAt) {
+    sessionCache.set(tokenHash, {
+      user,
+      expiresAt: Date.now() + (user ? SESSION_CACHE_POSITIVE_TTL_MS : SESSION_CACHE_NEGATIVE_TTL_MS),
+    });
+  }
   return user;
 };

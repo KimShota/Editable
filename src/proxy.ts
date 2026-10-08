@@ -220,6 +220,22 @@ const videoJobBrand = async (jobId: string): Promise<string | null> => {
   }
 };
 
+/** Where someone whose email is not confirmed yet is kept: nothing else in the
+ *  app opens until they confirm. The account APIs they need (resend the email,
+ *  log out) live under /api/auth/, which is public and never reaches this. */
+const VERIFY_EMAIL_PATH = "/verify-email";
+
+const verifyEmailRedirect = (req: NextRequest): NextResponse => {
+  // The verify route reports a link that failed as ?verify_error=…, aimed at
+  // /workspace: keep that message, which is for exactly this person.
+  const verifyError = req.nextUrl.searchParams.get("verify_error");
+  const url = req.nextUrl.clone();
+  url.pathname = VERIFY_EMAIL_PATH;
+  url.search = "";
+  if (verifyError) url.searchParams.set("verify_error", verifyError);
+  return NextResponse.redirect(url);
+};
+
 const loginRedirect = (req: NextRequest): NextResponse => {
   const url = req.nextUrl.clone();
   url.pathname = "/login";
@@ -242,6 +258,13 @@ export async function proxy(req: NextRequest) {
   const user = await getSessionUser(req.cookies.get(SESSION_COOKIE)?.value);
   if (!user) {
     return isApiPath(pathname) ? NextResponse.json({ error: "log in required" }, { status: 401 }) : loginRedirect(req);
+  }
+
+  // Signing up starts a session straight away, but the address is not proven
+  // until the emailed link is clicked. Until then the only page is
+  // /verify-email, and every API says why. Admins are exempt, as at login.
+  if (!user.isAdmin && !user.emailVerifiedAt && pathname !== VERIFY_EMAIL_PATH) {
+    return isApiPath(pathname) ? NextResponse.json({ error: "verify your email first: check your inbox for the confirmation link" }, { status: 403 }) : verifyEmailRedirect(req);
   }
 
   if (!user.isAdmin && ADMIN_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {

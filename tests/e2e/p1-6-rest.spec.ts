@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect, type Page, request, test } from "@playwright/test";
 import { APP_URL, STORAGE_ROOT } from "./env";
-import { CARDS, expectNoHorizontalScroll, resetFixture, shot, signInAndOpenCalendar, startSessions } from "./helpers";
+import { CARDS, expectNoHorizontalScroll, resetFixture, shot, signInAndOpenCalendar, sql, startSessions } from "./helpers";
 
 /**
  * P1.6 The rest (plan/ui-ux-full-flow.md §7, §8): Brand settings, Workspace,
@@ -443,8 +443,9 @@ test.describe("brands and invitations", () => {
     // They sign up with the invited address. Signup starts a session, but the address is not proven.
     const guest = await request.newContext({ baseURL: APP_URL });
     expect((await guest.post("/api/auth/signup", { data: { email: "newcomer@katalab.test", password: "a-long-password" } })).status()).toBe(201);
-    expect((await guest.get("/api/media/brands/acme/character/sheet/front.png", { failOnStatusCode: false })).status()).toBe(404);
-    expect((await guest.get("/api/tasks?slug=acme", { failOnStatusCode: false })).status()).toBe(404);
+    // Until the address is confirmed the proxy refuses every API, whoever they were invited by.
+    expect((await guest.get("/api/media/brands/acme/character/sheet/front.png", { failOnStatusCode: false })).status()).toBe(403);
+    expect((await guest.get("/api/tasks?slug=acme", { failOnStatusCode: false })).status()).toBe(403);
 
     // Verifying proves it, and the invitation is claimed.
     await expect.poll(() => outbox().some((m) => m.to === "newcomer@katalab.test" && m.subject.includes("Confirm")), { timeout: 15_000 }).toBe(true);
@@ -578,5 +579,62 @@ test.describe("admin sections", () => {
       await expectNoHorizontalScroll(page);
       await shot(page, info, "p1.6", name);
     }
+  });
+});
+
+test.describe("an account whose email is not confirmed", () => {
+  test("is held at the check-your-inbox page until it confirms, then gets in", async ({ page }) => {
+    test.setTimeout(60_000);
+    const email = "holdme@katalab.test";
+    await page.goto("/signup");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill("a-long-password");
+    await page.getByRole("button", { name: "Create account" }).click();
+
+    // Signup starts a session, but the only place it leads is the page that asks for the email to be confirmed.
+    await expect(page).toHaveURL(/\/verify-email$/);
+    await expect(page.getByRole("heading", { name: "Check your inbox" })).toBeVisible();
+    await expect(page.getByText(email)).toBeVisible();
+    for (const url of ["/calendar", "/plan", "/workspace", "/brand"]) {
+      await page.goto(url);
+      await expect(page).toHaveURL(/\/verify-email$/);
+    }
+    expect((await page.request.get("/api/tasks?slug=acme", { failOnStatusCode: false })).status()).toBe(403);
+    expect((await page.request.post("/api/billing/checkout", { data: {}, failOnStatusCode: false })).status()).toBe(403);
+
+    // A lost email can be sent again, and the new link replaces the first.
+    await page.getByRole("button", { name: "Send the email again" }).click();
+    await expect(page.getByRole("status")).toContainText("Sent");
+    await expect.poll(() => outbox().filter((m) => m.to === email && m.subject.includes("Confirm")).length, { timeout: 15_000 }).toBe(2);
+    const mails = outbox().filter((m) => m.to === email && m.subject.includes("Confirm"));
+    const linkOf = (html: string) => /href="([^"]+\/api\/auth\/verify\?token=[^"]+)"/.exec(html)![1].replace(/&amp;/g, "&");
+    await page.goto(linkOf(mails[0].html));
+    await expect(page).toHaveURL(/\/verify-email\?verify_error=/); // the first link was replaced, and the reason is kept
+    await expect(page.getByText("this verification link is invalid or has already been used")).toBeVisible();
+
+    // The newest link confirms, and the very next request is let through (the session cache does not hold them back).
+    await page.goto("/verify-email");
+    await page.goto(linkOf(mails[1].html));
+    await expect(page).toHaveURL(/\/workspace\?verified=1$/);
+    await page.goto("/calendar");
+    await expect(page).toHaveURL(/\/calendar$/);
+    // Someone already confirmed has no use for the waiting page.
+    await page.goto("/verify-email");
+    await expect(page).toHaveURL(/\/calendar$/);
+  });
+
+  test("a confirmed customer is not held anywhere", async ({ page }) => {
+    await as(page, "member");
+    await page.goto("/calendar");
+    await expect(page).toHaveURL(/\/calendar$/);
+    expect((await page.request.get("/api/tasks?slug=acme")).status()).toBe(200);
+  });
+
+  test("the founder is never held, even with no confirmed address on file", async ({ page }) => {
+    // Unconfirmed before the first request of the session, so the proxy reads it fresh rather than from its cache.
+    await sql(`update users set email_verified_at = null where email_norm = $1`, ["founder@katalab.test"]);
+    await as(page, "founder");
+    await page.goto("/admin/brands");
+    await expect(page).toHaveURL(/\/admin\/brands$/);
   });
 });

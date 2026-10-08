@@ -13,7 +13,7 @@ import { usePathname } from "next/navigation";
  * Nav is a server component that reads the session cookie (see Nav.tsx), and
  * a client component can't instantiate a server component in its own JSX —
  * only render one that a server parent (layout.tsx) already produced. */
-const NAV_HIDDEN_PATHS = new Set(["/", "/login", "/signup"]);
+const NAV_HIDDEN_PATHS = new Set(["/", "/login", "/signup", "/verify-email"]);
 /** The signed-in app brings its own sidebar (app/(app)/layout.tsx), so the
  *  top bar would be a second, conflicting navigation. */
 const APP_PREFIXES = ["/calendar", "/plan", "/analytics", "/brand", "/workspace", "/admin", "/onboarding", "/videos"];

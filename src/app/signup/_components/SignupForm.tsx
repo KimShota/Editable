@@ -26,7 +26,7 @@ export function SignupForm() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "signup failed");
-      router.push("/calendar");
+      router.push("/verify-email");
       router.refresh();
     } catch (err) {
       setError((err as Error).message);
