@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestUser } from "../../../lib/auth";
 import { getBillingStatus } from "../../../lib/billing";
+import { publicOrigin } from "../../../lib/publicOrigin";
 import { stripe } from "../../../lib/stripe";
 
 /**
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "no billing account on file" }, { status: 400 });
   }
 
-  const origin = req.nextUrl.origin;
+  const origin = publicOrigin(req);
   const session = await stripe().billingPortal.sessions.create({
     customer: stripeCustomerId,
     return_url: `${origin}/workspace`,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser, SESSION_COOKIE } from "../../../lib/auth";
 import { issueVerificationEmail } from "../../../lib/emailVerification";
+import { publicOrigin } from "../../../lib/publicOrigin";
 
 /**
  * Public per middleware.ts's PUBLIC_PREFIXES (/api/auth/) like the rest of
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await issueVerificationEmail(user.id, user.email, req.nextUrl.origin);
+    await issueVerificationEmail(user.id, user.email, publicOrigin(req));
   } catch (err) {
     console.error(`resend-verification: failed to send to ${user.email}`, err);
     return NextResponse.json({ error: "could not send the email — try again shortly" }, { status: 502 });

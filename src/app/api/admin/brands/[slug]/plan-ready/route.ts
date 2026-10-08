@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { brandRoute, ConflictError } from "../../../../../lib/brandApi";
 import { brandRepo } from "../../../../../lib/brandRepo";
+import { publicOrigin } from "../../../../../lib/publicOrigin";
 import { sendPlanReadyEmail } from "../../../../../lib/email";
 
 /** POST /api/admin/brands/<slug>/plan-ready: tells the brand's members their
@@ -13,7 +14,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     async ({ brand }) => {
       const plan = await brandRepo.getPlan(slug);
       if (!plan || plan.cards.length === 0) throw new ConflictError("There is no plan to tell anyone about yet.");
-      const link = `${new URL(req.url).origin}/plan`;
+      const link = `${publicOrigin(req)}/plan`;
       let sent = 0;
       let emailError: string | null = null;
       for (const m of await brandRepo.listMembers(slug)) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createSession, signup, SESSION_COOKIE, SESSION_TTL_MS } from "../../../lib/auth";
 import { issueVerificationEmail } from "../../../lib/emailVerification";
+import { publicOrigin } from "../../../lib/publicOrigin";
 
 /**
  * Open signup — see auth.ts's signup().
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
   // up the signup response the browser is waiting on; this process stays
   // alive to finish the send regardless (a persistent Node server, not a
   // serverless one that'd kill it the moment the response goes out).
-  issueVerificationEmail(result.user.id, result.user.email, req.nextUrl.origin).catch((err) => {
+  issueVerificationEmail(result.user.id, result.user.email, publicOrigin(req)).catch((err) => {
     console.error(`signup: failed to send verification email to ${result.user.email}`, err);
   });
 

@@ -4,6 +4,7 @@ import { cancelInvite, inviteToWorkspace } from "@backend/brand/members";
 import { brandRoute, ConflictError, readJsonBody } from "../../../../../lib/brandApi";
 import { brandRepo } from "../../../../../lib/brandRepo";
 import { query } from "../../../../../lib/db";
+import { publicOrigin } from "../../../../../lib/publicOrigin";
 import { sendInviteEmail } from "../../../../../lib/email";
 
 const Body = z.object({ email: z.string().trim().min(3).max(254) });
@@ -30,7 +31,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
       let emailError: string | null = null;
       if (result.status === "invited") {
         try {
-          await sendInviteEmail(result.email, brand.name, `${new URL(req.url).origin}/signup`);
+          await sendInviteEmail(result.email, brand.name, `${publicOrigin(req)}/signup`);
           emailed = true;
         } catch (err) {
           // The invitation is saved either way: the founder can tell them by hand.

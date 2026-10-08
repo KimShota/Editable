@@ -3,6 +3,7 @@ import { z } from "zod";
 import { canTransition } from "@backend/plan/status";
 import { brandRoute, readJsonBody } from "../../../../../lib/brandApi";
 import { brandRepo } from "../../../../../lib/brandRepo";
+import { publicOrigin } from "../../../../../lib/publicOrigin";
 import { sendVideosReadyEmail } from "../../../../../lib/email";
 
 /**
@@ -33,7 +34,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
       let emailed = 0;
       let emailError: string | null = null;
       if (sent.length > 0) {
-        const origin = new URL(req.url).origin;
+        const origin = publicOrigin(req);
         for (const member of await brandRepo.listMembers(slug)) {
           try {
             await sendVideosReadyEmail(member.email, brand.name, sent.length, `${origin}/calendar`);

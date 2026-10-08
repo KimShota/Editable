@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestUser } from "../../../lib/auth";
 import { getOrCreateStripeCustomerId } from "../../../lib/billing";
+import { publicOrigin } from "../../../lib/publicOrigin";
 import { premiumPriceId, stripe } from "../../../lib/stripe";
 
 /**
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
   }
 
   const customerId = await getOrCreateStripeCustomerId(user);
-  const origin = req.nextUrl.origin;
+  const origin = publicOrigin(req);
 
   const session = await stripe().checkout.sessions.create({
     mode: "subscription",

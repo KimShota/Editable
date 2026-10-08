@@ -26,6 +26,7 @@ import { BrandAccessError, BrandRepo } from "../brand/repo";
 import { assertBrandSlug, brandKeys, parseVideoJobId, productionKeys, recreationKeys, videoJobId } from "../brand/keys";
 import { type Card, CARD_STATUSES, PlanSchema } from "../plan/schemas";
 import { allowedNext, canTransition, isEditable, isVideoVisible, MAX_HISTORY, statusLabel, TransitionError, transitionCard } from "../plan/status";
+import { publicOrigin } from "../../app/lib/publicOrigin";
 import { planFromFiles } from "../plan/seed";
 import { findCard, sourceIdForCard } from "../plan/store";
 import { runOnce, NO_CONTEXT } from "../queue/worker";
@@ -249,6 +250,25 @@ const main = async () => {
   for (const st of CARD_STATUSES) t.check(`customer visibility of a ${st} video`, isVideoVisible(st, false) === ["needs_review", "ready", "posted"].includes(st));
   t.check("an admin sees every video", CARD_STATUSES.every((st) => isVideoVisible(st, true)));
   t.check("the review gate hides a video that is still with the founder", !isVideoVisible("internal_review", false) && !isVideoVisible("generating", false) && !isVideoVisible("failed", false));
+
+  console.log("public origin: the address links in emails and Stripe point at");
+  {
+    const req = { url: "https://localhost:3100/api/auth/signup" };
+    t.check("without APP_ORIGIN the request's own origin is used (local development)", publicOrigin(req, {}) === "https://localhost:3100");
+    t.check("APP_ORIGIN wins over the request's origin: behind the proxy that is localhost", publicOrigin(req, { APP_ORIGIN: "https://katalab.art" }) === "https://katalab.art");
+    t.check("a trailing slash or a path on APP_ORIGIN is dropped", publicOrigin(req, { APP_ORIGIN: "https://katalab.art/" }) === "https://katalab.art" && publicOrigin(req, { APP_ORIGIN: "https://katalab.art/login" }) === "https://katalab.art");
+    t.check("a blank APP_ORIGIN counts as unset", publicOrigin(req, { APP_ORIGIN: "   " }) === "https://localhost:3100");
+    let bad = 0;
+    for (const value of ["katalab.art", "javascript:alert(1)", "ftp://katalab.art"]) {
+      try {
+        publicOrigin(req, { APP_ORIGIN: value });
+      } catch {
+        bad++;
+      }
+    }
+    t.check("a misconfigured APP_ORIGIN fails loudly instead of emailing a broken link", bad === 3);
+  }
+
 
   console.log("calendar layout");
   {
