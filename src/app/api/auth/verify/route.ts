@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { consumeVerificationToken } from "../../../lib/emailVerification";
+import { publicOrigin } from "../../../lib/publicOrigin";
 
 /**
  * Public (see middleware.ts's PUBLIC_PREFIXES: /api/auth/) — this is a link
@@ -16,9 +17,10 @@ export async function GET(req: NextRequest) {
     ? await consumeVerificationToken(token)
     : { ok: false as const, error: "missing verification token" };
 
-  const url = req.nextUrl.clone();
-  url.pathname = "/workspace";
-  url.search = "";
+  // Not req.nextUrl.clone(): in a route handler behind Caddy that is
+  // https://localhost:3100, which sent a verified person to an address only the
+  // server can open (publicOrigin.ts).
+  const url = new URL("/workspace", publicOrigin(req));
   url.searchParams.set(result.ok ? "verified" : "verify_error", result.ok ? "1" : result.error);
   return NextResponse.redirect(url);
 }
