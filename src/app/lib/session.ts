@@ -21,6 +21,7 @@ const sha256Hex = (value: string): string => createHash("sha256").update(value).
 export type SessionUser = {
   id: string;
   email: string;
+  /** Admins alone reach the Admin sections (Viral videos, Cost, Brands, Demo, Reverse-engineer). */
   isAdmin: boolean;
   plan: "free" | "premium";
   /** ISO timestamp — quota.ts's free-trial window is measured from this. */
@@ -115,7 +116,7 @@ export const getSessionUser = async (token: string | undefined): Promise<Session
   // proxy and the route handlers are separate bundles with separate caches, so
   // nothing could clear this one when the person clicks the link, and they
   // would be held at /verify-email for up to the TTL after confirming.
-  if (!user || user.isAdmin || user.emailVerifiedAt) {
+  if (!user || user.emailVerifiedAt) {
     sessionCache.set(tokenHash, {
       user,
       expiresAt: Date.now() + (user ? SESSION_CACHE_POSITIVE_TTL_MS : SESSION_CACHE_NEGATIVE_TTL_MS),

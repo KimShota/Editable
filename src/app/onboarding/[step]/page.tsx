@@ -22,8 +22,8 @@ export const metadata: Metadata = { title: "Setup · Katalab" };
  * action, picking the angle, is the same call a live setup makes).
  *
  * Live onboarding for new brands is Phase 2. Until then this is the
- * founder's demo tool, so it needs an admin in demo mode and `?replay=<slug>`
- * naming a brand they can open; anyone else is sent home.
+ * demo tool, so it needs an admin in demo mode and `?replay=<slug>` naming a brand the
+ * viewer can open; anything else is sent home.
  */
 export default async function OnboardingPage({ params, searchParams }: { params: Promise<{ step: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const { step } = await params;
@@ -116,7 +116,6 @@ export default async function OnboardingPage({ params, searchParams }: { params:
         angles={niche?.angles ?? []}
         chosenId={niche?.chosenAngleId ?? plan?.niche?.angleId ?? null}
         lockedTitle={plan?.niche?.title ?? null}
-        isAdmin={user.isAdmin}
         poolThumbs={sources.flatMap((s) => (s.thumbKey ? [mediaUrl(s.thumbKey)] : [])).slice(0, 4)}
         nextHref={here(at + 1)}
       />

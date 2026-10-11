@@ -3,7 +3,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { recreationKeys } from "@backend/brand/keys";
 import { dateOfDay, formatDate } from "@backend/plan/dates";
-import { isVideoVisible } from "@backend/plan/status";
 import { getActiveBrand } from "../../../lib/activeBrand";
 import { getRequestUser } from "../../../lib/auth";
 import { editorPath } from "../../../lib/autoOpenEditor";
@@ -31,9 +30,8 @@ export default async function CardPage({ params }: { params: Promise<{ cardId: s
     brandRepo.getSpec(slug, card.sourceId),
     brandRepo.listStoryboard(slug, cardId),
     brandRepo.listSources(slug),
-    queue.listTasks({ slug, cardId, kinds: ["card.adapt", "card.storyboard", "video.produce"] }),
-    // The video we made, only for someone who may see it (the founder from internal review, a customer once it is sent).
-    isVideoVisible(card.status, user.isAdmin) ? brandRepo.getVideo(slug, cardId) : null,
+    queue.listTasks({ slug, cardId, kinds: ["card.adapt", "card.storyboard", "video.estimate", "video.produce"] }),
+    brandRepo.getVideo(slug, cardId),
   ]);
 
   const k = recreationKeys(slug);
@@ -100,10 +98,11 @@ export default async function CardPage({ params }: { params: Promise<{ cardId: s
           cardId={card.id}
           dayLabel={`Day ${card.day}`}
           status={card.status}
-          audience={user.isAdmin ? "admin" : "customer"}
           editorPath={editorPath(card.id)}
           canOpenEditor={Boolean(madeVideo?.hasEdl)}
           lowConfidence={card.lowConfidence}
+          estimateUsd={card.estimateUsd ?? null}
+          estimateMaxUsd={card.estimateMaxUsd ?? card.estimateUsd ?? null}
           angle={card.angle}
           whyItWorks={spec?.whyItWorks ?? null}
           videoUrl={hasVideo ? mediaUrl(k.video(card.sourceId)) : null}

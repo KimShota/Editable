@@ -21,7 +21,6 @@ export type NicheData = {
   chosenId: string | null;
   /** The angle a plan has already locked in, if any. */
   lockedTitle: string | null;
-  isAdmin: boolean;
   poolThumbs: string[];
   nextHref: string;
 };
@@ -39,7 +38,7 @@ export function NicheStep(d: NicheData) {
   const propose = async () => {
     setBusy("propose");
     setError(null);
-    const res = await sendJson<{ taskId: number | null }>(`/api/admin/brands/${d.slug}/niche`, {});
+    const res = await sendJson<{ taskId: number | null }>(`/api/brands/${d.slug}/niche/propose`, {});
     setBusy(null);
     if (!res.ok) return setError(res.error);
     setTaskId(res.data.taskId);
@@ -68,16 +67,14 @@ export function NicheStep(d: NicheData) {
       <div className="flex flex-col items-center rounded-3xl border border-dashed border-[color:var(--card-border)] px-6 py-14 text-center">
         <p className="font-[family-name:var(--font-display)] text-lg font-semibold text-[color:var(--ink)]">No angles proposed yet</p>
         <p className="mt-2 max-w-md text-[15px] text-[color:var(--ink-dim)]">We suggest 3 to 5 ways to build your videos around the product, and you pick one.</p>
-        {d.isAdmin && (
-          <div className="mt-6 flex flex-col items-center gap-3">
-            <button type="button" className={primary} onClick={propose} disabled={busy !== null || taskId !== null}>
-              {busy === "propose" ? "Starting" : "Propose angles"}
-            </button>
-            <p className="text-[13px] text-[color:var(--ink-dim)]">This asks the AI and costs a few cents.</p>
-            {error && <p role="alert" className="text-sm text-[color:var(--st-bad-fg)]">{error}</p>}
-            {taskId !== null && <TaskProgress taskId={taskId} title="Finding angles that fit" onDone={() => router.refresh()} className="w-full max-w-sm text-left" />}
-          </div>
-        )}
+        <div className="mt-6 flex flex-col items-center gap-3">
+          <button type="button" className={primary} onClick={propose} disabled={busy !== null || taskId !== null}>
+            {busy === "propose" ? "Starting" : "Propose angles"}
+          </button>
+          <p className="text-[13px] text-[color:var(--ink-dim)]">This asks the AI and costs a few cents.</p>
+          {error && <p role="alert" className="text-sm text-[color:var(--st-bad-fg)]">{error}</p>}
+          {taskId !== null && <TaskProgress taskId={taskId} title="Finding angles that fit" onDone={() => router.refresh()} className="w-full max-w-sm text-left" />}
+        </div>
       </div>
     );
   }

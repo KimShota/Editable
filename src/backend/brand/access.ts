@@ -6,7 +6,7 @@ import type { QueryFn } from "../../app/lib/db";
  * and API routes) and the request proxy (media and the editor's job
  * routes), so there is one definition of "may open this brand".
  *
- * Only brands linked to files (a slug) are visible. An admin sees them all.
+ * Only brands linked to files (a slug) are visible. An admin sees them all (the Admin sections work across brands).
  */
 
 export type Viewer = { id: string; isAdmin: boolean };

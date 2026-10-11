@@ -10,9 +10,7 @@ import { readNiche } from "./store";
  * (plan/ui-ux-full-flow.md §2.2): one card per adapted script, the card id
  * being the source id the script was written for.
  *
- * A card whose video is already rendered starts in `internal_review`, not
- * `needs_review`: the founder decides when the customer first sees it (the
- * review gate). Everything else is a `draft` waiting for the customer.
+ * A card whose video is already rendered starts in `ready`. Everything else is a `draft`.
  */
 export const planFromFiles = async (storage: Storage, slug: string, opts: { startsOn: string; cycleId?: string }): Promise<Omit<Plan, "rev">> => {
   const k = recreationKeys(slug);
@@ -28,7 +26,7 @@ export const planFromFiles = async (storage: Storage, slug: string, opts: { star
       sourceId: script.sourceId,
       angle: script.angle,
       hook: script.lines[0]?.text ?? "",
-      status: rendered ? "internal_review" : "draft",
+      status: rendered ? "ready" : "draft",
       lowConfidence: false,
       alternates: [],
       history: [],
@@ -38,7 +36,7 @@ export const planFromFiles = async (storage: Storage, slug: string, opts: { star
   if (cards.length > CYCLE_DAYS) throw new Error(`brand ${slug} has ${cards.length} scripts; a cycle holds ${CYCLE_DAYS}`);
 
   // Finished videos first (they are the ones to show), then by id.
-  cards.sort((a, b) => Number(b.status === "internal_review") - Number(a.status === "internal_review") || a.id.localeCompare(b.id));
+  cards.sort((a, b) => Number(b.status === "ready") - Number(a.status === "ready") || a.id.localeCompare(b.id));
 
   const niche = await readNiche(storage, slug);
   const chosen = niche?.angles.find((a) => a.id === niche.chosenAngleId) ?? null;

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { CardStatus } from "@backend/plan/schemas";
-import { type StatusAudience, type StatusKey, statusLabel } from "@backend/plan/status";
+import { type StatusKey, statusLabel } from "@backend/plan/status";
 
 /** Small reusable UI primitives shared across app pages, styled to the purple/grain theme. */
 
@@ -170,7 +170,6 @@ const STATUS_STYLE: Record<StatusKey, string> = {
   draft: "bg-[color:var(--st-draft-bg)] text-[color:var(--st-draft-fg)]",
   queued: "bg-[color:var(--st-queued-bg)] text-[color:var(--st-queued-fg)]",
   working: "bg-[color:var(--st-working-bg)] text-[color:var(--st-working-fg)]",
-  review: "bg-[color:var(--st-review-bg)] text-[color:var(--st-review-fg)]",
   ready: "bg-[color:var(--st-ready-bg)] text-[color:var(--st-ready-fg)]",
   posted: "bg-[color:var(--st-posted-bg)] text-[color:var(--st-posted-fg)]",
   bad: "bg-[color:var(--st-bad-bg)] text-[color:var(--st-bad-fg)]",
@@ -179,20 +178,17 @@ const STATUS_STYLE: Record<StatusKey, string> = {
 /**
  * The one place a card/video status is rendered, so Calendar, Plan, the
  * editor top bar and Admin all say the same thing in the same colour. The
- * words come from `statusLabel` (the customer never sees the internal review
- * gate or a failed run; admins do). `lowConfidence` adds the warning outline
+ * words come from `statusLabel`. `lowConfidence` adds the warning outline
  * QC sets when a clip only passed on its last retry.
  */
 export function StatusBadge({
   status,
   lowConfidence = false,
-  audience = "customer",
 }: {
   status: CardStatus;
   lowConfidence?: boolean;
-  audience?: StatusAudience;
 }) {
-  const { key, label } = statusLabel(status, audience);
+  const { key, label } = statusLabel(status);
   return (
     <span className="inline-flex max-w-full items-center gap-1.5" data-status={status}>
       <span

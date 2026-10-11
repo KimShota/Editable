@@ -33,12 +33,13 @@ type Props = {
   rows: Row[];
   shots: Shot[];
   swapOptions: { sourceId: string; label: string }[];
-  /** Whose words the status badge uses: the founder sees internal review, a customer sees "Generating". */
-  audience: "admin" | "customer";
   /** The editor for this card's video, and whether there is a video this viewer may open yet. */
   editorPath: string;
   canOpenEditor: boolean;
-  /** Work running on this card: planning steps and, once released, the video itself. */
+  /** What making the video would cost, once priced (the price check voices the script, which is cheap). */
+  estimateUsd: number | null;
+  estimateMaxUsd: number | null;
+  /** Work running on this card: planning steps, pricing and, once started, the video itself. */
   liveTasks: { id: number; kind: string }[];
   prevId: string | null;
   nextId: string | null;
@@ -67,10 +68,16 @@ const lengthHint = (text: string, sourceWords: number): string | null => {
   return null;
 };
 
-type LiveTask = { id: number; title: string; producing: boolean };
+type LiveTask = { id: number; title: string; producing: boolean; pricing?: boolean };
 /** Making the video itself gets its own title and the staged bar (Voice, Clips, Finishing). */
 const asLiveTask = (t: { id: number; kind: string }): LiveTask =>
-  t.kind === "video.produce" ? { id: t.id, title: "Making your video", producing: true } : { id: t.id, title: "Working on this video", producing: false };
+  t.kind === "video.produce"
+    ? { id: t.id, title: "Making your video", producing: true }
+    : t.kind === "video.estimate"
+      ? { id: t.id, title: "Pricing this video", producing: false, pricing: true }
+      : { id: t.id, title: "Working on this video", producing: false };
+
+const usd = (n: number): string => `$${n.toFixed(2)}`;
 
 export function CardWorkspace(props: Props) {
   const { slug, cardId, status, rows, shots, swapOptions } = props;
@@ -91,6 +98,7 @@ export function CardWorkspace(props: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [swapTo, setSwapTo] = useState("");
+  const [confirming, setConfirming] = useState(false);
 
   // The server sends fresh rows after a save or a rewrite; start typing from those.
   useEffect(() => setTexts(saved), [saved]);
@@ -103,6 +111,7 @@ export function CardWorkspace(props: Props) {
   const writing = tasks.length > 0;
   const producing = tasks.some((t) => t.producing);
   const locked = !editable || writing;
+  const canMake = status === "approved" || status === "failed";
 
   // Left and right arrows move between days, unless the person is typing.
   useEffect(() => {
@@ -128,10 +137,11 @@ export function CardWorkspace(props: Props) {
     router.refresh();
   };
 
-  const startTask = (title: string) => (data: Record<string, unknown>) => {
+  const startTask = (title: string, kind: Partial<LiveTask> = {}) => (data: Record<string, unknown>) => {
     const id = typeof data.taskId === "number" ? data.taskId : null;
-    if (id !== null) setTasks((t) => (t.some((x) => x.id === id) ? t : [...t, { id, title, producing: false }]));
+    if (id !== null) setTasks((t) => (t.some((x) => x.id === id) ? t : [...t, { id, title, producing: false, ...kind }]));
   };
+  const cardApi = `/api/brands/${slug}/cards/${cardId}`;
 
   const save = () => act("save", () => sendJson(`/api/brands/${slug}/cards/${cardId}/script`, { lines: changed }, "PUT"), () => setNotice("Saved."));
   const post = (action: string, extra: Record<string, unknown> = {}) => sendJson(`/api/brands/${slug}/cards/${cardId}`, { action, ...extra });
@@ -150,7 +160,7 @@ export function CardWorkspace(props: Props) {
       {/* Status and the actions that change the card */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <StatusBadge status={status} lowConfidence={props.lowConfidence} audience={props.audience} />
+          <StatusBadge status={status} lowConfidence={props.lowConfidence} />
           {writing && <span className="text-sm text-[color:var(--ink-dim)]">{producing ? "Being made" : "Writing in progress"}</span>}
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -161,14 +171,52 @@ export function CardWorkspace(props: Props) {
             </Button>
           )}
           {status === "approved" && (
-            <Button variant="secondary" onClick={() => act("unapprove", () => post("unapprove"))} disabled={busy !== null}>
+            <Button variant="secondary" onClick={() => act("unapprove", () => post("unapprove"))} disabled={busy !== null || writing}>
               {busy === "unapprove" ? "Working" : "Unapprove"}
             </Button>
           )}
         </div>
       </div>
       {status === "draft" && dirty && <p className="-mt-6 text-sm text-[color:var(--ink-dim)]">Save your changes before approving.</p>}
-      {!editable && status === "approved" && <p className="-mt-6 max-w-[65ch] text-sm text-[color:var(--ink-dim)]">This video is approved and queued for production. Unapprove it to change the script.</p>}
+      {canMake && (
+        <section aria-labelledby="make-title" className="flex flex-col gap-3 rounded-2xl border border-[color:var(--card-border)] bg-[color:var(--card)] p-5">
+          <h2 id="make-title" className="font-[family-name:var(--font-display)] text-base font-semibold text-[color:var(--ink)]">
+            Make this video
+          </h2>
+          <p className="max-w-[65ch] text-sm text-[color:var(--ink-dim)]">
+            {status === "failed" ? "The last run failed. Making it again pays for a new run. " : "This video is approved. Making it spends money, so you see the price first. "}
+            Unapprove it to change the script.
+          </p>
+          <p className="text-sm text-[color:var(--ink)]" data-testid="estimate">
+            {props.estimateUsd === null ? "Not priced yet." : `Estimated ${usd(props.estimateUsd)}${props.estimateMaxUsd !== null && props.estimateMaxUsd !== props.estimateUsd ? `, up to ${usd(props.estimateMaxUsd)} with retries` : ""}.`}
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            {props.estimateUsd === null && (
+              <Button variant="secondary" onClick={() => act("estimate", () => sendJson(`${cardApi}/estimate`, {}), startTask("Pricing this video", { pricing: true }))} disabled={busy !== null || writing}>
+                {busy === "estimate" ? "Starting" : "Get estimate"}
+              </Button>
+            )}
+            {props.estimateUsd !== null && !confirming && (
+              <Button onClick={() => setConfirming(true)} disabled={busy !== null || writing}>
+                Make this video
+              </Button>
+            )}
+            {confirming && (
+              <>
+                <Button
+                  onClick={() => act("release", () => sendJson(`${cardApi}/release`, {}), (data) => { setConfirming(false); startTask("Making your video", { producing: true })(data); })}
+                  disabled={busy !== null}
+                >
+                  {busy === "release" ? "Starting" : `Spend up to ${usd(props.estimateMaxUsd ?? props.estimateUsd ?? 0)}`}
+                </Button>
+                <Button variant="secondary" onClick={() => setConfirming(false)}>
+                  Cancel
+                </Button>
+              </>
+            )}
+          </div>
+        </section>
+      )}
 
       {error && (
         <p role="alert" className="rounded-xl border border-[color:var(--st-bad-fg)]/30 bg-[color:var(--st-bad-bg)] px-4 py-3 text-sm text-[color:var(--st-bad-fg)]">
@@ -189,8 +237,8 @@ export function CardWorkspace(props: Props) {
               taskId={t.id}
               title={t.title}
               stages={t.producing ? PRODUCTION_STAGES : undefined}
-              // A video the founder watched being made opens in the editor as soon as it is done.
-              onDone={() => (t.producing && props.audience === "admin" && canAutoOpenEditor() ? router.push(props.editorPath) : router.refresh())}
+              // A video you watched being made opens in the editor as soon as it is done.
+              onDone={() => (t.producing && canAutoOpenEditor() ? router.push(props.editorPath) : router.refresh())}
             />
           ))}
         </div>

@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
 import { averageCost, brandLedger, readVideoCosts, summarizeCosts, TARGET_USD_PER_VIDEO } from "@backend/brand/costs";
 import { getStorage } from "@backend/storage";
 import { getActiveBrand } from "../../../lib/activeBrand";
+import { notFound } from "next/navigation";
 import { getRequestUser } from "../../../lib/auth";
 import { brandRepo } from "../../../lib/brandRepo";
 import { query } from "../../../lib/db";
@@ -14,7 +14,7 @@ export const metadata: Metadata = { title: "Cost · Katalab" };
 const usd = (n: number): string => `$${n.toFixed(2)}`;
 
 /** What each video cost to make, against the $3 target (plan decision 15).
- *  Measured from the production cost logs, never estimated. Founder only. */
+ *  Measured from the production cost logs, never estimated. */
 export default async function AdminCostPage() {
   const user = (await getRequestUser())!;
   if (!user.isAdmin) notFound();

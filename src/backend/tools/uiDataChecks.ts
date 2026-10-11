@@ -25,7 +25,7 @@ import { addDays, dateOfDay, daysBetween, formatDate, todayIn, weekdayIndex } fr
 import { BrandAccessError, BrandRepo } from "../brand/repo";
 import { assertBrandSlug, brandKeys, parseVideoJobId, productionKeys, recreationKeys, videoJobId } from "../brand/keys";
 import { type Card, CARD_STATUSES, PlanSchema } from "../plan/schemas";
-import { allowedNext, canTransition, isEditable, isVideoVisible, MAX_HISTORY, statusLabel, TransitionError, transitionCard } from "../plan/status";
+import { allowedNext, canTransition, isEditable, MAX_HISTORY, statusLabel, TransitionError, transitionCard } from "../plan/status";
 import { publicOrigin } from "../../app/lib/publicOrigin";
 import { planFromFiles } from "../plan/seed";
 import { findCard, sourceIdForCard } from "../plan/store";
@@ -77,39 +77,39 @@ const main = async () => {
   t.check("parseVideoJobId is null for an unknown brand", parseVideoJobId("other-DbAJ", ["shogunai"]) === null);
 
   console.log("status rules");
-  for (const s of CARD_STATUSES) t.check(`every status has a customer and admin label: ${s}`, !!statusLabel(s, "customer").label && !!statusLabel(s, "admin").label);
-  t.check("customer approves a draft", canTransition("draft", "approved", "customer"));
-  t.check("customer cannot release production", !canTransition("approved", "queued", "customer"));
-  t.check("admin releases production", canTransition("approved", "queued", "admin"));
-  t.check("only the system starts generating", canTransition("queued", "generating", "system") && !canTransition("queued", "generating", "admin") && !canTransition("queued", "generating", "customer"));
-  t.check("customer cannot see a video before the admin sends it", !canTransition("internal_review", "needs_review", "customer") && canTransition("internal_review", "needs_review", "admin"));
-  t.check("a thumbs-down sends a reviewed video back behind the gate", canTransition("needs_review", "internal_review", "customer"));
-  t.check("customer approves a video, then marks it posted", canTransition("needs_review", "ready", "customer") && canTransition("ready", "posted", "customer"));
-  t.check("a customer cannot jump a draft straight to ready", !canTransition("draft", "ready", "customer") && !canTransition("draft", "ready", "admin"));
-  t.check("posted is final for a customer", allowedNext("posted", "customer").length === 0);
-  t.check("failed goes back to the release gate only for an admin", allowedNext("failed", "admin").includes("approved") && allowedNext("failed", "customer").length === 0);
-  t.check("the customer never sees the review gate or a failure", statusLabel("internal_review", "customer").label === "Generating" && statusLabel("failed", "customer").label === "Generating");
-  t.check("the customer sees an approved card as queued for production", statusLabel("approved", "customer").label === "Queued for production");
+  for (const s of CARD_STATUSES) t.check(`every status has a label: ${s}`, !!statusLabel(s).label);
+  t.check("a person approves a draft", canTransition("draft", "approved", "user"));
+  t.check("a person starts making an approved video", canTransition("approved", "queued", "user"));
+  t.check("legacy review statuses read back as ready", ["internal_review", "needs_review"].every((v) => PlanSchema.shape.cards.element.shape.status.parse(v) === "ready"));
+  t.check("only the system starts generating", canTransition("queued", "generating", "system") && !canTransition("queued", "generating", "user"));
+  t.check("a finished run goes straight to ready, with no review step", canTransition("generating", "ready", "system") && !canTransition("generating", "ready", "user") && !CARD_STATUSES.includes("needs_review" as never) && !CARD_STATUSES.includes("internal_review" as never));
+  t.check("a ready video can only be marked posted", allowedNext("ready", "user").join() === "posted");
+  t.check("a person marks a ready video as posted", canTransition("ready", "posted", "user"));
+  t.check("nobody jumps a draft straight to ready", !canTransition("draft", "ready", "user") && !canTransition("draft", "ready", "system"));
+  t.check("a posted video can be taken back to ready", allowedNext("posted", "user").join() === "ready");
+  t.check("a failed run goes back to the release gate", allowedNext("failed", "user").includes("approved"));
+  t.check("a failure is named, not hidden", statusLabel("failed").label === "Failed");
+  t.check("an approved card says it is ready to make", statusLabel("approved").label === "Approved · ready to make");
   t.check("only a draft is editable", CARD_STATUSES.every((s) => isEditable(s) === (s === "draft")));
   {
-    const moved = transitionCard(card(), "approved", "customer", new Date("2026-10-04T00:00:00Z"));
-    t.check("transitionCard changes the status and records the move", moved.status === "approved" && moved.history.length === 1 && moved.history[0].from === "draft" && moved.history[0].by === "customer");
+    const moved = transitionCard(card(), "approved", "user", new Date("2026-10-04T00:00:00Z"));
+    t.check("transitionCard changes the status and records the move", moved.status === "approved" && moved.history.length === 1 && moved.history[0].from === "draft" && moved.history[0].by === "user");
     t.check("transitionCard does not mutate its input", card().status === "draft");
-    t.throws("transitionCard throws a TransitionError for a forbidden edge", () => transitionCard(card(), "ready", "customer"), /cannot move a card from draft to ready/);
+    t.throws("transitionCard throws a TransitionError for a forbidden edge", () => transitionCard(card(), "ready", "user"), /cannot move a card from draft to ready/);
     let flipped = card();
-    for (let i = 0; i < MAX_HISTORY + 10; i++) flipped = transitionCard(flipped, flipped.status === "draft" ? "approved" : "draft", "customer");
+    for (let i = 0; i < MAX_HISTORY + 10; i++) flipped = transitionCard(flipped, flipped.status === "draft" ? "approved" : "draft", "user");
     t.check("history is capped, keeping the newest", flipped.history.length === MAX_HISTORY);
     try {
-      transitionCard(card(), "posted", "admin");
+      transitionCard(card(), "posted", "user");
     } catch (err) {
-      t.check("the error says what was attempted", err instanceof TransitionError && err.from === "draft" && err.to === "posted" && err.actor === "admin");
+      t.check("the error says what was attempted", err instanceof TransitionError && err.from === "draft" && err.to === "posted" && err.actor === "user");
     }
   }
   {
     // Every edge named in allowedNext must also pass canTransition (the two
     // views of the table can't drift).
     let consistent = true;
-    for (const from of CARD_STATUSES) for (const actor of ["customer", "admin", "system"] as const) for (const to of allowedNext(from, actor)) if (!canTransition(from, to, actor)) consistent = false;
+    for (const from of CARD_STATUSES) for (const actor of ["user", "system"] as const) for (const to of allowedNext(from, actor)) if (!canTransition(from, to, actor)) consistent = false;
     t.check("allowedNext and canTransition agree", consistent);
   }
 
@@ -246,11 +246,6 @@ const main = async () => {
   t.throws("a date that does not exist is rejected", () => addDays("2026-02-31", 1), /not a real date/);
   t.check("todayIn uses the given time zone, not the server's", todayIn("Asia/Tokyo", new Date("2026-10-09T20:00:00Z")) === "2026-10-10" && todayIn("America/New_York", new Date("2026-10-09T20:00:00Z")) === "2026-10-09");
 
-  console.log("who may see a produced video");
-  for (const st of CARD_STATUSES) t.check(`customer visibility of a ${st} video`, isVideoVisible(st, false) === ["needs_review", "ready", "posted"].includes(st));
-  t.check("an admin sees every video", CARD_STATUSES.every((st) => isVideoVisible(st, true)));
-  t.check("the review gate hides a video that is still with the founder", !isVideoVisible("internal_review", false) && !isVideoVisible("generating", false) && !isVideoVisible("failed", false));
-
   console.log("public origin: the address links in emails and Stripe point at");
   {
     const req = { url: "https://localhost:3100/api/auth/signup" };
@@ -294,7 +289,7 @@ const main = async () => {
     t.check("from day 11 the next plan is on its way", sum("2026-10-19").countdown === "Your next plan is on its way" && sum("2026-10-22").countdown === "Your next plan is on its way");
     t.check("after the last day the cycle has ended", sum("2026-10-23").countdown === "This cycle has ended");
     t.check("the end date is day 14", sum("2026-10-09").endsOn === "2026-10-22");
-    t.check("ready counts approved and posted videos only", sum("2026-10-12", [card({ id: "a", day: 1, status: "ready" }), card({ id: "b", day: 2, status: "posted" }), card({ id: "c", day: 3, status: "needs_review" }), card({ id: "d", day: 4, status: "approved" })]).ready === 2);
+    t.check("ready counts ready and posted videos only", sum("2026-10-12", [card({ id: "a", day: 1, status: "ready" }), card({ id: "b", day: 2, status: "posted" }), card({ id: "c", day: 3, status: "generating" }), card({ id: "d", day: 4, status: "approved" })]).ready === 2);
     t.check("a card leads to the editor once it has a video, else to the plan", cardHref("x", true) === "/videos/x/edit" && cardHref("x", false) === "/plan/x");
   }
 
@@ -382,12 +377,12 @@ const main = async () => {
     t.check("…and leaves the saved plan untouched", (await repo.getPlan("shogunai"))!.rev === 6);
 
     console.log("card transitions through the repo");
-    await repo.transitionCard("shogunai", "a", "approved", "customer");
+    await repo.transitionCard("shogunai", "a", "approved", "user");
     t.check("approving moves the card and logs it", (await repo.getCard("shogunai", "a"))!.status === "approved" && (await repo.getCard("shogunai", "a"))!.history.length === 1);
-    await t.rejects("a customer cannot release it", () => repo.transitionCard("shogunai", "a", "queued", "customer"), /cannot move a card/);
-    await repo.transitionCard("shogunai", "a", "queued", "admin", { estimateUsd: 12.5 });
+    await t.rejects("the system-only edges are refused to a person", () => repo.transitionCard("shogunai", "a", "generating", "user"), /cannot move a card/);
+    await repo.transitionCard("shogunai", "a", "queued", "user", { estimateUsd: 12.5 });
     t.check("a patch is applied with the move", (await repo.getCard("shogunai", "a"))!.estimateUsd === 12.5);
-    await t.rejects("an unknown card throws instead of silently doing nothing", () => repo.transitionCard("shogunai", "zzz", "approved", "customer"), /no card zzz/);
+    await t.rejects("an unknown card throws instead of silently doing nothing", () => repo.transitionCard("shogunai", "zzz", "approved", "user"), /no card zzz/);
     t.check("other cards were not touched", (await repo.getCard("shogunai", "b"))!.status === "draft");
 
     console.log("scripts, storyboards, post details, video");
@@ -476,7 +471,7 @@ const main = async () => {
     t.check("one card per script, card id = source id", seeded.cards.map((c) => c.id).sort().join() === "alpha,mid,zeta");
     t.check("a rendered video goes first, the rest by id", seeded.cards.map((c) => c.id).join() === "zeta,alpha,mid");
     t.check("days run 1..n in that order", seeded.cards.map((c) => c.day).join() === "1,2,3");
-    t.check("a rendered video waits at the review gate; the rest are drafts", seeded.cards[0].status === "internal_review" && seeded.cards.slice(1).every((c) => c.status === "draft"));
+    t.check("a rendered video is ready; the rest are drafts", seeded.cards[0].status === "ready" && seeded.cards.slice(1).every((c) => c.status === "draft"));
     t.check("angle and hook come from the script", seeded.cards[0].angle === "angle zeta" && seeded.cards[0].hook === "Z hook");
     t.check("with no niche chosen the plan has none", seeded.niche === null);
     await storage.putBuffer("brands/acme/niche.json", Buffer.from(JSON.stringify({ angles: [{ id: "n1", title: "Study tips", whyItFits: "x", exampleHooks: [] }], chosenAngleId: "n1", proposedAt: "2026-10-03T00:00:00Z" })));
@@ -526,7 +521,7 @@ const main = async () => {
     t.check("the angle is passed to the writer as direction", (await repo.getScript("planco", firstCard.id))!.angle.includes(firstCard.angle.slice(0, 20)));
     await run("card.adapt", { slug: "planco", cardId: firstCard.id, note: "make it shorter" });
     t.check("a rewrite note reaches the writer", (await repo.getScript("planco", firstCard.id))!.lines[0].text.includes("make it shorter"));
-    await repo.transitionCard("planco", firstCard.id, "approved", "customer");
+    await repo.transitionCard("planco", firstCard.id, "approved", "user");
     await t.rejects("an approved card cannot be rewritten", () => run("card.adapt", { slug: "planco", cardId: firstCard.id }), /only a draft can be rewritten/);
     await t.rejects("adapting a card that is not in the plan fails", () => run("card.adapt", { slug: "planco", cardId: "ghost" }), /no card ghost/);
 
@@ -564,13 +559,13 @@ const main = async () => {
       await t.rejects("an estimate needs a script", () => runV("video.estimate", { slug: "planco", cardId: vcards[5].id }), /no script yet/);
 
       await t.rejects("a draft is never produced", () => runV("video.produce", { slug: "planco", cardId: target.id }), /is draft, not queued/);
-      await repo.transitionCard("planco", target.id, "approved", "customer");
-      await t.rejects("an approved card the founder has not released is not produced either", () => runV("video.produce", { slug: "planco", cardId: target.id }), /is approved, not queued/);
-      await repo.transitionCard("planco", target.id, "queued", "admin");
+      await repo.transitionCard("planco", target.id, "approved", "user");
+      await t.rejects("an approved card that was not started is not produced either", () => runV("video.produce", { slug: "planco", cardId: target.id }), /is approved, not queued/);
+      await repo.transitionCard("planco", target.id, "queued", "user");
       const made = (await runV("video.produce", { slug: "planco", cardId: target.id })) as { flagged: string[] };
       const after = (await repo.getCard("planco", target.id))!;
-      t.check("a released card ends at internal review, not at the customer", after.status === "internal_review" && made.flagged.length === 0 && !after.lowConfidence);
-      t.check("the status history shows queued, generating, internal review", after.history.slice(-3).map((h) => h.to).join() === "queued,generating,internal_review");
+      t.check("a made card ends at ready", after.status === "ready" && made.flagged.length === 0 && !after.lowConfidence);
+      t.check("the status history shows queued, generating, ready", after.history.slice(-3).map((h) => h.to).join() === "queued,generating,ready");
       t.check("the finished video is stored with its cost log", (await repo.getVideo("planco", target.id)).hasFinal && (await repo.getVideo("planco", target.id)).costUsd > 0);
       const edl = EdlSchema.parse(JSON.parse(fs.readFileSync(path.join(artifactsDir(`planco-${target.id}`), "edl.json"), "utf8")));
       t.check("an EDL the editor can open is written, one segment per shot", edl.video.length === 3 && edl.durationSec === 6);
@@ -588,19 +583,19 @@ const main = async () => {
 
       // A run that fails leaves the card failed, with the reason, and is not retried.
       const broken = vcards[6];
-      await repo.transitionCard("planco", broken.id, "approved", "customer");
-      await repo.transitionCard("planco", broken.id, "queued", "admin");
+      await repo.transitionCard("planco", broken.id, "approved", "user");
+      await repo.transitionCard("planco", broken.id, "queued", "user");
       await t.rejects("a run that fails reports why", () => runV("video.produce", { slug: "planco", cardId: broken.id }), /ENOENT|no adapted script|adapted script/);
       t.check("…and the card is marked failed, not left generating", (await repo.getCard("planco", broken.id))!.status === "failed");
-      t.check("a failed card can be released again by the founder only", canTransition("failed", "queued", "admin") && !canTransition("failed", "queued", "customer"));
+      t.check("a failed card can be released again", canTransition("failed", "queued", "user"));
 
       // A shot that only passed on its last retry flags the card.
       await run("card.adapt", { slug: "planco", cardId: vcards[7].id });
       await repo.updatePlan("planco", (p) => ({ ...p, cards: p.cards.map((c) => (c.id === vcards[7].id ? { ...c, id: `${c.id}-flag` } : c)) }));
       const flagId = `${vcards[7].id}-flag`;
       await storage.putBuffer(`brands/planco/scripts/${flagId}.json`, fs.readFileSync(await storage.localPath(`brands/planco/scripts/${vcards[7].id}.json`)));
-      await repo.transitionCard("planco", flagId, "approved", "customer");
-      await repo.transitionCard("planco", flagId, "queued", "admin");
+      await repo.transitionCard("planco", flagId, "approved", "user");
+      await repo.transitionCard("planco", flagId, "queued", "user");
       await runV("video.produce", { slug: "planco", cardId: flagId });
       t.check("a shot that passed only on its last retry raises the low-confidence flag", (await repo.getCard("planco", flagId))!.lowConfidence === true);
     } finally {
@@ -642,8 +637,8 @@ const main = async () => {
     console.log("workspace members and invitations");
     {
       const pending = async (w: string) => (await listPendingInvites(query, w)).map((i) => i.email);
-      const mk = async (email: string, opts: { verified?: boolean; admin?: boolean } = {}) =>
-        String((await query(`insert into users (email, email_norm, password_hash, is_admin, email_verified_at) values ($1, $1, 'x', $2, ${opts.verified ? "now()" : "null"}) returning id`, [email, opts.admin ?? false]))[0].id);
+      const mk = async (email: string, opts: { verified?: boolean } = {}) =>
+        String((await query(`insert into users (email, email_norm, password_hash, email_verified_at) values ($1, $1, 'x', ${opts.verified ? "now()" : "null"}) returning id`, [email]))[0].id);
       const workspace = String((await query(`insert into workspaces (name) values ('Invite Co') returning id`))[0].id);
       const members = async () => (await query(`select u.email from workspace_members m join users u on u.id = m.user_id where m.workspace_id = $1 order by u.email`, [workspace])).map((r) => String(r.email));
 
@@ -664,8 +659,8 @@ const main = async () => {
       await query(`update users set email_verified_at = now() where id = $1`, [unverified]);
       await claimInvites(query, unverified);
       t.check("…and the right person still can, after verifying", (await members()).includes("later@x.test"));
-      await mk("boss@x.test", { admin: true });
-      t.check("an admin account (made by tool, never email-verified) counts as proven", (await inviteToWorkspace(query, workspace, "boss@x.test")).status === "added");
+      await mk("boss@x.test");
+      t.check("no account is exempt from verification: an unverified one waits too", (await inviteToWorkspace(query, workspace, "boss@x.test")).status === "invited");
       await inviteToWorkspace(query, workspace, "typo@x.test");
       t.check("an invitation can be cancelled", (await cancelInvite(query, workspace, "TYPO@x.test")) && !(await pending(workspace)).includes("typo@x.test") && !(await cancelInvite(query, workspace, "typo@x.test")));
       t.check("the migration made the table and its index", Number((await query(`select count(*)::int as n from pg_indexes where tablename = 'workspace_invites'`))[0].n) >= 2);

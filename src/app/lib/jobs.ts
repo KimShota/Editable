@@ -120,7 +120,7 @@ export const getJobStatus = (jobId: string): { completedStages: PipelineStage[];
   rendered: fs.existsSync(path.join(outDir, `${jobId}.mp4`)),
 });
 
-/** Every job on disk, unfiltered — for cross-user/admin concerns (e.g.
+/** Every job on disk, unfiltered — for cross-user concerns (e.g.
  *  formats.ts picking any rendered job as a gallery preview). Anything
  *  showing jobs to a specific signed-in user should go through
  *  listJobsForUser instead. */
@@ -138,14 +138,13 @@ export const listJobs = (): JobSummary[] => {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 };
 
-/** listJobs(), scoped to what `user` may see: everything for an admin,
- *  otherwise only jobs they own — mirrors middleware.ts's per-job access
- *  rule exactly, so nothing shows up in a listing that a direct link to it
- *  would then 404 on. An unowned job (pre-accounts dev/test data) stays
- *  admin-only rather than defaulting to "shared with everyone". */
-export const listJobsForUser = async (user: { id: string; isAdmin: boolean }): Promise<JobSummary[]> => {
+/** listJobs(), scoped to the jobs `user` owns — mirrors the request proxy's
+ *  per-job access rule exactly, so nothing shows up in a listing that a
+ *  direct link to it would then 404 on. An unowned job (pre-accounts
+ *  dev/test data) belongs to no one rather than defaulting to "shared with
+ *  everyone". */
+export const listJobsForUser = async (user: { id: string }): Promise<JobSummary[]> => {
   const jobs = listJobs();
-  if (user.isAdmin) return jobs;
   const rows = await sql`select job_id, user_id from job_owners`;
   const ownerOf = new Map((rows as { job_id: string; user_id: string }[]).map((r) => [r.job_id, r.user_id]));
   return jobs.filter((j) => ownerOf.get(j.id) === user.id);

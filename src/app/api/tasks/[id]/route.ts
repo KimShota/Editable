@@ -25,5 +25,5 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     if (err instanceof BrandAccessError) return NextResponse.json({ error: "not found" }, { status: 404 });
     throw err;
   }
-  return NextResponse.json(toPublicTask(task, user.isAdmin));
+  return NextResponse.json(toPublicTask(task));
 }

@@ -8,7 +8,7 @@ import { NewDraftForm } from "./_components/NewDraftForm";
 export const metadata: Metadata = { title: "Reverse-engineer · Katalab" };
 
 /** The format-authoring tool (the old template product), kept for the
- *  founder, now under Admin. */
+ *  now under Admin. */
 export default async function AdminReverseEngineerPage() {
   const user = await getRequestUser();
   if (!user?.isAdmin) notFound();

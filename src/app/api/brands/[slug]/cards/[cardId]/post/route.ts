@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { isVideoVisible } from "@backend/plan/status";
 import { brandRoute, readJsonBody } from "../../../../../../lib/brandApi";
 import { brandRepo } from "../../../../../../lib/brandRepo";
 
@@ -24,11 +23,11 @@ const Body = z.object({
 
 export async function PUT(req: Request, { params }: { params: Promise<{ slug: string; cardId: string }> }) {
   const { slug, cardId } = await params;
-  return brandRoute(slug, async ({ user }) => {
+  return brandRoute(slug, async () => {
     const body = await readJsonBody(req, Body);
     const card = await brandRepo.getCard(slug, cardId);
-    if (!card || !isVideoVisible(card.status, user.isAdmin)) return NextResponse.json({ error: "not found" }, { status: 404 });
-    // Keep where it was posted: only the customer's wording changes here.
+    if (!card) return NextResponse.json({ error: "not found" }, { status: 404 });
+    // Keep where it was posted: only the wording changes here.
     const current = await brandRepo.getPostDetails(slug, cardId);
     const saved = await brandRepo.savePostDetails(slug, cardId, { ...current, caption: body.caption, hashtags: [...new Set(body.hashtags)], platforms: body.platforms });
     return NextResponse.json({ ok: true, post: saved });

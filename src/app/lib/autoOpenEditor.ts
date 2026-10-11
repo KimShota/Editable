@@ -6,5 +6,5 @@
  */
 export const canAutoOpenEditor = (): boolean => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches;
 
-/** The editor for a card's finished video (founder: from internal review; customer: once sent to them). */
+/** The editor for a card's finished video (open as soon as it is made). */
 export const editorPath = (cardId: string): string => `/videos/${cardId}/edit`;

@@ -19,8 +19,7 @@ export const inviteToWorkspace = async (query: QueryFn, workspaceId: string, ema
   const emailNorm = normalizeEmail(email);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) throw new Error(`"${email}" is not an email address`);
 
-  // Admins are not email-verified (they are made by tool), so an admin counts as proven.
-  const users = await query(`select id from users where email_norm = $1 and (email_verified_at is not null or is_admin)`, [emailNorm]);
+  const users = await query(`select id from users where email_norm = $1 and email_verified_at is not null`, [emailNorm]);
   if (users.length > 0) {
     const inserted = await query(`insert into workspace_members (workspace_id, user_id) values ($1, $2) on conflict do nothing returning user_id`, [workspaceId, users[0].id]);
     return { status: inserted.length > 0 ? "added" : "already_member", email: emailNorm };
@@ -35,7 +34,7 @@ export const claimInvites = async (query: QueryFn, userId: string): Promise<numb
   const rows = await query(
     `with mine as (
        delete from workspace_invites i using users u
-        where u.id = $1 and i.email_norm = u.email_norm and (u.email_verified_at is not null or u.is_admin)
+        where u.id = $1 and i.email_norm = u.email_norm and u.email_verified_at is not null
         returning i.workspace_id
      )
      insert into workspace_members (workspace_id, user_id)

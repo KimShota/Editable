@@ -267,14 +267,14 @@ test.describe("choosing the angle", () => {
     expect((await page.request.post(api, { data: { angleId: "x" }, failOnStatusCode: false })).status()).toBe(404);
   });
 
-  test("proposing is the founder's, and once the plan carries an angle it is locked", async ({ page }) => {
+  test("a member can propose angles, and once the plan carries an angle it is locked", async ({ page }) => {
     test.setTimeout(60_000);
-    await signInAndOpenCalendar(page, "member");
-    expect((await page.request.post("/api/admin/brands/acme/niche", { data: {}, failOnStatusCode: false })).status()).toBe(404);
+    await signInAndOpenCalendar(page, "outsider");
+    expect((await page.request.post("/api/brands/acme/niche/propose", { data: {}, failOnStatusCode: false })).status()).toBe(404); // not their brand
     await page.context().clearCookies();
-    await signInAndOpenCalendar(page, "founder");
+    await signInAndOpenCalendar(page, "member");
 
-    const { taskId } = await (await page.request.post("/api/admin/brands/acme/niche", { data: {} })).json();
+    const { taskId } = await (await page.request.post("/api/brands/acme/niche/propose", { data: {} })).json();
     await expect.poll(async () => (await (await page.request.get(`/api/tasks/${taskId}`)).json()).status, { timeout: 20_000 }).toBe("done");
     const angles = readJson("brands/acme/niche.json").angles as { id: string }[];
     expect(angles).toHaveLength(4);
@@ -287,9 +287,9 @@ test.describe("choosing the angle", () => {
     expect((await other.json()).error).toMatch(/locked for this cycle/);
 
     // Proposing again would replace what the plan is built on: the job refuses.
-    const again = await (await page.request.post("/api/admin/brands/acme/niche", { data: {} })).json();
+    const again = await (await page.request.post("/api/brands/acme/niche/propose", { data: {} })).json();
     await expect.poll(async () => (await (await page.request.get(`/api/tasks/${again.taskId}`)).json()).status, { timeout: 20_000 }).toBe("failed");
-    expect((await (await page.request.get(`/api/tasks/${again.taskId}`)).json()).error).toMatch(/locked for this cycle/);
+    expect((await (await page.request.get(`/api/tasks/${again.taskId}`)).json()).error).toMatch(/did not finish/); // the reason stays in the logs
     expect(readJson("brands/acme/niche.json").chosenAngleId).toBe(angles[0].id);
   });
 });

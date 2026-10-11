@@ -4,7 +4,6 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { recreationKeys, videoJobId } from "@backend/brand/keys";
 import { dateOfDay, formatDate } from "@backend/plan/dates";
-import { isVideoVisible } from "@backend/plan/status";
 import { repoRoot } from "@backend/pipeline/paths";
 import { storageRoot } from "@backend/storage";
 import { getActiveBrand } from "../../../lib/activeBrand";
@@ -21,8 +20,7 @@ export const metadata: Metadata = { title: "Video · Katalab" };
  * A brand's finished video in the editor (plan/ui-ux-full-flow.md §5). A card
  * id is a source id, so the same id can exist in two brands: the active brand
  * is preferred, then any other the user may open that has this card. A
- * customer reaches only videos that have passed the founder's review gate;
- * for anything else this page does not exist.
+ * card with no video yet has no editor, so this page does not exist for it.
  */
 export default async function VideoEditPage({ params }: { params: Promise<{ cardId: string }> }) {
   const { cardId } = await params;
@@ -41,7 +39,7 @@ export default async function VideoEditPage({ params }: { params: Promise<{ card
   if (!slug) notFound();
 
   const [plan, card, brand] = await Promise.all([brandRepo.getPlan(slug), brandRepo.getCard(slug, cardId), brandRepo.getBrand(slug)]);
-  if (!plan || !card || !isVideoVisible(card.status, user.isAdmin)) notFound();
+  if (!plan || !card) notFound();
 
   const jobId = videoJobId(slug, cardId);
   const data = await loadEditorData(jobId);
@@ -72,7 +70,6 @@ export default async function VideoEditPage({ params }: { params: Promise<{ card
       angle={card.angle}
       status={card.status}
       lowConfidence={card.lowConfidence}
-      isAdmin={user.isAdmin}
       source={source}
       post={{
         caption: details.caption || script?.postCaption || "",

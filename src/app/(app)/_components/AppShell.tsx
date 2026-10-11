@@ -68,8 +68,7 @@ const NAV: NavItem[] = [
   },
 ];
 
-/** Extra links in the account menu at the bottom (Workspace, and Admin for
- *  admins). Filled in by the slices that build those pages. */
+/** Extra links in the account menu at the bottom: Workspace for everyone, and Admin for admins. */
 const MENU: (NavItem & { adminOnly?: boolean })[] = [
   {
     href: "/workspace",
@@ -82,7 +81,7 @@ const MENU: (NavItem & { adminOnly?: boolean })[] = [
     ),
   },
   {
-    href: "/admin/production",
+    href: "/admin/sources",
     label: "Admin",
     adminOnly: true,
     icon: icon(
@@ -94,8 +93,8 @@ const MENU: (NavItem & { adminOnly?: boolean })[] = [
 ];
 
 const isActive = (pathname: string, href: string): boolean =>
-  // Admin is one menu entry for several screens (production, review, viral videos).
-  href === "/admin/production" ? pathname === "/admin" || pathname.startsWith("/admin/") : pathname === href || pathname.startsWith(`${href}/`);
+  // Admin is one menu entry for several screens (viral videos, brands, cost, demo, reverse-engineer).
+  href === "/admin/sources" ? pathname === "/admin" || pathname.startsWith("/admin/") : pathname === href || pathname.startsWith(`${href}/`);
 
 const linkClass = (active: boolean): string =>
   `flex items-center gap-3 rounded-xl px-3 py-2.5 font-[family-name:var(--font-display)] text-[14px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--accent)] ${

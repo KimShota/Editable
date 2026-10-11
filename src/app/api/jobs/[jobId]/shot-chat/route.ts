@@ -3,7 +3,6 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { NextRequest, NextResponse } from "next/server";
 import { jobExists } from "../../../../lib/jobs";
-import { getRequestUser } from "../../../../lib/auth";
 import { repoRoot } from "@backend/pipeline/paths";
 import { readShotChat } from "@backend/production/shotChats";
 import { takesForClip } from "@backend/production/takes";
@@ -19,8 +18,7 @@ import { takesForClip } from "@backend/production/takes";
  *   POST { clipId, message }       → { shotId, messages }   one turn, ~10-30 s
  *
  * Like regenerate-clip, the work runs in the produce CLI (Claude, ffmpeg
- * frame grabs, the price check), and posting is admin only: each turn is a
- * paid model call.
+ * frame grabs, the price check), and each turn is a paid model call.
  */
 
 const validId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9._-]+$/.test(v);
@@ -45,8 +43,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ jobI
 export async function POST(req: Request, { params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;
   if (!jobExists(jobId) || !isAiVideo(jobId)) return NextResponse.json({ error: "only AI videos have shots to change" }, { status: 404 });
-  const user = await getRequestUser();
-  if (!user?.isAdmin) return NextResponse.json({ error: "the shot chat spends AI credits; admins only for now" }, { status: 403 });
   const body = (await req.json().catch(() => ({}))) as { clipId?: unknown; message?: unknown };
   if (!validId(body.clipId)) return NextResponse.json({ error: "clipId required" }, { status: 400 });
   const message = typeof body.message === "string" ? body.message.trim() : "";

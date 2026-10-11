@@ -153,7 +153,7 @@ const defaultBaseName = (createdAt: string): string => {
   return `${mm}${dd}`;
 };
 
-export const listProjects = async (user: Pick<SessionUser, "id" | "isAdmin">): Promise<ProjectSummary[]> => {
+export const listProjects = async (user: Pick<SessionUser, "id">): Promise<ProjectSummary[]> => {
   const jobs = await listJobsForUser(user);
 
   const ascending = [...jobs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));

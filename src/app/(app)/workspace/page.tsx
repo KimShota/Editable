@@ -23,7 +23,7 @@ export default async function WorkspacePage({ searchParams }: { searchParams: Pr
   const { active } = await getActiveBrand(user);
   const workspace = active ? await brandRepo.getWorkspace(active.slug) : null;
   const members = active ? await brandRepo.listMembers(active.slug) : [];
-  const pending = workspace && user.isAdmin ? await listPendingInvites(query, workspace.id) : [];
+  const pending = workspace ? await listPendingInvites(query, workspace.id) : [];
 
   return (
     <Container className="max-w-3xl">
@@ -45,7 +45,7 @@ export default async function WorkspacePage({ searchParams }: { searchParams: Pr
             <dd><Pill tone={premium ? "accent" : "default"}>{premium ? "Premium" : "Free"}</Pill></dd>
           </div>
         </dl>
-        {!user.emailVerifiedAt && !user.isAdmin && (
+        {!user.emailVerifiedAt && (
           <div className="mt-5">
             <p className="mb-2 text-sm text-[color:var(--ink-dim)]">Verify your email to finish setting up. Check your inbox for the link.</p>
             <ResendVerificationButton />

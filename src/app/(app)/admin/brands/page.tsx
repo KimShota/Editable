@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
 import { listPendingInvites } from "@backend/brand/members";
 import { CARD_STATUSES } from "@backend/plan/schemas";
 import { formatDate } from "@backend/plan/dates";
+import { notFound } from "next/navigation";
 import { getRequestUser } from "../../../lib/auth";
 import { brandRepo } from "../../../lib/brandRepo";
 import { query } from "../../../lib/db";
@@ -17,15 +17,13 @@ const LABEL: Record<string, string> = {
   approved: "Approved",
   queued: "Queued",
   generating: "Generating",
-  internal_review: "In review",
-  needs_review: "With customer",
   ready: "Ready",
   posted: "Posted",
   skipped: "Skipped",
   failed: "Failed",
 };
 
-/** Every brand, who is in its workspace, and where its cycle stands. Founder only. */
+/** Every brand, who is in its workspace, and where its cycle stands. */
 export default async function AdminBrandsPage() {
   const user = (await getRequestUser())!;
   if (!user.isAdmin) notFound();

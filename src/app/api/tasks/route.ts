@@ -29,5 +29,5 @@ export async function GET(req: NextRequest) {
     cardId: q.get("cardId") ?? undefined,
     includeRecentMinutes: recent,
   });
-  return NextResponse.json({ tasks: tasks.map((t) => toPublicTask(t, user.isAdmin)) });
+  return NextResponse.json({ tasks: tasks.map((t) => toPublicTask(t)) });
 }

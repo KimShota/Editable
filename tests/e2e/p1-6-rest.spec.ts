@@ -272,7 +272,7 @@ test.describe("workspace", () => {
     await expect(page.getByRole("alert").filter({ hasText: "invalid or has already been used" })).toBeVisible();
   });
 
-  test("the founder sees who has been invited but has not joined", async ({ page }) => {
+  test("everyone in the workspace sees who has been invited but has not joined", async ({ page }) => {
     await as(page, "founder");
     await page.request.post("/api/admin/brands/acme/members", { data: { email: "waiting@katalab.test" } });
     await page.goto("/workspace");
@@ -281,7 +281,7 @@ test.describe("workspace", () => {
     await page.context().clearCookies();
     await as(page, "member");
     await page.goto("/workspace");
-    await expect(page.getByRole("list", { name: "Members" })).not.toContainText("waiting@katalab.test"); // a customer does not see invitations
+    await expect(page.getByRole("list", { name: "Members" })).toContainText("waiting@katalab.test"); // a member sees the same
   });
 });
 
@@ -563,9 +563,9 @@ test.describe("reverse-engineer, moved under Admin", () => {
 test.describe("admin sections", () => {
   test("every section is reachable from the tabs", async ({ page }) => {
     await as(page, "founder");
-    await page.goto("/admin/production");
+    await page.goto("/admin/sources");
     const tabs = page.getByRole("navigation", { name: "Admin sections" });
-    for (const name of ["Production", "Review", "Viral videos", "Brands", "Cost", "Demo", "Reverse-engineer"]) await expect(tabs.getByRole("link", { name })).toBeVisible();
+    for (const name of ["Viral videos", "Brands", "Cost", "Demo", "Reverse-engineer"]) await expect(tabs.getByRole("link", { name })).toBeVisible();
     await tabs.getByRole("link", { name: "Cost" }).click();
     await expect(page).toHaveURL(/\/admin\/cost$/);
     await expect(tabs.getByRole("link", { name: "Cost" })).toHaveAttribute("aria-current", "page");
@@ -630,11 +630,11 @@ test.describe("an account whose email is not confirmed", () => {
     expect((await page.request.get("/api/tasks?slug=acme")).status()).toBe(200);
   });
 
-  test("the founder is never held, even with no confirmed address on file", async ({ page }) => {
-    // Unconfirmed before the first request of the session, so the proxy reads it fresh rather than from its cache.
+  test("no account is exempt: an admin without a confirmed address cannot log in", async ({ page }) => {
     await sql(`update users set email_verified_at = null where email_norm = $1`, ["founder@katalab.test"]);
-    await as(page, "founder");
+    const res = await page.request.post("/api/auth/login", { data: { email: "founder@katalab.test", password: "test-password-123" }, failOnStatusCode: false });
+    expect(res.status()).toBe(403);
     await page.goto("/admin/brands");
-    await expect(page).toHaveURL(/\/admin\/brands$/);
+    await expect(page).toHaveURL(/\/login/);
   });
 });

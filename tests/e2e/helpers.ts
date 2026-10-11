@@ -9,7 +9,7 @@ export const USERS = {
   member: "member@katalab.test",
   outsider: "outsider@katalab.test",
 } as const;
-export const CARDS = { draft: "card-draft", approved: "card-approved", review: "card-review", inReview: "card-internal", ready: "card-ready" } as const;
+export const CARDS = { draft: "card-draft", approved: "card-approved", review: "card-review", failed: "card-failed", ready: "card-ready" } as const;
 
 /** Puts the test database and storage back to the seeded fixture. Users get
  *  new ids, so call this before logging in, not after.

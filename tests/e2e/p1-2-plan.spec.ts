@@ -38,10 +38,8 @@ test.describe("the plan list", () => {
     await expect(draft).toContainText(`angle for ${CARDS.draft}`);
     await expect(draft).toContainText(`Hook words for ${CARDS.draft}.`);
     await expect(draft).toContainText("Draft");
-    await expect(page.locator(`[data-card-id="${CARDS.approved}"]`)).toContainText("Queued for production");
-    // The internal review gate stays hidden from a customer.
-    await expect(page.locator(`[data-card-id="${CARDS.inReview}"]`)).toContainText("Generating");
-    await expect(page.locator("body")).not.toContainText(/internal review/i);
+    await expect(page.locator(`[data-card-id="${CARDS.approved}"]`)).toContainText("Approved · ready to make");
+    await expect(page.locator(`[data-card-id="${CARDS.failed}"]`)).toContainText("Failed");
     await expect(page.getByText(/4 of 5 approved/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Approve 1 draft" })).toBeVisible();
     await expectNoHorizontalScroll(page);
@@ -59,14 +57,14 @@ test.describe("the plan list", () => {
     await openPlan(page);
     await page.getByRole("button", { name: "Approve 1 draft" }).click();
     await expect(page.getByRole("status").filter({ hasText: "1 approved" })).toBeVisible();
-    await expect(page.locator(`[data-card-id="${CARDS.draft}"]`)).toContainText("Queued for production");
+    await expect(page.locator(`[data-card-id="${CARDS.draft}"]`)).toContainText("Approved · ready to make");
     await expect(page.getByRole("button", { name: "Nothing to approve" })).toBeDisabled();
   });
 
-  test("a brand with no plan says so, and offers the founder a way to build one", async ({ page }) => {
+  test("a brand with no plan says so, and offers a way to build one", async ({ page }) => {
     await openPlan(page, "outsider");
     await expect(page.getByText("Your plan is being built")).toBeVisible();
-    await expect(page.getByRole("button", { name: /Build the 14-day plan/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Build the 14-day plan/ })).toBeVisible();
   });
 });
 
@@ -172,9 +170,9 @@ test.describe("reviewing a video", () => {
   test("approving locks the words, unapproving unlocks them", async ({ page }, info) => {
     await openCard(page, CARDS.draft);
     await page.getByRole("button", { name: "Approve", exact: true }).click();
-    await expect(page.getByText("Queued for production").first()).toBeVisible();
+    await expect(page.getByText("Approved · ready to make").first()).toBeVisible();
     await expect(page.locator("#line-0")).toBeDisabled();
-    await expect(page.getByText(/approved and queued for production/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Make this video" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Rewrite script" })).toHaveCount(0);
     await shot(page, info, "p1.2", "card-approved");
 
@@ -201,9 +199,10 @@ test.describe("reviewing a video", () => {
     await expect(page.getByRole("button", { name: "Unapprove" })).toBeVisible();
   });
 
-  test("a video the customer has not been sent shows no editing at all", async ({ page }) => {
-    await openCard(page, CARDS.inReview);
-    await expect(page.getByText("Generating").first()).toBeVisible();
+  test("a failed video shows no script editing, and offers to make it again", async ({ page }) => {
+    await openCard(page, CARDS.failed);
+    await expect(page.getByText("Failed").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Make this video" })).toBeVisible();
     await expect(page.locator("#line-0")).toBeDisabled();
   });
 });
@@ -244,11 +243,11 @@ test.describe("rules the server enforces", () => {
     expect((await page.request.put(`${cardApi(CARDS.draft)}/script`, { data: { lines: [{ index: 9, text: "nope" }] }, failOnStatusCode: false })).status()).toBe(409);
   });
 
-  test("one brand cannot touch another's cards, and a customer cannot build a plan", async ({ page }) => {
+  test("one brand cannot touch another's cards or plan", async ({ page }) => {
     await signInAndOpenCalendar(page, "outsider");
     expect((await post(page, cardApi(CARDS.draft), card("approve"))).status()).toBe(404); // Acme's card, Rival's member
     expect((await post(page, "/api/brands/rival/sources", { url: "https://www.instagram.com/reel/XYZ/" })).status()).toBe(200);
-    expect((await post(page, "/api/admin/brands/rival/plan", {})).status()).toBe(404);
+    expect((await post(page, "/api/brands/acme/plan", {})).status()).toBe(404); // Acme's plan, Rival's member
     expect((await page.goto(`/plan/${CARDS.draft}`))?.status()).toBe(404);
   });
 });

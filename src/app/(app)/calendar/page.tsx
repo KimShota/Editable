@@ -3,14 +3,12 @@ import Link from "next/link";
 import { cardHref, layoutCycle, summarizeCycle } from "@backend/plan/calendar";
 import { formatDate, todayIn } from "@backend/plan/dates";
 import type { Card } from "@backend/plan/schemas";
-import { isVideoVisible } from "@backend/plan/status";
 import { getActiveBrand } from "../../lib/activeBrand";
 import { getRequestUser } from "../../lib/auth";
 import { brandRepo } from "../../lib/brandRepo";
 import { now } from "../../lib/clock";
 import { mediaUrl } from "../../lib/mediaUrl";
 import { Container, EmptyState, PageHeader, StatusBadge } from "../../_components/ui";
-import { ApproveVideos, type WaitingVideo } from "./_components/ApproveVideos";
 import { AutoPostBanner } from "./_components/AutoPostBanner";
 import { ManualPostActions } from "./_components/ManualPostActions";
 
@@ -27,8 +25,7 @@ type CellData = { card: Card; href: string; hasVideo: boolean; thumb: Thumb; pos
  * storyboard, else a frame of the original), its status, and where clicking
  * leads. Ready videos carry the manual-posting actions.
  */
-export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
-  const sentBack = (await searchParams)["sent-back"] === "1";
+export default async function CalendarPage() {
   const user = (await getRequestUser())!;
   const { active } = await getActiveBrand(user);
 
@@ -56,13 +53,12 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   const weeks = layoutCycle(plan, today);
   const summary = summarizeCycle(plan, today);
 
-  // What each card shows. A video is only used if this viewer may see it.
+  // What each card shows.
   const data = new Map<string, CellData>();
   await Promise.all(
     plan.cards.map(async (card) => {
-      const visible = isVideoVisible(card.status, user.isAdmin);
       const [video, stills, spec, details, script] = await Promise.all([
-        visible ? brandRepo.getVideo(slug, card.id) : null,
+        brandRepo.getVideo(slug, card.id),
         brandRepo.listStoryboard(slug, card.id),
         brandRepo.getSpec(slug, card.sourceId),
         card.status === "ready" || card.status === "posted" ? brandRepo.getPostDetails(slug, card.id) : null,
@@ -84,11 +80,6 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
     }),
   );
 
-  const waiting: WaitingVideo[] = plan.cards
-    .filter((c) => c.status === "needs_review")
-    .sort((a, b) => a.day - b.day)
-    .map((c) => ({ id: c.id, day: c.day, dateLabel: formatDate(weeks.flat().find((x) => x.kind === "day" && x.day === c.day)!.date), hook: c.hook || c.angle, flagged: c.lowConfidence }));
-
   const pct = Math.round((summary.ready / summary.total) * 100);
 
   return (
@@ -97,7 +88,6 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
         kicker={active.name}
         title="Calendar"
         subtitle={`Cycle ${plan.cycleId}, ${formatDate(summary.startsOn)} to ${formatDate(summary.endsOn)}`}
-        actions={<ApproveVideos slug={slug} waiting={waiting} />}
       />
 
       <div className="mb-8">
@@ -115,11 +105,6 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
       </div>
 
       <AutoPostBanner />
-      {sentBack && (
-        <p role="status" className="mb-6 rounded-xl bg-[color:var(--st-queued-bg)] px-4 py-3 text-sm text-[color:var(--st-queued-fg)]">
-          Thank you. We will look at that video and send you a new version.
-        </p>
-      )}
 
       <div aria-hidden="true" className="mb-2 hidden grid-cols-7 gap-2 text-xs font-semibold tracking-wide text-[color:var(--ink-dim)] uppercase md:grid">
         {WEEKDAYS.map((d) => (
@@ -169,7 +154,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
                   <p className="text-[13px] text-[color:var(--ink-dim)]">{label}</p>
                   <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-[color:var(--ink-dim)]">{d.card.hook || d.card.angle}</p>
                   <div className="mt-2">
-                    <StatusBadge status={d.card.status} lowConfidence={d.card.lowConfidence} audience="customer" />
+                    <StatusBadge status={d.card.status} lowConfidence={d.card.lowConfidence} />
                   </div>
                 </div>
               </Link>

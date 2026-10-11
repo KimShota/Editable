@@ -5,7 +5,7 @@ import { getRequestUser } from "../lib/auth";
 import { AppShell } from "./_components/AppShell";
 
 /**
- * Everything signed-in customers and the founder use except the editor:
+ * Everything a signed-in account uses except the editor:
  * calendar, plan, brand, analytics, workspace, admin (plan/ui-ux-full-flow.md
  * §2.5). The proxy already requires a session, so the redirect below is only
  * a backstop.

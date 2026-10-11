@@ -32,10 +32,8 @@ export async function POST(req: NextRequest) {
   }
   // Blocks a RETURNING login, not the signup that created the account (see
   // signup/route.ts, which still auto-creates a session right after signup
-  // so there's a logged-in /account page to resend the link from). Admins
-  // are exempt — they're created directly via the promoteAdmin tool, not
-  // through this signup/verification flow at all.
-  if (!user.isAdmin && !user.emailVerifiedAt) {
+  // so there's a logged-in /account page to resend the link from).
+  if (!user.emailVerifiedAt) {
     return NextResponse.json(
       { error: "verify your email before logging in — check your inbox for the confirmation link" },
       { status: 403 },

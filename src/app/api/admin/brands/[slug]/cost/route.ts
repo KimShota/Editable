@@ -6,7 +6,7 @@ import { getStorage } from "@backend/storage";
 import { isBrandSlug } from "@backend/brand/keys";
 
 /** GET /api/admin/brands/<slug>/cost: the measured cost of every produced
- *  video as CSV, for the pitch package. Founder only. */
+ *  video as CSV, for the pitch package. */
 export async function GET(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const user = await getRequestUser();

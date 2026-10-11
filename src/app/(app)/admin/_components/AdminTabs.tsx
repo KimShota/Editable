@@ -4,8 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
-  { href: "/admin/production", label: "Production" },
-  { href: "/admin/review", label: "Review" },
   { href: "/admin/sources", label: "Viral videos" },
   { href: "/admin/brands", label: "Brands" },
   { href: "/admin/cost", label: "Cost" },
@@ -13,7 +11,7 @@ const TABS = [
   { href: "/admin/reverse-engineer", label: "Reverse-engineer" },
 ];
 
-/** The founder's sections, shared by every admin screen. */
+/** The sections shared by every admin screen (admins only). */
 export function AdminTabs() {
   const pathname = usePathname();
   return (

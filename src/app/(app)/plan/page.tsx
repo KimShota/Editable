@@ -63,7 +63,7 @@ export default async function PlanPage() {
       {cards.length === 0 ? (
         <EmptyState
           title="Your plan is being built"
-          action={user.isAdmin && !building ? <BuildPlanButton slug={slug} label="Build the 14-day plan" /> : undefined}
+          action={!building ? <BuildPlanButton slug={slug} label="Build the 14-day plan" /> : undefined}
         >
           {sources.length === 0 ? "Add a few viral videos below and your first 14 days of videos will be planned from them." : "Your first 14 days of videos will appear here."}
         </EmptyState>
@@ -93,7 +93,7 @@ export default async function PlanPage() {
                   </div>
                   <div className="col-span-2 flex flex-wrap items-center gap-2 md:col-span-1 md:justify-end">
                     {isWriting && <span className="text-[13px] text-[color:var(--ink-dim)]">Writing</span>}
-                    <StatusBadge status={card.status} lowConfidence={card.lowConfidence} audience="customer" />
+                    <StatusBadge status={card.status} lowConfidence={card.lowConfidence} />
                   </div>
                 </Link>
               </li>
@@ -104,7 +104,7 @@ export default async function PlanPage() {
 
       <div className="mt-10 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
         <AddSourceForm slug={slug} />
-        {user.isAdmin && freeDays > 0 && cards.length > 0 && (
+        {freeDays > 0 && cards.length > 0 && (
           <section className="rounded-2xl border border-[color:var(--card-border)] bg-[color:var(--card)] p-5">
             <h2 className="font-[family-name:var(--font-display)] text-base font-semibold text-[color:var(--ink)]">Fill the plan</h2>
             <p className="mt-1 text-sm text-[color:var(--ink-dim)]">{freeDays} day{freeDays === 1 ? "" : "s"} have no video yet. They are planned from your viral videos.</p>

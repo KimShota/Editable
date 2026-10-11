@@ -593,8 +593,8 @@ const clips = async (c: Ctx, args: string[]) => {
 /**
  * Makes the video a project in the app: jobs/<jobId>/job.json (format
  * AI_VIDEO_FORMAT, so the editor and the render route take the EDL as the
- * whole video) and a readable name. Unowned jobs are admin-only (see
- * middleware.ts), which is right for the founder-run pilot.
+ * whole video) and a readable name. It has no owner row: the request proxy
+ * lets the brand's members open it (see proxy.ts).
  */
 const publishToEditor = (c: Ctx) => {
   const dir = path.join(repoRoot, "jobs", c.jobId);
@@ -688,7 +688,7 @@ const renderVideo = async (c: Ctx, args: string[]) => {
   const out = render(edl, dir);
   await storage.putFile(c.k.final, out);
   console.log(`\n✔ ${await storage.localPath(c.k.final)} (${edl.durationSec.toFixed(1)}s)`);
-  console.log(`  editor: /jobs/${c.jobId}/edit (admin account)`);
+  console.log(`  editor: /jobs/${c.jobId}/edit`);
 };
 
 /** Only generated shots get new takes: the product's own footage would come out the same. */

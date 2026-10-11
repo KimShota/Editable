@@ -3,47 +3,39 @@ import type { Actor, Card, CardStatus } from "./schemas";
 /**
  * Every status change of a plan card goes through `transitionCard`
  * (plan/ui-ux-full-flow.md §2.3). It holds the allowed edges and who may take
- * each one, so a route handler never decides that on its own.
+ * each one, so a route handler never decides that on its own. There is one
+ * kind of person: whoever is signed in can take every human edge; only the
+ * worker can start or fail a run.
  *
- *   draft ─approve─▶ approved ─(admin release)─▶ queued ─▶ generating ─▶ internal_review
- *     ▲                 │                                       │              │ (admin sends)
- *     └── unapprove ────┘                                    failed            ▼
- *                                                       needs_review ─approve─▶ ready ─▶ posted
+ *   draft ─approve─▶ approved ─make─▶ queued ─▶ generating ─▶ ready ─▶ posted
+ *     ▲                 │                              │
+ *     └── unapprove ────┘                           failed
  *
- * `approved` is "the customer said yes, waiting for the founder to release
- * the spend"; `queued` is "released, waiting for a worker".
+ * `approved` is "said yes, not made yet"; `queued` is "the person pressed
+ * Make this video (which spends money), waiting for a worker".
  */
 
-const CUSTOMER_OR_ADMIN: readonly Actor[] = ["customer", "admin"];
-const ADMIN: readonly Actor[] = ["admin"];
+const USER: readonly Actor[] = ["user"];
 const SYSTEM: readonly Actor[] = ["system"];
 
 type Edge = { from: CardStatus; to: CardStatus; by: readonly Actor[] };
 
 const EDGES: readonly Edge[] = [
-  { from: "draft", to: "approved", by: CUSTOMER_OR_ADMIN },
-  { from: "approved", to: "draft", by: CUSTOMER_OR_ADMIN },
-  { from: "approved", to: "queued", by: ADMIN },
+  { from: "draft", to: "approved", by: USER },
+  { from: "approved", to: "draft", by: USER },
+  { from: "approved", to: "queued", by: USER },
   { from: "queued", to: "generating", by: SYSTEM },
   { from: "queued", to: "failed", by: SYSTEM },
-  { from: "generating", to: "internal_review", by: SYSTEM },
+  { from: "generating", to: "ready", by: SYSTEM },
   { from: "generating", to: "failed", by: SYSTEM },
-  // A failed run goes back to the release gate, or straight to the queue.
-  { from: "failed", to: "approved", by: ADMIN },
-  { from: "failed", to: "queued", by: ADMIN },
-  { from: "internal_review", to: "needs_review", by: ADMIN },
-  // The founder rejects a take and re-runs production.
-  { from: "internal_review", to: "queued", by: ADMIN },
-  { from: "needs_review", to: "ready", by: CUSTOMER_OR_ADMIN },
-  // A thumbs-down sends the video back behind the review gate.
-  { from: "needs_review", to: "internal_review", by: CUSTOMER_OR_ADMIN },
-  { from: "ready", to: "needs_review", by: CUSTOMER_OR_ADMIN },
-  { from: "ready", to: "posted", by: CUSTOMER_OR_ADMIN },
-  { from: "posted", to: "ready", by: ADMIN },
+  // A failed run can be made again, or put back to approved.
+  { from: "failed", to: "approved", by: USER },
+  { from: "failed", to: "queued", by: USER },
+  { from: "ready", to: "posted", by: USER },
+  { from: "posted", to: "ready", by: USER },
   // The post-time scheduler (Phase 2/M3) marks a day that passed unapproved.
   { from: "draft", to: "skipped", by: SYSTEM },
   { from: "approved", to: "skipped", by: SYSTEM },
-  { from: "needs_review", to: "skipped", by: SYSTEM },
   { from: "ready", to: "skipped", by: SYSTEM },
 ];
 
@@ -79,52 +71,22 @@ export const transitionCard = (card: Card, to: CardStatus, actor: Actor, now: Da
 };
 
 /** A card's script, storyboard and angle may be edited only before it is
- *  approved: after that the founder may already be paying to generate it. */
+ *  approved: after that it may already be paying to generate. */
 export const isEditable = (status: CardStatus): boolean => status === "draft";
 
-/** A produced video is shown to a customer only once the founder has sent
- *  it through the review gate (and from then on). Before that it may be
- *  half-made or wrong; after posting it is still theirs to open. Admins see
- *  every video. One rule, used by the page, the API and the request proxy. */
-export const CUSTOMER_VIDEO_STATUSES: readonly CardStatus[] = ["needs_review", "ready", "posted"];
-
-export const isVideoVisible = (status: CardStatus, isAdmin: boolean): boolean => isAdmin || CUSTOMER_VIDEO_STATUSES.includes(status);
-
-/** What a status is called to the person looking at it. The customer never
- *  sees the internal review gate or a failed run: to them the video is
- *  still being made. */
-export type StatusAudience = "customer" | "admin";
-
 export type StatusLabel = { key: StatusKey; label: string };
-export type StatusKey = "draft" | "queued" | "working" | "review" | "ready" | "posted" | "bad";
+export type StatusKey = "draft" | "queued" | "working" | "ready" | "posted" | "bad";
 
-export const statusLabel = (status: CardStatus, audience: StatusAudience): StatusLabel => {
-  if (audience === "admin") {
-    const admin: Record<CardStatus, StatusLabel> = {
-      draft: { key: "draft", label: "Draft" },
-      approved: { key: "queued", label: "Approved · awaiting release" },
-      queued: { key: "queued", label: "Released · queued" },
-      generating: { key: "working", label: "Generating" },
-      internal_review: { key: "working", label: "Internal review" },
-      needs_review: { key: "review", label: "Sent to customer" },
-      ready: { key: "ready", label: "Ready to post" },
-      posted: { key: "posted", label: "Posted" },
-      skipped: { key: "bad", label: "Skipped" },
-      failed: { key: "bad", label: "Failed" },
-    };
-    return admin[status];
-  }
-  const customer: Record<CardStatus, StatusLabel> = {
-    draft: { key: "draft", label: "Draft" },
-    approved: { key: "queued", label: "Queued for production" },
-    queued: { key: "queued", label: "Queued for production" },
-    generating: { key: "working", label: "Generating" },
-    internal_review: { key: "working", label: "Generating" },
-    needs_review: { key: "review", label: "Needs your review" },
-    ready: { key: "ready", label: "Ready to post" },
-    posted: { key: "posted", label: "Posted" },
-    skipped: { key: "bad", label: "Skipped" },
-    failed: { key: "working", label: "Generating" },
-  };
-  return customer[status];
+/** What a status is called to the person looking at it. */
+export const statusLabel = (status: CardStatus): StatusLabel => LABELS[status];
+
+const LABELS: Record<CardStatus, StatusLabel> = {
+  draft: { key: "draft", label: "Draft" },
+  approved: { key: "queued", label: "Approved · ready to make" },
+  queued: { key: "queued", label: "Queued" },
+  generating: { key: "working", label: "Generating" },
+  ready: { key: "ready", label: "Ready to post" },
+  posted: { key: "posted", label: "Posted" },
+  skipped: { key: "bad", label: "Skipped" },
+  failed: { key: "bad", label: "Failed" },
 };

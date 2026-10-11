@@ -8,7 +8,7 @@ const quiet = "rounded-full border border-[color:var(--card-border)] px-4 py-2 t
 
 type Msg = { tone: "ok" | "bad"; text: string } | null;
 
-/** The founder's tools for one brand: add a member by email, cancel a pending
+/** The tools for one brand: add a member by email, cancel a pending
  *  invitation, and tell the members their plan is ready. */
 export function BrandAdminActions({ slug, brandName, pending, canAnnounce }: { slug: string; brandName: string; pending: string[]; canAnnounce: boolean }) {
   const router = useRouter();

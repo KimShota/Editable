@@ -12,11 +12,11 @@ export type PublicTask = {
   finishedAt: string | null;
 };
 
-export const toPublicTask = (task: TaskView, isAdmin: boolean): PublicTask => ({
+export const toPublicTask = (task: TaskView): PublicTask => ({
   id: task.id,
   kind: task.kind,
   status: task.status,
   progress: task.progress,
-  error: task.error === null ? null : isAdmin ? task.error : "This step did not finish. We have been notified and will look at it.",
+  error: task.error === null ? null : "This step did not finish. We have been notified and will look at it.",
   finishedAt: task.finishedAt,
 });

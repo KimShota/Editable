@@ -38,15 +38,16 @@ const WRITING_KINDS = ["card.adapt", "card.storyboard"];
 
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string; cardId: string }> }) {
   const { slug, cardId } = await params;
-  return brandRoute(slug, async ({ user }) => {
+  return brandRoute(slug, async () => {
     const body = await readJsonBody(req, Body);
     const card = await brandRepo.getCard(slug, cardId);
     if (!card) return NextResponse.json({ error: "not found" }, { status: 404 });
-    const actor = user.isAdmin ? "admin" : "customer";
+    const actor = "user";
     const live = await queue.listTasks({ slug, cardId, kinds: WRITING_KINDS });
 
     switch (body.action) {
       case "approve": {
+        if (!isEditable(card.status)) throw new ConflictError("Only a draft can be approved.");
         if (live.length > 0) throw new ConflictError("This video is still being written. Try again in a moment.");
         if (!(await brandRepo.getScript(slug, cardId))) throw new ConflictError("This video has no script yet.");
         await brandRepo.transitionCard(slug, cardId, "approved", actor);

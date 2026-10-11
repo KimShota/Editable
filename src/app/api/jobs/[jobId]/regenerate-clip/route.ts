@@ -20,8 +20,7 @@ import { getStorage } from "@backend/storage";
  *
  * It runs on the work queue like every other slow job (it used to spawn the
  * CLI itself and keep a status file), so it survives a restart and shows in
- * the same place. GET's shape is unchanged: the editor reads `clips`. Admin
- * only while the pilot is founder-run.
+ * the same place. GET's shape is unchanged: the editor reads `clips`.
  */
 
 type ClipStatus =
@@ -39,7 +38,7 @@ const brandVideo = (jobId: string): { slug: string; cardId: string } | null => {
 };
 
 /** Newest task per clip, as the status the editor shows. */
-const statuses = async (slug: string, cardId: string, isAdmin: boolean): Promise<Record<string, ClipStatus>> => {
+const statuses = async (slug: string, cardId: string): Promise<Record<string, ClipStatus>> => {
   const tasks = await queue.listTasks({ slug, cardId, kinds: ["clip.regenerate"], includeRecentMinutes: 60 }); // newest first
   const out: Record<string, ClipStatus> = {};
   for (const t of tasks) {
@@ -47,7 +46,7 @@ const statuses = async (slug: string, cardId: string, isAdmin: boolean): Promise
     if (!clipId || out[clipId]) continue;
     if (t.status === "queued" || t.status === "running") out[clipId] = { status: "running", startedAt: t.createdAt };
     else if (t.status === "done") out[clipId] = { status: "done", startedAt: t.createdAt, finishedAt: t.finishedAt ?? t.createdAt };
-    else out[clipId] = { status: "error", startedAt: t.createdAt, finishedAt: t.finishedAt ?? t.createdAt, error: isAdmin ? (t.error ?? "regeneration failed") : "Regeneration failed." };
+    else out[clipId] = { status: "error", startedAt: t.createdAt, finishedAt: t.finishedAt ?? t.createdAt, error: "Regeneration failed." };
   }
   return out;
 };
@@ -58,17 +57,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ jobId: 
   const user = await getRequestUser();
   const video = brandVideo(jobId);
   if (!user || !video) return NextResponse.json({ clips: {} });
-  return NextResponse.json({ clips: await statuses(video.slug, video.cardId, user.isAdmin) });
+  return NextResponse.json({ clips: await statuses(video.slug, video.cardId) });
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;
   const video = jobExists(jobId) ? brandVideo(jobId) : null;
   if (!video) return NextResponse.json({ error: "only AI videos have clips to regenerate" }, { status: 404 });
-  const user = await getRequestUser();
-  if (!user?.isAdmin) {
-    return NextResponse.json({ error: "regenerating a clip spends AI credits; admins only for now" }, { status: 403 });
-  }
   const body = (await req.json().catch(() => ({}))) as { clipId?: unknown; confirm?: unknown; planId?: unknown };
   const clipId = typeof body.clipId === "string" && /^[A-Za-z0-9._-]+$/.test(body.clipId) ? body.clipId : null;
   if (!clipId) return NextResponse.json({ error: "clipId required" }, { status: 400 });
@@ -87,7 +82,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ jobId: 
     }
   }
 
-  const live = (await statuses(video.slug, video.cardId, true))[clipId];
+  const live = (await statuses(video.slug, video.cardId))[clipId];
   if (live?.status === "running") return NextResponse.json(live, { status: 202 });
   // One attempt: a failed generation is looked at, not silently paid for again.
   await enqueueBrandTask("clip.regenerate", { slug: video.slug, cardId: video.cardId, clipId, planId }, { maxAttempts: 1, discriminator: clipId });

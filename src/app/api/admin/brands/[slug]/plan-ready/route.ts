@@ -5,8 +5,8 @@ import { publicOrigin } from "../../../../../lib/publicOrigin";
 import { sendPlanReadyEmail } from "../../../../../lib/email";
 
 /** POST /api/admin/brands/<slug>/plan-ready: tells the brand's members their
- *  plan is ready to review. Sent by the founder's button, once they have read
- *  the plan themselves; it needs a plan with cards. */
+ *  plan is ready to review. Sent by a button, once the plan has been read;
+ *  it needs a plan with cards. */
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   return brandRoute(

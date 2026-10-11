@@ -33,9 +33,9 @@ test.describe("signing in and the shell", () => {
 
     const expected: Record<string, string> = {
       [CARDS.draft]: "Draft",
-      [CARDS.approved]: "Queued for production",
-      [CARDS.inReview]: "Generating",
-      [CARDS.review]: "Needs your review",
+      [CARDS.approved]: "Approved · ready to make",
+      [CARDS.failed]: "Failed",
+      [CARDS.review]: "Ready to post",
       [CARDS.ready]: "Ready to post",
     };
     await expect(page.locator("[data-card-id]")).toHaveCount(5);
@@ -45,9 +45,6 @@ test.describe("signing in and the shell", () => {
     // Dates come from the plan's start date, not the viewer's time zone.
     await expect(page.locator(`[data-card-id="${CARDS.draft}"]`)).toContainText("Fri, Oct 9");
     await expect(page.locator(`[data-card-id="${CARDS.ready}"]`)).toContainText("Tue, Oct 13");
-
-    // The customer must never be told about the internal review gate.
-    await expect(page.locator("body")).not.toContainText(/internal review/i);
 
     // The old top bar is gone inside the app: one navigation, not two.
     await expect(page.getByRole("link", { name: "Pricing" })).toHaveCount(0);
@@ -319,11 +316,12 @@ test.describe("task progress", () => {
     await expect(page.getByTestId("retry-count")).toHaveText("retries: 1");
   });
 
-  test("the founder sees the real error", async ({ page }) => {
+  test("an admin gets the same plain message, never the real error", async ({ page }) => {
     await signInAndOpenCalendar(page, "founder");
     const id = await enqueuePing({ slug: "acme", steps: 2, stepMs: 100, failWith: "boom: provider returned 500" }, 1);
     await page.goto(`/dev-tools/task-progress?task=${id}`);
-    await expect(page.getByRole("status")).toContainText("boom: provider returned 500");
+    await expect(page.getByRole("status")).toContainText("did not finish");
+    await expect(page.locator("body")).not.toContainText("boom");
   });
 
   test("a task that is not yours reads as not found", async ({ page }) => {

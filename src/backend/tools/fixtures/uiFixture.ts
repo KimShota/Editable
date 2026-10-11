@@ -28,7 +28,7 @@ export const FIXTURE = {
   },
   brands: { acme: "acme", rival: "rival" },
   /** Card ids in Acme's plan, one per status the screens must handle. */
-  cards: { draft: "card-draft", approved: "card-approved", review: "card-review", inReview: "card-internal", ready: "card-ready" },
+  cards: { draft: "card-draft", approved: "card-approved", review: "card-review", failed: "card-failed", ready: "card-ready" },
 } as const;
 
 const intake = (company: string) => ({
@@ -88,8 +88,8 @@ export const seedUiFixture = async (query: QueryFn, storageRoot: string): Promis
         cards: [
           card(c.draft, 1, "draft", `Hook words for ${c.draft}.`),
           card(c.approved, 2, "approved", `Hook words for ${c.approved}.`),
-          card(c.inReview, 3, "internal_review", `Hook words for ${c.inReview}.`),
-          card(c.review, 4, "needs_review", `Hook words for ${c.review}.`),
+          card(c.failed, 3, "failed", `Hook words for ${c.failed}.`),
+          card(c.review, 4, "ready", `Hook words for ${c.review}.`),
           card(c.ready, 5, "ready", `Hook words for ${c.ready}.`),
         ],
       }),
@@ -107,7 +107,7 @@ export const seedUiFixture = async (query: QueryFn, storageRoot: string): Promis
   // Media a customer may fetch…
   await storage.putBuffer(`brands/acme/character/sheet/front.png`, PNG);
   // The cards a video exists for: real (tiny) videos and editor jobs, made by the stub producer.
-  for (const id of [c.inReview, c.review, c.ready]) await writeStubVideo(storage, "acme", id);
+  for (const id of [c.failed, c.review, c.ready]) await writeStubVideo(storage, "acme", id);
   // …and files a customer must never fetch, even from their own brand.
   await storage.putBuffer(`brands/acme/videos/${c.ready}/costs.jsonl`, Buffer.from(`${JSON.stringify({ usd: 12.34, provider: "higgsfield" })}\n`));
   await storage.putBuffer(`brands/acme/videos/${c.ready}/clips/s0.request.json`, Buffer.from(JSON.stringify({ prompt: "secret prompt" })));

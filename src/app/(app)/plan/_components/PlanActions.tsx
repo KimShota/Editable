@@ -43,7 +43,7 @@ export function ApproveAllButton({ slug, ready }: { slug: string; ready: number 
   );
 }
 
-/** Founder only: fills the plan's free days from the brand's viral videos. */
+/** Fills the plan's free days from the brand's viral videos. */
 export function BuildPlanButton({ slug, label }: { slug: string; label: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -53,7 +53,7 @@ export function BuildPlanButton({ slug, label }: { slug: string; label: string }
   const run = async () => {
     setBusy(true);
     setError(null);
-    const res = await sendJson<{ taskId: number | null }>(`/api/admin/brands/${slug}/plan`, {});
+    const res = await sendJson<{ taskId: number | null }>(`/api/brands/${slug}/plan`, {});
     setBusy(false);
     if (!res.ok) return setError(res.error);
     setTaskId(res.data.taskId);

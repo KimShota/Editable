@@ -50,9 +50,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
  * runs, so this has to be signed in.)
  */
 const WARM = [
-  "/calendar", "/plan", "/plan/card-draft", "/admin/production", "/admin/review", "/admin/sources", "/videos/card-review/edit", "/dev-tools/task-progress",
+  "/calendar", "/plan", "/plan/card-draft", "/admin/sources", "/videos/card-review/edit", "/dev-tools/task-progress",
   "/api/tasks?slug=acme", "/api/brands/acme/cards/x/video", "/api/brands/acme/cards/x/post", "/api/brands/acme/cards/x", "/api/brands/acme/cards/x/script", "/api/brands/acme/cards/approve-all", "/api/brands/acme/sources",
-  "/api/admin/brands/acme/send", "/api/admin/brands/acme/plan", "/api/admin/brands/acme/cards/x/release", "/api/admin/brands/acme/cards/x/estimate",
+  "/api/brands/acme/plan", "/api/brands/acme/niche/propose", "/api/brands/acme/cards/x/release", "/api/brands/acme/cards/x/estimate",
   "/api/jobs/acme-card-review/regenerate-clip", "/api/jobs/acme-card-review/edl", "/api/jobs/acme-card-review/clip-takes",
 ];
 

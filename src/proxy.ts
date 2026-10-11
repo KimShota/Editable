@@ -3,9 +3,6 @@ import { getSessionUser, SESSION_COOKIE } from "./app/lib/session";
 import { query, sql } from "./app/lib/db";
 import { brandSlugForVideoJob, findBrandForViewer } from "./backend/brand/access";
 import { isBrandSlug } from "./backend/brand/keys";
-import { isVideoVisible } from "./backend/plan/status";
-import { readPlan } from "./backend/plan/store";
-import { getStorage } from "./backend/storage";
 import { safeDecode } from "./app/lib/mediaPaths";
 
 /**
@@ -22,36 +19,25 @@ import { safeDecode } from "./app/lib/mediaPaths";
  */
 
 /**
- * Accounts + job ownership. Invite-gated signup
- *    (see app/lib/auth.ts) means every non-public route requires a valid
- *    session; /jobs/<id>, /api/jobs/<id>, and the media routes that serve
- *    a job's own files additionally require OWNING that job (or being
- *    admin) — jobs contain friends' personal footage, so this isn't
- *    optional. /authoring, /api/authoring, /reverse-engineer, and the
- *    authoring media root are admin-only: authoring runs yt-dlp against
- *    any URL a visitor types and spends LLM credits, not something to
- *    expose to every signed-up friend.
+ * Accounts + job ownership. Every account is treated the same, except that
+ *    the Admin sections are for admins. Every non-public route requires a valid session; /jobs/<id>,
+ *    /api/jobs/<id>, and the media routes that serve a job's own files
+ *    additionally require OWNING that job — jobs contain friends' personal
+ *    footage, so this isn't optional.
  *
  * Allow-list, not deny-list, same as before: anything not explicitly
  * public 401s/redirects, so a new route added later is protected by
  * default instead of accidentally exposed because nobody remembered it.
  *
- * A job with no job_owners row is admin-only UNLESS it's one of the three
- * ids checked into the repo as genuine shared example content (see
- * .gitignore's explicit `!jobs/<id>` allow-list) — everything else unowned
- * is real dev/test data that predates accounts, not something to expose to
- * every signed-up friend by default. Kept in sync with jobs.ts's copy of
- * this same list. Being shared doesn't mean writable, though: a demo job
- * is read-only for non-admins (GET/HEAD only) — otherwise any tester could
- * overwrite or "Delete forever" the one demo every gallery preview and
- * README walkthrough points at.
+ * A job with no job_owners row (real dev/test data that predates accounts) is
+ * not exposed to any signed-in account.
  *
  * Each user's own asset library (library/<userId>/<category>/, see
  *    app/lib/library.ts) is scoped the same way a job is — every route
  *    under api/library/ already resolves to the caller's own userId
  *    server-side, so the only extra thing middleware needs to enforce is
  *    that /api/media/library/<userId>/... can't be fetched by anyone but
- *    that userId (or an admin).
+ *    that userId.
  */
 
 const PUBLIC_EXACT = new Set(["/", "/login", "/signup", "/pricing"]);
@@ -60,6 +46,9 @@ const PUBLIC_EXACT = new Set(["/", "/login", "/signup", "/pricing"]);
 // /api/leads and /landing/: the marketing page's lead form and its reel videos, visited before any login.
 const PUBLIC_PREFIXES = ["/api/auth/", "/api/billing/webhook", "/api/leads", "/landing/"];
 
+/** The Admin sections: Viral videos, Cost, Brands, Demo and Reverse-engineer
+ *  (and the authoring tool behind the last, which runs yt-dlp against any URL
+ *  and spends LLM credits). Anyone else gets a 404. */
 const ADMIN_PREFIXES = ["/authoring", "/api/authoring", "/reverse-engineer", "/api/media/authoring", "/admin", "/api/admin"];
 
 const isApiPath = (pathname: string): boolean => pathname.startsWith("/api/");
@@ -175,41 +164,6 @@ const canOpenBrand = async (user: { id: string; isAdmin: boolean }, slug: string
   return ok;
 };
 
-/**
- * Whether this user may see a card's produced video. Customers only see one
- * after the founder has sent it through the review gate (plan/status.ts); the
- * card ids are visible in their plan, so without this a hidden video's files
- * could be fetched by URL. Reads plan.json (a few seconds of cache) and fails
- * closed.
- */
-const videoVisibilityCache = new Map<string, { visible: boolean; expiresAt: number }>();
-const VIDEO_VISIBILITY_TTL_MS = 3_000;
-
-const canSeeVideo = async (user: { isAdmin: boolean }, slug: string, cardId: string): Promise<boolean> => {
-  if (user.isAdmin) return true;
-  const cacheKey = `${slug}:${cardId}`;
-  const cached = videoVisibilityCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.visible;
-  let visible = false;
-  try {
-    const card = (await readPlan(getStorage(), slug))?.cards.find((c) => c.id === cardId);
-    visible = card ? isVideoVisible(card.status, false) : false;
-  } catch (err) {
-    console.error("proxy: video visibility lookup failed; denying", err);
-  }
-  videoVisibilityCache.set(cacheKey, { visible, expiresAt: Date.now() + VIDEO_VISIBILITY_TTL_MS });
-  return visible;
-};
-
-/** /api/media/brands/<slug>/videos/<cardId>/…: a card's produced files. */
-const brandVideoFromPath = (pathname: string): { slug: string; cardId: string } | null => {
-  const m = /^\/api\/media\/brands\/([^/]+)\/videos\/([^/]+)\//.exec(pathname);
-  if (!m) return null;
-  const slug = safeDecode(m[1]);
-  const cardId = safeDecode(m[2]);
-  return slug && cardId && isBrandSlug(slug) ? { slug, cardId } : null;
-};
-
 /** The brand a video job belongs to, or null. Also fails closed. */
 const videoJobBrand = async (jobId: string): Promise<string | null> => {
   try {
@@ -262,8 +216,8 @@ export async function proxy(req: NextRequest) {
 
   // Signing up starts a session straight away, but the address is not proven
   // until the emailed link is clicked. Until then the only page is
-  // /verify-email, and every API says why. Admins are exempt, as at login.
-  if (!user.isAdmin && !user.emailVerifiedAt && pathname !== VERIFY_EMAIL_PATH) {
+  // /verify-email, and every API says why.
+  if (!user.emailVerifiedAt && pathname !== VERIFY_EMAIL_PATH) {
     return isApiPath(pathname) ? NextResponse.json({ error: "verify your email first: check your inbox for the confirmation link" }, { status: 403 }) : verifyEmailRedirect(req);
   }
 
@@ -271,32 +225,25 @@ export async function proxy(req: NextRequest) {
     return notFound(req);
   }
 
-  if (!user.isAdmin) {
-    const jobId = jobIdFromPath(pathname);
-    if (jobId) {
-      const ownerId = await jobOwnerId(jobId);
-      if (ownerId !== user.id) {
-        // An AI video (job id "<brand slug>-<card id>") has no owner row: it
-        // belongs to its brand, so the brand's members may open it.
-        const slug = ownerId === null ? await videoJobBrand(jobId) : null;
-        if (!slug || !(await canOpenBrand(user, slug))) return notFound(req);
-        // …and only once the founder has sent that video to them.
-        if (!(await canSeeVideo(user, slug, jobId.slice(slug.length + 1)))) return notFound(req);
-      }
+  const jobId = jobIdFromPath(pathname);
+  if (jobId) {
+    const ownerId = await jobOwnerId(jobId);
+    if (ownerId !== user.id) {
+      // An AI video (job id "<brand slug>-<card id>") has no owner row: it
+      // belongs to its brand, so the brand's members may open it.
+      const slug = ownerId === null ? await videoJobBrand(jobId) : null;
+      if (!slug || !(await canOpenBrand(user, slug))) return notFound(req);
     }
+  }
 
-    const video = brandVideoFromPath(pathname);
-    if (video && !(await canSeeVideo(user, video.slug, video.cardId))) return notFound(req);
+  const brandSlug = brandSlugFromPath(pathname);
+  if (brandSlug !== null && (brandSlug === "" || !(await canOpenBrand(user, brandSlug)))) {
+    return notFound(req);
+  }
 
-    const brandSlug = brandSlugFromPath(pathname);
-    if (brandSlug !== null && (brandSlug === "" || !(await canOpenBrand(user, brandSlug)))) {
-      return notFound(req);
-    }
-
-    const libraryUserId = libraryUserIdFromPath(pathname);
-    if (libraryUserId && libraryUserId !== user.id) {
-      return notFound(req);
-    }
+  const libraryUserId = libraryUserIdFromPath(pathname);
+  if (libraryUserId && libraryUserId !== user.id) {
+    return notFound(req);
   }
 
   // Verified downstream of here — route handlers can trust these instead

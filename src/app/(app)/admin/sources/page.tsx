@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
 import { getActiveBrand } from "../../../lib/activeBrand";
+import { notFound } from "next/navigation";
 import { getRequestUser } from "../../../lib/auth";
 import { brandRepo } from "../../../lib/brandRepo";
 import { mediaUrl } from "../../../lib/mediaUrl";

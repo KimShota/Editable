@@ -1,12 +1,9 @@
-import fs from "node:fs";
-import path from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { STORAGE_ROOT } from "./env";
 import { CARDS, expectNoHorizontalScroll, resetFixture, shot, signInAndOpenCalendar, startSessions } from "./helpers";
 
 /**
  * P1.4 Calendar (plan/ui-ux-full-flow.md §6): the cycle on a Monday-to-Sunday
- * grid, what each day shows and where it leads, approve-all, manual posting,
+ * grid, what each day shows and where it leads, manual posting,
  * and the phone's day list. "Today" is fixed to Monday Oct 12 (day 4) by
  * KATALAB_NOW; the plan starts on Friday Oct 9.
  */
@@ -18,14 +15,6 @@ test.beforeEach(async () => {
 
 const isPhone = (page: Page): boolean => (page.viewportSize()?.width ?? 1440) < 768;
 const cell = (page: Page, id: string) => page.locator(`[data-card-id="${id}"]`);
-
-/** Edits a card in plan.json directly (the app reads the file on every request). */
-const patchCard = (id: string, patch: Record<string, unknown>) => {
-  const file = path.join(STORAGE_ROOT, "brands/acme/plan.json");
-  const plan = JSON.parse(fs.readFileSync(file, "utf8")) as { cards: { id: string }[] };
-  plan.cards = plan.cards.map((c) => (c.id === id ? { ...c, ...patch } : c));
-  fs.writeFileSync(file, JSON.stringify(plan));
-};
 
 const open = async (page: Page, user: "member" | "founder" | "outsider" = "member") => signInAndOpenCalendar(page, user);
 
@@ -65,8 +54,8 @@ test.describe("the cycle on a calendar", () => {
 
   test("shows how far along the cycle is and when the next plan comes", async ({ page }) => {
     await open(page);
-    await expect(page.getByTestId("cycle-progress-label")).toHaveText("1 of 14 ready");
-    await expect(page.getByRole("progressbar", { name: "Videos ready this cycle" })).toHaveAttribute("aria-valuenow", "1");
+    await expect(page.getByTestId("cycle-progress-label")).toHaveText("2 of 14 ready");
+    await expect(page.getByRole("progressbar", { name: "Videos ready this cycle" })).toHaveAttribute("aria-valuenow", "2");
     await expect(page.getByTestId("cycle-countdown")).toHaveText("Next plan in 7 days");
   });
 
@@ -76,14 +65,13 @@ test.describe("the cycle on a calendar", () => {
     await expect(cell(page, CARDS.review)).toContainText("Today");
   });
 
-  test("each day shows something to look at, and never a video the customer may not see", async ({ page }) => {
+  test("each day shows something to look at", async ({ page }) => {
     await open(page);
     await expect(cell(page, CARDS.draft).locator("img")).toHaveCount(1); // a frame of the original
     await expect(cell(page, CARDS.review).locator("video")).toHaveCount(1);
     await expect(cell(page, CARDS.ready).locator("video")).toHaveCount(1);
-    await expect(cell(page, CARDS.inReview).locator("video")).toHaveCount(0); // behind the review gate
+    await expect(cell(page, CARDS.failed).locator("video")).toHaveCount(1); // a failed run left a video behind
     await expect(cell(page, CARDS.review).locator("video")).toHaveAttribute("src", /\/api\/media\/brands\/acme\/videos\/card-review\/final\.mp4#t=0\.5/);
-    await expect(page.locator(`[data-card-id="${CARDS.inReview}"] video`)).toHaveCount(0);
   });
 
   test("a day leads to the plan before there is a video, and to the editor after", async ({ page }) => {
@@ -91,17 +79,11 @@ test.describe("the cycle on a calendar", () => {
     const link = (id: string) => cell(page, id).getByRole("link").first();
     await expect(link(CARDS.draft)).toHaveAttribute("href", `/plan/${CARDS.draft}`);
     await expect(link(CARDS.approved)).toHaveAttribute("href", `/plan/${CARDS.approved}`);
-    await expect(link(CARDS.inReview)).toHaveAttribute("href", `/plan/${CARDS.inReview}`); // not theirs to open yet
+    await expect(link(CARDS.failed)).toHaveAttribute("href", `/videos/${CARDS.failed}/edit`);
     await expect(link(CARDS.review)).toHaveAttribute("href", `/videos/${CARDS.review}/edit`);
     await expect(link(CARDS.ready)).toHaveAttribute("href", `/videos/${CARDS.ready}/edit`);
     await link(CARDS.draft).click();
     await expect(page).toHaveURL(new RegExp(`/plan/${CARDS.draft}$`));
-  });
-
-  test("the founder's calendar leads to the video behind the gate", async ({ page }) => {
-    await open(page, "founder");
-    await expect(cell(page, CARDS.inReview).getByRole("link").first()).toHaveAttribute("href", `/videos/${CARDS.inReview}/edit`);
-    await expect(cell(page, CARDS.inReview).locator("video")).toHaveCount(1);
   });
 
   test("a brand with no plan says so", async ({ page }) => {
@@ -111,77 +93,13 @@ test.describe("the cycle on a calendar", () => {
   });
 });
 
-test.describe("approve all remaining", () => {
-  test("lists what it will approve, then approves it and updates the cycle", async ({ page }, info) => {
-    await open(page);
-    const trigger = page.getByRole("button", { name: "Approve all remaining (1)" });
-    await trigger.click();
-    const dialog = page.getByRole("dialog", { name: "Approve these videos?" });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole("list", { name: "Videos to approve" }).getByRole("listitem")).toHaveCount(1);
-    await expect(dialog).toContainText("Day 4, Oct 12");
-    await shot(page, info, "p1.4", "approve-all-dialog");
-
-    await page.keyboard.press("Escape");
-    await expect(dialog).toHaveCount(0);
-    await expect(trigger).toBeFocused();
-
-    await trigger.click();
-    await dialog.getByRole("button", { name: "Approve 1", exact: true }).click();
-    await expect(page.getByRole("status").filter({ hasText: "1 approved" })).toBeVisible();
-    await expect(cell(page, CARDS.review)).toContainText("Ready to post");
-    await expect(page.getByTestId("cycle-progress-label")).toHaveText("2 of 14 ready");
-    await expect(page.getByRole("button", { name: "Nothing to approve" })).toBeDisabled();
-  });
-
-  test("holds back a flagged video unless asked", async ({ page }) => {
-    patchCard(CARDS.review, { lowConfidence: true });
-    await open(page);
-    await expect(cell(page, CARDS.review).getByText("Low confidence")).toBeAttached();
-    await page.getByRole("button", { name: "Approve all remaining (1)" }).click();
-    const dialog = page.getByRole("dialog", { name: "Approve these videos?" });
-    await expect(dialog.getByText("Held back")).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "Approve 0" })).toBeDisabled();
-    await dialog.getByLabel(/Include the 1 flagged video/).check();
-    await expect(dialog.getByText("Flagged", { exact: true })).toBeVisible();
-    await dialog.getByRole("button", { name: "Approve 1", exact: true }).click();
-    await expect(cell(page, CARDS.review)).toContainText("Ready to post");
-  });
-
-  test("the API holds flagged videos back too, and says why", async ({ page }) => {
-    patchCard(CARDS.review, { lowConfidence: true });
-    await open(page);
-    const res = await (await page.request.post("/api/brands/acme/videos/approve-all", { data: {} })).json();
-    expect(res.approved).toEqual([]);
-    expect(res.skipped).toEqual([{ cardId: CARDS.review, reason: "flagged" }]);
-    const again = await (await page.request.post("/api/brands/acme/videos/approve-all", { data: { includeFlagged: true } })).json();
-    expect(again.approved).toEqual([CARDS.review]);
-  });
-
-  test("only approves videos waiting for review, never drafts or hidden ones", async ({ page }) => {
-    await open(page);
-    await page.request.post("/api/brands/acme/videos/approve-all", { data: {} });
-    const plan = JSON.parse(fs.readFileSync(path.join(STORAGE_ROOT, "brands/acme/plan.json"), "utf8")) as { cards: { id: string; status: string }[] };
-    const status = Object.fromEntries(plan.cards.map((c) => [c.id, c.status]));
-    expect(status[CARDS.draft]).toBe("draft");
-    expect(status[CARDS.approved]).toBe("approved");
-    expect(status[CARDS.inReview]).toBe("internal_review");
-    expect(status[CARDS.review]).toBe("ready");
-  });
-
-  test("another brand's member cannot approve this brand's videos", async ({ page }) => {
-    await open(page, "outsider");
-    expect((await page.request.post("/api/brands/acme/videos/approve-all", { data: {}, failOnStatusCode: false })).status()).toBe(404);
-  });
-});
-
 test.describe("posting by hand", () => {
   test("a ready video offers download, copy and mark as posted; others do not", async ({ page }) => {
     await open(page);
     const ready = cell(page, CARDS.ready);
     await expect(ready.getByRole("link", { name: "Download the day 5 video" })).toHaveAttribute("href", /\/api\/media\/brands\/acme\/videos\/card-ready\/final\.mp4/);
     await expect(ready.getByRole("button", { name: "Copy the day 5 caption" })).toBeVisible();
-    for (const id of [CARDS.draft, CARDS.approved, CARDS.inReview, CARDS.review]) await expect(cell(page, id).getByRole("button", { name: /Mark the day .* video as posted/ })).toHaveCount(0);
+    for (const id of [CARDS.draft, CARDS.approved, CARDS.failed]) await expect(cell(page, id).getByRole("button", { name: /Mark the day .* video as posted/ })).toHaveCount(0);
   });
 
   test("copies the caption and hashtags", async ({ page, context }) => {
@@ -215,7 +133,7 @@ test.describe("posting by hand", () => {
     await expect(ready).toContainText("Posted");
     await expect(ready.getByRole("link", { name: "View the post" })).toHaveAttribute("href", "https://www.tiktok.com/@acme/video/99");
     await expect(ready.getByRole("button", { name: /Mark the day 5/ })).toHaveCount(0);
-    await expect(page.getByTestId("cycle-progress-label")).toHaveText("1 of 14 ready"); // posted still counts
+    await expect(page.getByTestId("cycle-progress-label")).toHaveText("2 of 14 ready"); // posted still counts
   });
 });
 
@@ -242,11 +160,6 @@ test.describe("messages", () => {
     await expect(note).toHaveCount(0);
   });
 
-  test("thanks a customer who sent a video back", async ({ page }) => {
-    await signInAndOpenCalendar(page, "member");
-    await page.goto("/calendar?sent-back=1");
-    await expect(page.getByText("We will look at that video")).toBeVisible();
-  });
 });
 
 test.describe("on a phone", () => {
@@ -272,11 +185,7 @@ test.describe("on a phone", () => {
   test("the controls are reachable and fit", async ({ page }) => {
     test.skip(!isPhone(page), "phone only");
     await open(page);
-    await expect(page.getByRole("button", { name: "Approve all remaining (1)" })).toBeVisible();
-    await page.getByRole("button", { name: "Approve all remaining (1)" }).click();
-    await expect(page.getByRole("dialog", { name: "Approve these videos?" })).toBeVisible();
     await expectNoHorizontalScroll(page);
-    await page.getByRole("button", { name: "Cancel" }).click();
     await expect(cell(page, CARDS.ready).getByRole("button", { name: "Mark the day 5 video as posted" })).toBeVisible();
   });
 });

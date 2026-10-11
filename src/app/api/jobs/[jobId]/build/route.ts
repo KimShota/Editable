@@ -130,13 +130,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ jobId: 
   const status = readStatus(jobId) ?? { status: "idle" as const };
   // A pipeline failure's stderr tail can carry absolute server paths, stack
   // traces, or a raw Anthropic/Gemini SDK error — fine for triage, not for
-  // a friend's browser. Full detail is already in the journal (see the
-  // console.error above); only an admin gets it here too.
+  // a browser. Full detail is already in the journal (see the console.error
+  // above); nobody gets it here.
   if (status.status === "error") {
-    const user = await getRequestUser();
-    if (!user?.isAdmin) {
-      return NextResponse.json({ ...status, error: "the build failed — ask an admin to check the server logs" });
-    }
+    return NextResponse.json({ ...status, error: "the build failed — try again, and get in touch if it keeps happening" });
   }
   return NextResponse.json(status);
 }

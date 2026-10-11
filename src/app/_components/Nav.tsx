@@ -5,7 +5,7 @@ import { getQuotaStatus, QuotaStatus } from "../lib/quota";
 import { LogoutButton } from "./LogoutButton";
 import { Pill } from "./ui";
 
-const LINKS: { href: string; label: string; adminOnly?: boolean; authOnly?: boolean }[] = [
+const LINKS: { href: string; label: string; authOnly?: boolean }[] = [
   { href: "/calendar", label: "Open app", authOnly: true },
   { href: "/pricing", label: "Pricing" },
 ];
@@ -22,7 +22,7 @@ export async function Nav() {
   } catch (err) {
     console.error("Nav: session lookup failed", err);
   }
-  const links = LINKS.filter((link) => (!link.adminOnly || user?.isAdmin) && (!link.authOnly || user));
+  const links = LINKS.filter((link) => !link.authOnly || user);
 
   // Same best-effort shape as the session lookup above — a quota query
   // failure shouldn't take down every page's nav, it just means the badge

@@ -22,9 +22,7 @@ import { loadFormat } from "@backend/pipeline/loader";
  *    user is locked out entirely — Premium is the only way back in.
  *  - Premium users get every format, including PREMIUM_ONLY_FORMATS, up to
  *    premiumDailyLimit()/day.
- *  - Admins bypass every cap here — they're the operator, not a spend risk
- *    the quota needs to guard against, and a locked-out admin can't raise
- *    their own limit without SSH access anyway.
+ *  - Every account is held to these caps; no account is exempt.
  */
 
 export type QuotaResult = { ok: true } | { ok: false; error: string; status: 429 | 503 };
@@ -137,7 +135,6 @@ const countUsed = async (userId: string): Promise<number> => {
  * until they upgrade.
  */
 export const getQuotaStatus = async (user: SessionUser): Promise<QuotaStatus> => {
-  if (user.isAdmin) return { unlimited: true };
   const access = resolveDailyAccess(user);
   if (access.kind === "unlimited") return { unlimited: true };
   if (access.kind === "locked") return { unlimited: false, limit: 0, used: 0, remaining: 0 };
@@ -167,8 +164,6 @@ export const checkAndRecordQuota = async (
   if (process.env.PIPELINE_DISABLED === "1") {
     return { ok: false, error: "builds and renders are temporarily paused — try again later", status: 503 };
   }
-
-  if (user.isAdmin) return { ok: true };
 
   const formatId = readJobManifest(jobId).format;
 

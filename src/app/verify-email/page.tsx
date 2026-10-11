@@ -13,7 +13,7 @@ import { ResendEmail } from "./_components/ResendEmail";
 export default async function VerifyEmailPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const verifyError = (await searchParams).verify_error;
   const user = await getRequestUser();
-  if (user && (user.isAdmin || user.emailVerifiedAt)) redirect("/calendar");
+  if (user && user.emailVerifiedAt) redirect("/calendar");
 
   return (
     <Container className="max-w-md">

@@ -13,17 +13,17 @@ export const CARD_STATUSES = [
   "approved",
   "queued",
   "generating",
-  "internal_review",
-  "needs_review",
   "ready",
   "posted",
   "skipped",
   "failed",
 ] as const;
-export const CardStatusSchema = z.enum(CARD_STATUSES);
+/** Plans saved while videos waited for a review (`internal_review`, `needs_review`) read back as `ready`: a made video is ready to post. */
+export const CardStatusSchema = z.preprocess((v) => (v === "internal_review" || v === "needs_review" ? "ready" : v), z.enum(CARD_STATUSES));
 export type CardStatus = z.infer<typeof CardStatusSchema>;
 
-export const ACTORS = ["customer", "admin", "system"] as const;
+/** Who moved a card. Older plans recorded "customer" and "admin"; they read back as "user". */
+export const ACTORS = ["user", "system"] as const;
 export type Actor = (typeof ACTORS)[number];
 
 export const CYCLE_DAYS = 14;
@@ -52,7 +52,7 @@ export const CardSchema = z.object({
   thumbsDown: z.object({ reason: z.string(), note: z.string().optional(), at: z.string() }).optional(),
   /** Status transitions, newest last, capped (see MAX_HISTORY). */
   history: z
-    .array(z.object({ at: z.string(), from: CardStatusSchema, to: CardStatusSchema, by: z.enum(ACTORS) }))
+    .array(z.object({ at: z.string(), from: CardStatusSchema, to: CardStatusSchema, by: z.preprocess((v) => (v === "customer" || v === "admin" ? "user" : v), z.enum(ACTORS)) }))
     .default([]),
 });
 export type Card = z.infer<typeof CardSchema>;

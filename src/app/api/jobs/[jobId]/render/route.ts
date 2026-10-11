@@ -158,13 +158,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ jobId: 
   if (existing) {
     // See build/route.ts's identical redaction — a raw pipeline stderr tail
     // can carry server paths/stack traces/SDK error bodies, not something
-    // to hand a non-admin's browser. Full detail is in the journal already
-    // (see the console.error above).
+    // to hand a browser. Full detail is in the journal already (see the
+    // console.error above).
     if (existing.status === "error") {
-      const user = await getRequestUser();
-      if (!user?.isAdmin) {
-        return NextResponse.json({ ...existing, error: "the render failed — ask an admin to check the server logs" });
-      }
+      return NextResponse.json({ ...existing, error: "the render failed — try again, and get in touch if it keeps happening" });
     }
     return NextResponse.json(existing);
   }

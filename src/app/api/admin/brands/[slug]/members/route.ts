@@ -13,7 +13,7 @@ const Body = z.object({ email: z.string().trim().min(3).max(254) });
  * POST /api/admin/brands/<slug>/members { email }: adds someone to the
  * brand's workspace. A verified account joins at once; any other address gets
  * an invitation email and joins when it is verified (backend/brand/members.ts).
- * DELETE { email } cancels a pending invitation. Founder only.
+ * DELETE { email } cancels a pending invitation.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -34,7 +34,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
           await sendInviteEmail(result.email, brand.name, `${publicOrigin(req)}/signup`);
           emailed = true;
         } catch (err) {
-          // The invitation is saved either way: the founder can tell them by hand.
+          // The invitation is saved either way: you can tell them by hand.
           emailError = err instanceof Error ? err.message : String(err);
         }
       }

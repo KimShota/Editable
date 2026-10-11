@@ -9,18 +9,18 @@ import type { JobDeps } from "./deps";
  * The jobs behind the video screens (plan/ui-ux-full-flow.md §2.4, §8):
  *
  *   video.estimate   what producing a card would cost (no clip is paid for)
- *   video.produce    voice, clips and render: the paid run, released by the founder
+ *   video.produce    voice, clips and render: the paid run, started by the user
  *   clip.regenerate  one new take of one clip, from the editor
  *
  * video.produce spends real money, so it is enqueued with a single attempt
  * (the queue would otherwise retry a failed run, and pay again) and moves the
- * card through queued → generating → internal_review, or to failed.
+ * card through queued → generating → ready, or to failed.
  */
 
 const CardPayload = TaskPayloadSchema.and(z.object({ cardId: z.string() }));
 const RegenPayload = TaskPayloadSchema.and(z.object({ cardId: z.string(), clipId: z.string().regex(/^[A-Za-z0-9._-]+$/), planId: z.string().regex(/^[A-Za-z0-9-]+$/).optional() }));
 
-/** The message to keep when a run fails: the person reading it is the founder. */
+/** The message to keep when a run fails: it is shown to the person who started the run. */
 const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err)).slice(0, 500);
 
 export const createVideoHandlers = (deps: JobDeps): Record<string, JobHandler> => {
@@ -43,14 +43,14 @@ export const createVideoHandlers = (deps: JobDeps): Record<string, JobHandler> =
       const { slug, cardId } = CardPayload.parse(job.payload);
       const card = await repo.getCard(slug, cardId);
       if (!card) throw new Error(`no card ${cardId}`);
-      // Only a card the founder released. Anything else is a stale or forged
+      // Only a card the user released. Anything else is a stale or forged
       // job, and must not spend money.
       if (card.status !== "queued") throw new Error(`card ${cardId} is ${card.status}, not queued: refusing to produce it`);
 
       await transitionCardInPlan(storage, slug, cardId, "generating", "system");
       try {
         const { flagged } = await deps.production.produce({ storage, costSink: deps.costSinkFor(slug), report: ctx.report }, slug, cardId);
-        await transitionCardInPlan(storage, slug, cardId, "internal_review", "system", { lowConfidence: flagged.length > 0 });
+        await transitionCardInPlan(storage, slug, cardId, "ready", "system", { lowConfidence: flagged.length > 0 });
         return { flagged };
       } catch (err) {
         await transitionCardInPlan(storage, slug, cardId, "failed", "system").catch(() => undefined);

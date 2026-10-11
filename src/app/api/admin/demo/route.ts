@@ -3,8 +3,7 @@ import { z } from "zod";
 import { getRequestUser } from "../../../lib/auth";
 import { DEMO_COOKIE } from "../../../lib/demo";
 
-/** POST { on } — turns demo mode on or off for this browser. Founder only
- *  (the proxy hides /api/admin from everyone else; this checks again). */
+/** POST { on } — turns demo mode on or off for this browser. */
 export async function POST(req: NextRequest) {
   const user = await getRequestUser();
   if (!user?.isAdmin) return NextResponse.json({ error: "not found" }, { status: 404 });
